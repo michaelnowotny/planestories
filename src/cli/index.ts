@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { registerDeleteCommand } from "./commands/delete.ts";
 import { registerExportCommand } from "./commands/export.ts";
 import { registerImportCommand } from "./commands/import.ts";
+import { registerProjectsCommand } from "./commands/projects.ts";
 import { registerSetCommand } from "./commands/set.ts";
 
 const program = new Command();
@@ -16,5 +17,6 @@ registerImportCommand(program);
 registerExportCommand(program);
 registerDeleteCommand(program);
 registerSetCommand(program);
+registerProjectsCommand(program);
 
 program.parse();

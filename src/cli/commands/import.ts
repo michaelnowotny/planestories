@@ -84,6 +84,20 @@ function printSummary(summary: ImportSummary): void {
 	}
 
 	printLabelSummary(summary);
+	printBoardLinks(summary);
+}
+
+/** Print distinct "view in Plane" board links for the projects we wrote to. */
+function printBoardLinks(summary: ImportSummary): void {
+	const urls = new Set<string>();
+	for (const result of summary.results) {
+		if ((result.action === "created" || result.action === "updated") && result.projectUrl) {
+			urls.add(result.projectUrl);
+		}
+	}
+	for (const url of urls) {
+		console.log(chalk.dim(`  View in Plane: ${url}`));
+	}
 }
 
 /**

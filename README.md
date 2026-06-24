@@ -138,8 +138,11 @@ project: Infrastructure Setup  # per-story override
 ...
 ````
 
-Project names are matched within the workspace; an unknown name fails loudly
-(`Project not found: "..."`). Use `--dry-run --check` to validate routing before importing.
+A project can be given by its **display name** ("Infrastructure Setup") or its **identifier**
+("INFRASETUP" — stable and typo-resistant). Run `planestories projects` to list both for your
+workspace. An unknown name fails loudly and suggests the closest match plus the available list
+(`Project not found: "Infrastructure". Did you mean "Infrastructure Setup"? Available projects: ...`).
+Use `--dry-run --check` to validate routing before importing.
 
 ### Idempotency
 
@@ -196,6 +199,15 @@ planestories export [options]
 ```
 
 Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order.
+
+### `projects`
+
+List the projects in your workspace (identifier + name) — handy for first-run setup and for
+choosing the right `--project` value.
+
+```
+planestories projects
+```
 
 ### `set`
 

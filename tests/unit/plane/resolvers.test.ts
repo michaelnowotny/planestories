@@ -22,11 +22,39 @@ describe("Resolver.resolveProject", () => {
 		expect(resolved.identifier).toBe("WEB");
 	});
 
+	test("resolves by identifier (case-insensitive)", async () => {
+		const { client } = makeFakeClient({ projects: [PROJECT] });
+		const resolver = new Resolver(client);
+
+		expect((await resolver.resolveProject("WEB")).id).toBe(PROJECT.id);
+		expect((await resolver.resolveProject("web")).id).toBe(PROJECT.id);
+	});
+
 	test("throws ResolverError when not found", async () => {
 		const { client } = makeFakeClient({ projects: [PROJECT] });
 		const resolver = new Resolver(client);
 
 		expect(resolver.resolveProject("Nonexistent")).rejects.toThrow(ResolverError);
+	});
+
+	test("not-found error lists available projects and suggests the closest", async () => {
+		const projects = [
+			{ id: "p1", name: "Infrastructure Setup", identifier: "INFRASETUP" },
+			{ id: "p2", name: "True Cost", identifier: "TRUECOST" },
+		];
+		const { client } = makeFakeClient({ projects });
+		const resolver = new Resolver(client);
+
+		try {
+			await resolver.resolveProject("Infrastructure");
+			throw new Error("should have thrown");
+		} catch (error) {
+			const message = (error as Error).message;
+			expect(message).toContain("Available projects:");
+			expect(message).toContain("Infrastructure Setup");
+			expect(message).toContain("True Cost");
+			expect(message).toContain('Did you mean "Infrastructure Setup"?');
+		}
 	});
 
 	test("caches lookups (lists projects once)", async () => {

@@ -79,13 +79,18 @@ export class Resolver {
 		}
 
 		const projects = await this.client.listProjects<PlaneProject>();
-		// Match by id first (UUID pass-through), then by exact name.
-		const match = isUuid(name)
-			? projects.find((p) => p.id === name)
-			: projects.find((p) => p.name === name);
+		const match = findProject(projects, name);
 
 		if (!match) {
-			throw new ResolverError(`Project not found: "${name}"`);
+			const available = projects
+				.map((p) => p.name)
+				.sort()
+				.join(", ");
+			const suggestion = closestProjectName(projects, name);
+			const hint = suggestion ? ` Did you mean "${suggestion}"?` : "";
+			throw new ResolverError(
+				`Project not found: "${name}".${hint} Available projects: ${available || "(none)"}`,
+			);
 		}
 
 		const resolved: ResolvedProject = { id: match.id, identifier: match.identifier };
@@ -222,6 +227,62 @@ export class Resolver {
 	private labelKey(projectId: string, name: string): string {
 		return `${projectId}:${name.toLowerCase()}`;
 	}
+}
+
+/**
+ * Match a project by UUID, then exact name, then case-insensitive identifier
+ * (e.g. "INFRASETUP"), then case-insensitive name. Returns undefined if none match.
+ */
+function findProject(projects: PlaneProject[], query: string): PlaneProject | undefined {
+	if (isUuid(query)) {
+		return projects.find((p) => p.id === query);
+	}
+	const exact = projects.find((p) => p.name === query);
+	if (exact) {
+		return exact;
+	}
+	const lower = query.toLowerCase();
+	return (
+		projects.find((p) => p.identifier?.toLowerCase() === lower) ??
+		projects.find((p) => p.name.toLowerCase() === lower)
+	);
+}
+
+/** Suggest the closest project name to an unmatched query, if one is reasonably close. */
+function closestProjectName(projects: PlaneProject[], query: string): string | undefined {
+	const q = query.toLowerCase();
+	let best: { name: string; distance: number } | undefined;
+	for (const project of projects) {
+		const distance = Math.min(
+			levenshtein(q, project.name.toLowerCase()),
+			levenshtein(q, (project.identifier ?? "").toLowerCase()),
+		);
+		if (!best || distance < best.distance) {
+			best = { name: project.name, distance };
+		}
+	}
+	// Only suggest when the edit distance is within a sensible fraction of the query.
+	if (best && best.distance <= Math.max(3, Math.floor(query.length / 2))) {
+		return best.name;
+	}
+	return undefined;
+}
+
+function levenshtein(a: string, b: string): number {
+	const rows = a.length + 1;
+	const cols = b.length + 1;
+	const dp: number[] = Array.from({ length: cols }, (_, i) => i);
+	for (let i = 1; i < rows; i++) {
+		let prev = dp[0] as number;
+		dp[0] = i;
+		for (let j = 1; j < cols; j++) {
+			const temp = dp[j] as number;
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			dp[j] = Math.min((dp[j] as number) + 1, (dp[j - 1] as number) + 1, prev + cost);
+			prev = temp;
+		}
+	}
+	return dp[cols - 1] as number;
 }
 
 /**

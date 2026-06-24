@@ -111,6 +111,8 @@ export interface ImportResult {
 	planeId?: string;
 	planeIdentifier?: string;
 	planeUrl?: string;
+	/** Board URL of the project this story landed in (for a "view in Plane" hint). */
+	projectUrl?: string;
 	error?: string;
 	/** In dry-run: "create" or "update" — what would happen for this story. */
 	wouldAction?: "create" | "update";

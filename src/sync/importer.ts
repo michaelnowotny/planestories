@@ -230,6 +230,7 @@ function makeResult(
 		planeId: ref.id,
 		planeIdentifier: `${projectIdentifier}-${ref.sequenceId}`,
 		planeUrl: client.workItemWebUrl(projectId, ref.id),
+		projectUrl: client.projectBoardUrl(projectId),
 	};
 }
 

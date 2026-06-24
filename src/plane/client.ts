@@ -49,6 +49,11 @@ export class PlaneClient {
 		return `${this.webBaseUrl}/${this.workspaceSlug}/projects/${projectId}/issues/${workItemId}`;
 	}
 
+	/** Absolute browser URL for a project's work-items board. */
+	projectBoardUrl(projectId: string): string {
+		return `${this.webBaseUrl}/${this.workspaceSlug}/projects/${projectId}/issues/`;
+	}
+
 	private workspacePath(suffix: string): string {
 		return `/api/v1/workspaces/${this.workspaceSlug}${suffix}`;
 	}

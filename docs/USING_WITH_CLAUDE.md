@@ -90,6 +90,9 @@ bun run src/cli/index.ts export --project "My Project" -o exported.md
 #   --external-source         export only items planestories created (no demo/other noise)
 #   --label NAME / --status S filters; --sync-criteria rebuilds checklists from sub-items
 
+# Discover the workspace's projects (identifier + name) — use either with --project:
+bun run src/cli/index.ts projects
+
 # Move a card's state without editing YAML:
 bun run src/cli/index.ts set PROJ-12 --status "In Progress" --project "My Project"
 
@@ -106,8 +109,10 @@ The stories markdown file can live anywhere — pass any path.
 A workspace usually has several projects; target one at four levels (highest first):
 `--project "Name"` (forces all stories) → a per-story `project:` in the YAML block →
 the file's frontmatter `project:` → `defaultProject` in config. So one file can route
-different stories to different projects, and `--project` overrides everything. Unknown
-project names fail loudly — use `--dry-run --check` to validate routing first.
+different stories to different projects, and `--project` overrides everything. You can use
+either the display name or the project identifier (e.g. INFRASETUP). Run
+`planestories projects` to list them. Unknown names fail loudly with a suggestion and the
+available list — use `--dry-run --check` to validate routing first.
 
 Confirm the target project(s) with the operator. For a low-risk first run, use a sandbox
 project and clean up afterward with `delete`. To track real work, pick the appropriate

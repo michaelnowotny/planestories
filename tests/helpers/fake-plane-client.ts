@@ -55,6 +55,10 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			return `https://app.plane.so/ws/projects/${projectId}/issues/${workItemId}`;
 		},
 
+		projectBoardUrl(projectId: string): string {
+			return `https://app.plane.so/ws/projects/${projectId}/issues/`;
+		},
+
 		async listProjects<T>(): Promise<T[]> {
 			record("listProjects", []);
 			return (data.projects ?? []) as unknown as T[];

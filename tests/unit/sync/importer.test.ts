@@ -159,6 +159,8 @@ describe("importStories", () => {
 
 		expect(createdItems).toHaveLength(2);
 		expect(summary.created).toBe(2);
+		// Results carry a project board URL for the "view in Plane" hint.
+		expect(summary.results[0]?.projectUrl).toContain(`/projects/${PROJECT_UUID}/issues/`);
 	});
 
 	test("sets external_id/external_source on create for idempotency", async () => {
