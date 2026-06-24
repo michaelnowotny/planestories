@@ -15,6 +15,8 @@ export interface CreateWorkItemInput {
 	stateId?: string;
 	externalId?: string;
 	externalSource?: string;
+	/** Parent work item UUID (used for acceptance-criteria sub-items). */
+	parent?: string;
 }
 
 export type UpdateWorkItemInput = Omit<CreateWorkItemInput, "externalId" | "externalSource">;
@@ -44,6 +46,11 @@ export interface FetchedWorkItem {
 	assigneeDisplayName: string | undefined;
 	labels: string[];
 	externalSource: string | undefined;
+	externalId: string | undefined;
+	/** Parent work item UUID, if this item is a sub-item. */
+	parent: string | undefined;
+	/** State group: backlog | unstarted | started | completed | cancelled. */
+	stateGroup: string | undefined;
 }
 
 /** Build the Plane work item request body shared by create and update. */
@@ -70,6 +77,9 @@ function buildBody(input: CreateWorkItemInput | UpdateWorkItemInput): Record<str
 	}
 	if (input.stateId !== undefined) {
 		body.state = input.stateId;
+	}
+	if (input.parent !== undefined) {
+		body.parent = input.parent;
 	}
 	if ("externalId" in input && input.externalId !== undefined) {
 		body.external_id = input.externalId;
@@ -163,8 +173,9 @@ export async function fetchWorkItems(
 }
 
 function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
-	const state = item.state as { name?: string } | string | undefined;
+	const state = item.state as { name?: string; group?: string } | string | undefined;
 	const stateName = state && typeof state === "object" ? state.name : undefined;
+	const stateGroup = state && typeof state === "object" ? state.group : undefined;
 
 	const assignees = (item.assignees as Array<Record<string, unknown>> | undefined) ?? [];
 	const firstAssignee = assignees[0];
@@ -193,5 +204,8 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 		assigneeDisplayName: firstAssignee?.display_name as string | undefined,
 		labels: labelNames,
 		externalSource: (item.external_source as string) || undefined,
+		externalId: (item.external_id as string) || undefined,
+		parent: (item.parent as string) || undefined,
+		stateGroup,
 	};
 }

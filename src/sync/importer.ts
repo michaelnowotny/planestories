@@ -1,3 +1,4 @@
+import { type AcceptanceCriterion, splitBody } from "../markdown/criteria.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
 import { type WriteBackUpdate, writeBackIds } from "../markdown/writer.ts";
 import type { PlaneClient } from "../plane/client.ts";
@@ -5,7 +6,9 @@ import {
 	type CreateWorkItemInput,
 	createWorkItem,
 	findWorkItemByExternalId,
+	type UpdateWorkItemInput,
 	updateWorkItem,
+	type WorkItemRef,
 } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ImportResult, ImportSummary, ResolvedConfig, UserStory } from "../types.ts";
@@ -23,6 +26,8 @@ export interface ImportOptions {
 	createLabels?: boolean;
 	/** In dry-run, do read-only resolution (project/state/assignee/labels) to validate. */
 	check?: boolean;
+	/** Sync each acceptance criterion to a Plane sub-item (state from its checkbox). */
+	syncCriteria?: boolean;
 }
 
 /**
@@ -143,38 +148,52 @@ async function processStory(
 			};
 		}
 
+		// When syncing criteria to sub-items, the parent description holds the
+		// narrative only; the checklist lives as child work items.
+		const { narrative, criteria } = splitBody(story.body);
+		const bodyForParent = options.syncCriteria ? narrative : story.body;
+
 		const input: CreateWorkItemInput = { name: story.title };
-		if (story.body) input.body = story.body;
+		if (bodyForParent) input.body = bodyForParent;
 		if (labelIds && labelIds.length > 0) input.labelIds = labelIds;
 		if (assigneeId) input.assigneeId = assigneeId;
 		if (story.priority !== null) input.priority = story.priority;
 		if (story.estimate !== null) input.estimate = story.estimate;
 		if (stateId) input.stateId = stateId;
 
-		// 1. Update path: markdown already carries the work item UUID.
-		if (story.planeId) {
-			const ref = await updateWorkItem(client, project.id, story.planeId, input);
-			return makeResult(client, story, project.id, project.identifier, ref, "updated");
-		}
-
-		// 2. Idempotency: look up an item we previously created for this story.
 		const externalId = makeExternalId(story.title);
-		const existing = await findWorkItemByExternalId(
-			client,
-			project.id,
-			externalId,
-			EXTERNAL_SOURCE,
-		);
-		if (existing) {
-			const ref = await updateWorkItem(client, project.id, existing.id, input);
-			return makeResult(client, story, project.id, project.identifier, ref, "updated");
+
+		let ref: WorkItemRef;
+		let action: "created" | "updated";
+		if (story.planeId) {
+			// 1. Update path: markdown already carries the work item UUID.
+			ref = await updateWorkItem(client, project.id, story.planeId, input);
+			action = "updated";
+		} else {
+			// 2. Idempotency: look up an item we previously created for this story.
+			const existing = await findWorkItemByExternalId(
+				client,
+				project.id,
+				externalId,
+				EXTERNAL_SOURCE,
+			);
+			if (existing) {
+				ref = await updateWorkItem(client, project.id, existing.id, input);
+				action = "updated";
+			} else {
+				// 3. Create path.
+				input.externalId = externalId;
+				input.externalSource = EXTERNAL_SOURCE;
+				ref = await createWorkItem(client, project.id, input);
+				action = "created";
+			}
 		}
 
-		// 3. Create path.
-		input.externalId = externalId;
-		input.externalSource = EXTERNAL_SOURCE;
-		const ref = await createWorkItem(client, project.id, input);
-		return makeResult(client, story, project.id, project.identifier, ref, "created");
+		if (options.syncCriteria && criteria.length > 0) {
+			await syncCriteriaChildren(client, resolver, project.id, ref.id, externalId, criteria);
+		}
+
+		return makeResult(client, story, project.id, project.identifier, ref, action);
 	} catch (error) {
 		return {
 			story,
@@ -199,6 +218,55 @@ function makeResult(
 		planeIdentifier: `${projectIdentifier}-${ref.sequenceId}`,
 		planeUrl: client.workItemWebUrl(projectId, ref.id),
 	};
+}
+
+/**
+ * Sync acceptance criteria to Plane sub-items (children of the story work item).
+ * Each criterion is keyed by a positional external id so re-imports update in
+ * place. A checked box maps to a completed-group state; an unchecked box to an
+ * open (unstarted/backlog) state, so ticking in markdown moves the sub-item.
+ */
+async function syncCriteriaChildren(
+	client: PlaneClient,
+	resolver: Resolver,
+	projectId: string,
+	parentId: string,
+	parentExternalId: string,
+	criteria: AcceptanceCriterion[],
+): Promise<void> {
+	const completedStateId = await resolver.firstStateIdInGroups(projectId, ["completed"]);
+	const openStateId = await resolver.firstStateIdInGroups(projectId, [
+		"unstarted",
+		"backlog",
+		"started",
+	]);
+
+	for (let i = 0; i < criteria.length; i++) {
+		const criterion = criteria[i] as AcceptanceCriterion;
+		const childExternalId = `${parentExternalId}::ac${i}`;
+		const stateId = criterion.checked ? completedStateId : openStateId;
+
+		const existing = await findWorkItemByExternalId(
+			client,
+			projectId,
+			childExternalId,
+			EXTERNAL_SOURCE,
+		);
+		if (existing) {
+			const update: UpdateWorkItemInput = { name: criterion.text, parent: parentId };
+			if (stateId) update.stateId = stateId;
+			await updateWorkItem(client, projectId, existing.id, update);
+		} else {
+			const create: CreateWorkItemInput = {
+				name: criterion.text,
+				parent: parentId,
+				externalId: childExternalId,
+				externalSource: EXTERNAL_SOURCE,
+			};
+			if (stateId) create.stateId = stateId;
+			await createWorkItem(client, projectId, create);
+		}
+	}
 }
 
 /**

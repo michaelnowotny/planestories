@@ -26,6 +26,8 @@ interface PlaneProject {
 interface PlaneState {
 	id: string;
 	name: string;
+	/** State group: backlog | unstarted | started | completed | cancelled. */
+	group?: string;
 }
 
 interface PlaneLabel {
@@ -53,6 +55,7 @@ export class Resolver {
 	private projectCache = new Map<string, ResolvedProject>();
 	private labelCache = new Map<string, string>();
 	private stateCache = new Map<string, string | undefined>();
+	private rawStatesCache = new Map<string, PlaneState[]>();
 	private memberCache = new Map<string, NormalizedMember[]>();
 	private warnedMissingLabels = new Set<string>();
 
@@ -149,7 +152,7 @@ export class Resolver {
 			return this.stateCache.get(key);
 		}
 
-		const states = await this.client.listStates<PlaneState>(projectId);
+		const states = await this.getStates(projectId);
 		for (const state of states) {
 			this.stateCache.set(`${projectId}:${state.name.toLowerCase()}`, state.id);
 		}
@@ -158,6 +161,27 @@ export class Resolver {
 			this.stateCache.set(key, undefined);
 		}
 		return this.stateCache.get(key);
+	}
+
+	/**
+	 * Return the id of the first project state belonging to one of the given
+	 * groups (backlog | unstarted | started | completed | cancelled). Used to
+	 * map acceptance-criteria checkboxes to a state when syncing sub-items.
+	 */
+	async firstStateIdInGroups(projectId: string, groups: string[]): Promise<string | undefined> {
+		const wanted = new Set(groups);
+		const states = await this.getStates(projectId);
+		return states.find((s) => s.group !== undefined && wanted.has(s.group))?.id;
+	}
+
+	private async getStates(projectId: string): Promise<PlaneState[]> {
+		const cached = this.rawStatesCache.get(projectId);
+		if (cached) {
+			return cached;
+		}
+		const states = await this.client.listStates<PlaneState>(projectId);
+		this.rawStatesCache.set(projectId, states);
+		return states;
 	}
 
 	/**

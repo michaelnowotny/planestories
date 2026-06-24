@@ -15,6 +15,9 @@ function item(overrides: Partial<FetchedWorkItem>): FetchedWorkItem {
 		assigneeDisplayName: undefined,
 		labels: [],
 		externalSource: undefined,
+		externalId: undefined,
+		parent: undefined,
+		stateGroup: undefined,
 		...overrides,
 	};
 }

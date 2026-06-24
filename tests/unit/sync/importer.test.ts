@@ -285,6 +285,56 @@ describe("importStories", () => {
 		expect(createdLabels).toHaveLength(0);
 	});
 
+	test("--sync-criteria creates a sub-item per acceptance criterion with state from its checkbox", async () => {
+		const md = `---
+project: "Q1 Release"
+---
+
+## Story with criteria
+
+\`\`\`yaml
+priority: high
+\`\`\`
+
+Narrative text.
+
+### Acceptance Criteria
+
+- [ ] open one
+- [x] done two
+`;
+		const file = writeTmpFile("crit.md", md);
+		const { client, createdItems } = makeFakeClient(
+			baseData({
+				states: {
+					[PROJECT_UUID]: [
+						{ id: "s-backlog", name: "Backlog", group: "backlog" },
+						{ id: "s-done", name: "Done", group: "completed" },
+					],
+				},
+			}),
+		);
+
+		await importStories(client, { files: [file], config: defaultConfig, syncCriteria: true });
+
+		// 1 parent + 2 criterion children
+		expect(createdItems).toHaveLength(3);
+
+		// Parent description has the narrative but NOT the AC checklist.
+		const parent = createdItems[0]!;
+		expect(String(parent.body.description_html)).toContain("Narrative text.");
+		expect(String(parent.body.description_html)).not.toContain("Acceptance Criteria");
+
+		const children = createdItems.slice(1);
+		const ext = makeExternalId("Story with criteria");
+		// child 0 (unchecked) -> open/backlog state; child 1 (checked) -> completed state
+		expect(children[0]!.body.parent).toBe(parent ? "wi-101" : "");
+		expect(children[0]!.body.external_id).toBe(`${ext}::ac0`);
+		expect(children[0]!.body.state).toBe("s-backlog");
+		expect(children[1]!.body.external_id).toBe(`${ext}::ac1`);
+		expect(children[1]!.body.state).toBe("s-done");
+	});
+
 	test("reports created and skipped labels in the summary", async () => {
 		const filePath = writeTmpFile("labelsum.md", markdownNewStories);
 		// "Feature" exists; default label "Extra" does not.

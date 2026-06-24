@@ -9,6 +9,8 @@ export interface FakeProject {
 export interface FakeNamed {
 	id: string;
 	name: string;
+	/** State group (states only): backlog | unstarted | started | completed | cancelled. */
+	group?: string;
 }
 
 export interface RecordedCall {

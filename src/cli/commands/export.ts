@@ -41,6 +41,7 @@ export function registerExportCommand(program: Command) {
 			"Only export items stamped with this external_source (default: planestories)",
 		)
 		.option("-l, --label <name>", "Filter by label name")
+		.option("--sync-criteria", "Reconstruct acceptance criteria from sub-items", false)
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
@@ -66,6 +67,7 @@ export function registerExportCommand(program: Command) {
 					filters,
 					project: options.project ?? config.defaultProject ?? undefined,
 					outputPath: options.output,
+					syncCriteria: options.syncCriteria,
 				});
 
 				console.log(chalk.green(`Exported ${result.count} stories to ${result.outputPath}`));

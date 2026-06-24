@@ -114,6 +114,7 @@ export function registerImportCommand(program: Command) {
 		.option("--context <name>", "Select a named context from multi-context config")
 		.option("-p, --project <name>", "Override default project")
 		.option("--create-labels", "Create labels that don't exist instead of skipping them", false)
+		.option("--sync-criteria", "Sync each acceptance criterion to a Plane sub-item", false)
 		.option("--dry-run", "Preview without writing to Plane", false)
 		.option(
 			"--check",
@@ -148,6 +149,7 @@ export function registerImportCommand(program: Command) {
 					dryRun: options.dryRun,
 					check: options.check,
 					createLabels: options.createLabels,
+					syncCriteria: options.syncCriteria,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});
 

@@ -139,6 +139,65 @@ describe("exportStories", () => {
 		expect(readFileSync(outputPath, "utf-8")).toContain("## Log in");
 	});
 
+	test("--sync-criteria folds sub-items into the parent's checklist and hides them as stories", async () => {
+		const { client } = makeFakeClient({
+			projects: [{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{
+						id: "p1",
+						sequence_id: 5,
+						name: "Parent story",
+						description_html: "<p>Narrative.</p>",
+						state: { id: "s1", name: "Backlog", group: "backlog" },
+						assignees: [],
+						labels: [],
+						external_source: "planestories",
+					},
+					{
+						id: "c0",
+						sequence_id: 6,
+						name: "first criterion",
+						parent: "p1",
+						external_id: "parent-story::ac0",
+						state: { id: "s2", name: "Backlog", group: "unstarted" },
+						assignees: [],
+						labels: [],
+						external_source: "planestories",
+					},
+					{
+						id: "c1",
+						sequence_id: 7,
+						name: "second criterion",
+						parent: "p1",
+						external_id: "parent-story::ac1",
+						state: { id: "s3", name: "Done", group: "completed" },
+						assignees: [],
+						labels: [],
+						external_source: "planestories",
+					},
+				],
+			},
+		});
+		const outputPath = join(tmpDir, "out.md");
+
+		const result = await exportStories(client, {
+			config,
+			filters: {},
+			outputPath,
+			syncCriteria: true,
+		});
+
+		// Only the parent is a story; the two children are folded in.
+		expect(result.count).toBe(1);
+		const md = readFileSync(outputPath, "utf-8");
+		expect(md).toContain("## Parent story");
+		expect(md).not.toContain("## first criterion");
+		expect(md).toContain("### Acceptance Criteria");
+		expect(md).toContain("- [ ] first criterion");
+		expect(md).toContain("- [x] second criterion");
+	});
+
 	test("throws when no project can be resolved", async () => {
 		const { client } = makeFakeClient(dataWithItems());
 		const outputPath = join(tmpDir, "out.md");
