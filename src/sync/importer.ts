@@ -21,6 +21,8 @@ export interface ImportOptions {
 	noWriteBack?: boolean;
 	/** Create labels that don't exist in the project instead of skipping them. */
 	createLabels?: boolean;
+	/** In dry-run, do read-only resolution (project/state/assignee/labels) to validate. */
+	check?: boolean;
 }
 
 /**
@@ -76,7 +78,10 @@ export async function importStories(
 		}
 	}
 
-	return buildSummary(results);
+	const summary = buildSummary(results);
+	summary.labelsCreated = [...resolver.createdLabelNames];
+	summary.labelsSkipped = [...resolver.skippedLabelNames];
+	return summary;
 }
 
 /**
@@ -88,9 +93,9 @@ async function processStory(
 	story: UserStory,
 	options: ImportOptions,
 ): Promise<ImportResult> {
-	// Dry-run validates parsing only; it makes no network calls.
-	if (options.dryRun) {
-		return { story, action: "skipped" };
+	// Plain dry-run (no --check) validates parsing only and makes no network calls.
+	if (options.dryRun && !options.check) {
+		return { story, action: "skipped", wouldAction: story.planeId ? "update" : "create" };
 	}
 
 	try {
@@ -105,11 +110,16 @@ async function processStory(
 
 		const project = await resolver.resolveProject(projectName);
 
-		// Merge labels: story.labels + config.defaultLabels (deduplicated)
+		// Merge labels: story.labels + config.defaultLabels (deduplicated).
+		// Never create labels during a dry-run, even with --create-labels.
 		const allLabels = deduplicateLabels(story.labels, options.config.defaultLabels);
 		const labelIds =
 			allLabels.length > 0
-				? await resolver.resolveLabelIds(project.id, allLabels, options.createLabels)
+				? await resolver.resolveLabelIds(
+						project.id,
+						allLabels,
+						options.dryRun ? false : options.createLabels,
+					)
 				: undefined;
 
 		const assigneeId = story.assignee
@@ -119,6 +129,19 @@ async function processStory(
 		const stateId = story.status
 			? await resolver.resolveStateId(project.id, story.status)
 			: undefined;
+
+		// Dry-run --check: everything above is read-only; report findings, no writes.
+		if (options.dryRun) {
+			const notes: string[] = [];
+			if (story.assignee && !assigneeId) notes.push(`assignee "${story.assignee}" not found`);
+			if (story.status && !stateId) notes.push(`status "${story.status}" not found`);
+			return {
+				story,
+				action: "skipped",
+				wouldAction: story.planeId ? "update" : "create",
+				note: notes.join("; ") || undefined,
+			};
+		}
 
 		const input: CreateWorkItemInput = { name: story.title };
 		if (story.body) input.body = story.body;
@@ -241,5 +264,7 @@ function buildSummary(results: ImportResult[]): ImportSummary {
 		failed,
 		skipped,
 		results,
+		labelsCreated: [],
+		labelsSkipped: [],
 	};
 }

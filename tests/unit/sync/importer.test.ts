@@ -234,6 +234,85 @@ describe("importStories", () => {
 		expect(readTmpFile("dryrun.md")).toBe(originalContent);
 	});
 
+	test("--dry-run reports wouldAction (create vs update) per story", async () => {
+		const filePath = writeTmpFile("would.md", markdownMixedStories);
+		const { client } = makeFakeClient(baseData());
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		// story 1 has a plane_id -> would update; story 2 -> would create
+		expect(summary.results[0]?.wouldAction).toBe("update");
+		expect(summary.results[1]?.wouldAction).toBe("create");
+	});
+
+	test("--dry-run --check resolves read-only and notes bad metadata without writing", async () => {
+		// Project resolves, but the status state does not exist in the project.
+		const data = baseData({ states: { [PROJECT_UUID]: [{ id: "s-todo", name: "Todo" }] } });
+		const filePath = writeTmpFile("check.md", markdownNewStories);
+		const { client, createdItems } = makeFakeClient(data);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			check: true,
+		});
+
+		expect(createdItems).toHaveLength(0); // still no writes
+		// story 1 uses status "Backlog" which isn't in the project -> noted
+		expect(summary.results[0]?.note).toContain('status "Backlog" not found');
+	});
+
+	test("does not create labels during a dry-run even with createLabels", async () => {
+		const filePath = writeTmpFile("drylabels.md", markdownNewStories);
+		const { client, createdLabels } = makeFakeClient({
+			...baseData(),
+			labels: { [PROJECT_UUID]: [] }, // no labels exist
+		});
+
+		await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			check: true,
+			createLabels: true,
+		});
+
+		expect(createdLabels).toHaveLength(0);
+	});
+
+	test("reports created and skipped labels in the summary", async () => {
+		const filePath = writeTmpFile("labelsum.md", markdownNewStories);
+		// "Feature" exists; default label "Extra" does not.
+		const { client } = makeFakeClient({
+			...baseData(),
+			labels: { [PROJECT_UUID]: [{ id: "lbl-feature", name: "Feature" }] },
+		});
+
+		const created = await importStories(client, {
+			files: [filePath],
+			config: { ...defaultConfig, defaultLabels: ["Extra"] },
+			createLabels: true,
+		});
+		expect(created.labelsCreated).toContain("Extra");
+
+		const skipped = await importStories(
+			makeFakeClient({
+				...baseData(),
+				labels: { [PROJECT_UUID]: [{ id: "lbl-feature", name: "Feature" }] },
+			}).client,
+			{
+				files: [writeTmpFile("labelsum2.md", markdownNewStories)],
+				config: { ...defaultConfig, defaultLabels: ["Extra"] },
+			},
+		);
+		expect(skipped.labelsSkipped).toContain("Extra");
+	});
+
 	test("--no-write-back calls API but does not write back to file", async () => {
 		const filePath = writeTmpFile("nowriteback.md", markdownNewStories);
 		const originalContent = readTmpFile("nowriteback.md");

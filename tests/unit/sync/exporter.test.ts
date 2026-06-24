@@ -26,12 +26,14 @@ function dataWithItems(): FakeData {
 					id: "wi-1",
 					sequence_id: 8,
 					name: "Log in",
-					description_stripped: "User can log in.",
+					description_html:
+						'<p>User can log in.</p><h3>Acceptance Criteria</h3><ul><li><input type="checkbox"> enters email</li></ul>',
 					priority: "high",
 					point: 3,
 					state: { id: "s1", name: "Backlog" },
 					assignees: [{ id: "u1", email: "jane@co.com", display_name: "jane" }],
 					labels: [{ id: "l1", name: "Feature" }],
+					external_source: "planestories",
 				},
 				{
 					id: "wi-2",
@@ -77,6 +79,9 @@ describe("exportStories", () => {
 		expect(md).toContain("status: Backlog");
 		expect(md).toContain("assignee: jane@co.com");
 		expect(md).toContain("labels: [Feature]");
+		// Body HTML is converted back to markdown, including the AC checklist.
+		expect(md).toContain("### Acceptance Criteria");
+		expect(md).toContain("- [ ] enters email");
 		// 'none' priority is not written
 		expect(md).toContain("## Sign up");
 	});

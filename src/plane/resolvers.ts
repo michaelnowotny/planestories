@@ -54,6 +54,12 @@ export class Resolver {
 	private labelCache = new Map<string, string>();
 	private stateCache = new Map<string, string | undefined>();
 	private memberCache = new Map<string, NormalizedMember[]>();
+	private warnedMissingLabels = new Set<string>();
+
+	/** Distinct label names created via createMissing, for run summaries. */
+	readonly createdLabelNames = new Set<string>();
+	/** Distinct label names skipped because they were not found. */
+	readonly skippedLabelNames = new Set<string>();
 
 	constructor(client: PlaneClient) {
 		this.client = client;
@@ -115,12 +121,18 @@ export class Resolver {
 			}
 
 			if (!createMissing) {
-				console.warn(`Label not found, skipping: "${name}"`);
+				this.skippedLabelNames.add(name);
+				// Warn once per distinct label, and name the remedy.
+				if (!this.warnedMissingLabels.has(key)) {
+					this.warnedMissingLabels.add(key);
+					console.warn(`Label not found, skipping: "${name}" — pass --create-labels to create it`);
+				}
 				continue;
 			}
 
 			const created = await this.client.createLabel<PlaneLabel>(projectId, { name });
 			this.labelCache.set(key, created.id);
+			this.createdLabelNames.add(name);
 			ids.push(created.id);
 		}
 

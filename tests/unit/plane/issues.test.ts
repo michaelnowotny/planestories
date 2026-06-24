@@ -91,7 +91,7 @@ describe("fetchWorkItems", () => {
 						id: "wi-1",
 						sequence_id: 8,
 						name: "Log in",
-						description_stripped: "User can log in.",
+						description_html: "<p>User can log in.</p>",
 						priority: "high",
 						point: 3,
 						state: { id: "s1", name: "Backlog" },

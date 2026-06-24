@@ -1,5 +1,5 @@
 import { PlaneApiError } from "../errors.ts";
-import { markdownToHtml } from "../markdown/html.ts";
+import { htmlToMarkdown, markdownToHtml } from "../markdown/html.ts";
 import type { PlanePriority } from "../types.ts";
 import type { PlaneClient } from "./client.ts";
 
@@ -35,6 +35,7 @@ export interface FetchedWorkItem {
 	id: string;
 	sequenceId: number;
 	name: string;
+	/** Description as markdown (converted from Plane's description_html). */
 	description: string | undefined;
 	priority: PlanePriority | undefined;
 	estimate: number | undefined;
@@ -42,6 +43,7 @@ export interface FetchedWorkItem {
 	assigneeEmail: string | undefined;
 	assigneeDisplayName: string | undefined;
 	labels: string[];
+	externalSource: string | undefined;
 }
 
 /** Build the Plane work item request body shared by create and update. */
@@ -183,12 +185,13 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 		id: item.id as string,
 		sequenceId: item.sequence_id as number,
 		name: item.name as string,
-		description: (item.description_stripped as string) || undefined,
+		description: htmlToMarkdown(item.description_html as string | undefined) || undefined,
 		priority,
 		estimate,
 		stateName,
 		assigneeEmail: firstAssignee?.email as string | undefined,
 		assigneeDisplayName: firstAssignee?.display_name as string | undefined,
 		labels: labelNames,
+		externalSource: (item.external_source as string) || undefined,
 	};
 }

@@ -20,9 +20,49 @@ async function resolveGlobs(patterns: string[]): Promise<string[]> {
 	return [...new Set(allFiles)];
 }
 
-/**
- * Print a formatted import summary to stdout.
- */
+/** Print the shared label-summary lines (created / skipped). */
+function printLabelSummary(summary: ImportSummary): void {
+	if (summary.labelsCreated.length > 0) {
+		console.log(chalk.green(`  Labels created: ${summary.labelsCreated.join(", ")}`));
+	}
+	if (summary.labelsSkipped.length > 0) {
+		console.log(
+			chalk.yellow(
+				`  Labels skipped: ${summary.labelsSkipped.join(", ")} (use --create-labels to create)`,
+			),
+		);
+	}
+}
+
+/** Print a dry-run preview: what WOULD happen, plus any validation findings. */
+function printDryRun(summary: ImportSummary, checked: boolean): void {
+	const wouldCreate = summary.results.filter((r) => r.wouldAction === "create").length;
+	const wouldUpdate = summary.results.filter((r) => r.wouldAction === "update").length;
+
+	console.log("");
+	console.log(chalk.bold(`Dry run${checked ? " (validated)" : ""} — no changes made`));
+	console.log(`  Stories:      ${summary.total}`);
+	console.log(`  Would create: ${chalk.green(String(wouldCreate))}`);
+	console.log(`  Would update: ${chalk.blue(String(wouldUpdate))}`);
+	if (checked) {
+		console.log(`  Invalid:      ${chalk.red(String(summary.failed))}`);
+	}
+
+	for (const result of summary.results) {
+		if (result.action === "failed") {
+			console.log(chalk.red(`  x ${result.story.title}: ${result.error}`));
+			continue;
+		}
+		const mark = result.wouldAction === "update" ? chalk.blue("~") : chalk.green("+");
+		const verb = result.wouldAction === "update" ? "would update" : "would create";
+		const note = result.note ? chalk.yellow(` (⚠ ${result.note})`) : "";
+		console.log(`  ${mark} ${verb}: ${result.story.title}${note}`);
+	}
+
+	printLabelSummary(summary);
+}
+
+/** Print the summary after a real import. */
 function printSummary(summary: ImportSummary): void {
 	console.log("");
 	console.log(chalk.bold("Import Summary"));
@@ -32,7 +72,6 @@ function printSummary(summary: ImportSummary): void {
 	console.log(`  Skipped: ${chalk.yellow(String(summary.skipped))}`);
 	console.log(`  Failed:  ${chalk.red(String(summary.failed))}`);
 
-	// Print details for created/updated stories
 	for (const result of summary.results) {
 		const id = result.planeIdentifier ?? "";
 		if (result.action === "created") {
@@ -43,6 +82,8 @@ function printSummary(summary: ImportSummary): void {
 			console.log(chalk.red(`  x ${result.story.title}: ${result.error}`));
 		}
 	}
+
+	printLabelSummary(summary);
 }
 
 /**
@@ -73,7 +114,12 @@ export function registerImportCommand(program: Command) {
 		.option("--context <name>", "Select a named context from multi-context config")
 		.option("-p, --project <name>", "Override default project")
 		.option("--create-labels", "Create labels that don't exist instead of skipping them", false)
-		.option("--dry-run", "Validate parsing without calling Plane", false)
+		.option("--dry-run", "Preview without writing to Plane", false)
+		.option(
+			"--check",
+			"With --dry-run, validate against Plane read-only (project/state/assignee/labels)",
+			false,
+		)
 		.option("--no-write-back", "Skip writing Plane IDs back to markdown")
 		.action(async (filePatterns: string[], options) => {
 			try {
@@ -100,14 +146,18 @@ export function registerImportCommand(program: Command) {
 					config,
 					project: options.project,
 					dryRun: options.dryRun,
+					check: options.check,
 					createLabels: options.createLabels,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});
 
-				// Print summary
-				printSummary(summary);
+				if (options.dryRun) {
+					printDryRun(summary, Boolean(options.check));
+				} else {
+					printSummary(summary);
+				}
 
-				// Exit with error code if any failures
+				// Exit with error code if any failures (incl. failed validation in --check)
 				if (summary.failed > 0) {
 					process.exit(1);
 				}

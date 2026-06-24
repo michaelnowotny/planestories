@@ -104,6 +104,10 @@ export interface ImportResult {
 	planeIdentifier?: string;
 	planeUrl?: string;
 	error?: string;
+	/** In dry-run: "create" or "update" — what would happen for this story. */
+	wouldAction?: "create" | "update";
+	/** Free-form note, e.g. dry-run --check validation findings. */
+	note?: string;
 }
 
 export interface ImportSummary {
@@ -113,4 +117,8 @@ export interface ImportSummary {
 	failed: number;
 	skipped: number;
 	results: ImportResult[];
+	/** Distinct label names created via --create-labels this run. */
+	labelsCreated: string[];
+	/** Distinct label names skipped (not found, not created) this run. */
+	labelsSkipped: string[];
 }

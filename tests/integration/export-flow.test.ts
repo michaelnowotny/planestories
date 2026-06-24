@@ -26,7 +26,8 @@ function data(): FakeData {
 					id: "wi-1",
 					sequence_id: 8,
 					name: "Log in",
-					description_stripped: "User can log in.",
+					description_html:
+						'<p>User can log in.</p><h3>Acceptance Criteria</h3><ul><li><input type="checkbox"> enters email</li></ul>',
 					priority: "high",
 					point: 3,
 					state: { id: "s1", name: "Backlog" },
@@ -75,5 +76,8 @@ describe("export flow (end to end)", () => {
 		expect(story.assignee).toBe("jane@co.com");
 		expect(story.labels).toEqual(["Feature"]);
 		expect(story.estimate).toBe(3);
+		// The acceptance-criteria checklist survives the HTML round-trip.
+		expect(story.body).toContain("### Acceptance Criteria");
+		expect(story.body).toContain("- [ ] enters email");
 	});
 });
