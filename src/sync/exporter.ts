@@ -1,3 +1,4 @@
+import { ARCHIVE_LABEL } from "../constants.ts";
 import { ConfigError } from "../errors.ts";
 import { buildAcceptanceCriteria, joinBody, splitBody } from "../markdown/criteria.ts";
 import { serializeStories } from "../markdown/serializer.ts";
@@ -15,6 +16,8 @@ export interface ExportOptions {
 	outputPath: string;
 	/** Reconstruct acceptance criteria from sub-items instead of the description. */
 	syncCriteria?: boolean;
+	/** Include items carrying the archive label (excluded by default). */
+	includeArchived?: boolean;
 }
 
 /** A criterion child has a parent and an external_id of the form `<parent>::ac<n>`. */
@@ -89,6 +92,12 @@ export async function exportStories(
 	);
 	if (options.syncCriteria) {
 		filtered = filtered.filter((item) => !isCriterionChild(item));
+	}
+	// Hide archived items (label convention) unless explicitly included.
+	if (!options.includeArchived) {
+		filtered = filtered.filter(
+			(item) => !item.labels.some((l) => l.toLowerCase() === ARCHIVE_LABEL),
+		);
 	}
 
 	const stories = filtered.map((item) =>

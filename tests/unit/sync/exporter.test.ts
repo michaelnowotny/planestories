@@ -198,6 +198,46 @@ describe("exportStories", () => {
 		expect(md).toContain("- [x] second criterion");
 	});
 
+	test("excludes archived items by default; --include-archived keeps them", async () => {
+		const make = () =>
+			makeFakeClient({
+				projects: [{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" }],
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: "a",
+							sequence_id: 1,
+							name: "Active",
+							state: { id: "s", name: "Todo" },
+							assignees: [],
+							labels: [],
+						},
+						{
+							id: "b",
+							sequence_id: 2,
+							name: "Archived one",
+							state: { id: "s", name: "Done" },
+							assignees: [],
+							labels: [{ id: "l", name: "archived" }],
+						},
+					],
+				},
+			});
+
+		const out = join(tmpDir, "out.md");
+		const def = await exportStories(make().client, { config, filters: {}, outputPath: out });
+		expect(def.count).toBe(1);
+		expect(readFileSync(out, "utf-8")).not.toContain("## Archived one");
+
+		const all = await exportStories(make().client, {
+			config,
+			filters: {},
+			outputPath: out,
+			includeArchived: true,
+		});
+		expect(all.count).toBe(2);
+	});
+
 	test("throws when no project can be resolved", async () => {
 		const { client } = makeFakeClient(dataWithItems());
 		const outputPath = join(tmpDir, "out.md");

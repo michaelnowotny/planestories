@@ -125,8 +125,9 @@ real work, pick or create the appropriate project.
 - Export converts Plane's HTML description back to markdown — headings and
   `- [ ]`/`- [x]` checklists survive an export → re-import round-trip.
 - Use `delete` to clean up after a sandbox run (scoped to your files or to
-  `--external-source`; archive-default is unavailable because Plane only
-  archives completed/cancelled items, so hard-delete is the default behind `--yes`).
+  `--external-source`, behind `--yes`). `delete --archive` is the recoverable
+  alternative: it applies an `archived` label (works on any state) instead of
+  hard-deleting, and archived items are hidden from `export` by default.
 - Targets Plane Cloud by default; `PLANE_BASE_URL` / `baseUrl` can point at a self-hosted
   instance.
 

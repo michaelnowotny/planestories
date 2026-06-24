@@ -178,23 +178,19 @@ export class PlaneClient {
 		return this.listAll<T>(`/projects/${projectId}/issues/`, query);
 	}
 
+	/** Retrieve a single work item (e.g. to read its current labels before merging). */
+	getWorkItem<T>(projectId: string, workItemId: string): Promise<T> {
+		return this.request<T>(
+			"GET",
+			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/`),
+		);
+	}
+
 	/** Permanently delete a work item (204 on success). */
 	deleteWorkItem(projectId: string, workItemId: string): Promise<void> {
 		return this.request<void>(
 			"DELETE",
 			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/`),
-		);
-	}
-
-	/**
-	 * Archive a work item (recoverable). Plane only permits archiving items whose
-	 * state group is completed or cancelled; otherwise it returns a 400 with
-	 * INVALID_ARCHIVE_STATE_GROUP, which surfaces as a PlaneApiError.
-	 */
-	archiveWorkItem<T>(projectId: string, workItemId: string): Promise<T> {
-		return this.request<T>(
-			"POST",
-			this.workspacePath(`/projects/${projectId}/work-items/${workItemId}/archive/`),
 		);
 	}
 

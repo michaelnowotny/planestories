@@ -1,3 +1,4 @@
+import { ARCHIVE_LABEL } from "../constants.ts";
 import { ConfigError } from "../errors.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
 import { clearWriteBack } from "../markdown/writer.ts";
@@ -13,8 +14,10 @@ export interface DeleteOptions {
 	project?: string;
 	/** External-source-scoped mode: delete stamped items in a project. */
 	externalSource?: string;
-	/** Archive (recoverable) instead of hard delete. Plane only archives completed/cancelled. */
+	/** Archive (recoverable) by applying the archive label instead of hard deleting. */
 	archive?: boolean;
+	/** Label name used for archiving (default "archived"). */
+	archiveLabel?: string;
 	dryRun?: boolean;
 	/** Must be true to actually delete; otherwise the plan is shown but nothing happens. */
 	confirmed?: boolean;
@@ -72,6 +75,8 @@ export async function deleteStories(
 
 	const willDelete = options.confirmed === true && options.dryRun !== true;
 
+	const archiveLabel = options.archiveLabel || ARCHIVE_LABEL;
+
 	const results: DeleteResult[] = [];
 	for (const target of targets) {
 		if (!willDelete) {
@@ -80,7 +85,7 @@ export async function deleteStories(
 		}
 		try {
 			if (options.archive) {
-				await client.archiveWorkItem(target.projectId, target.workItemId);
+				await archiveTarget(client, resolver, target, archiveLabel);
 				results.push({ target, action: "archived" });
 			} else {
 				await client.deleteWorkItem(target.projectId, target.workItemId);
@@ -95,8 +100,8 @@ export async function deleteStories(
 		}
 	}
 
-	// File mode: clear plane_* for successfully removed stories.
-	if (willDelete && !options.noWriteBack && options.files?.length) {
+	// File mode: clear plane_* only after a HARD delete (archived items still exist).
+	if (willDelete && !options.archive && !options.noWriteBack && options.files?.length) {
 		await clearFiles(results);
 	}
 
@@ -174,6 +179,34 @@ async function collectFromExternalSource(
 			workItemId: item.id,
 			label: `${project.identifier}-${item.sequence_id} ${item.name}`,
 		}));
+}
+
+/**
+ * Archive a work item by adding the archive label, preserving existing labels.
+ * Recoverable (remove the label) and works on any state, unlike Plane's native
+ * archive which is restricted to completed/cancelled items.
+ */
+async function archiveTarget(
+	client: PlaneClient,
+	resolver: Resolver,
+	target: DeleteTarget,
+	archiveLabel: string,
+): Promise<void> {
+	const [archiveLabelId] = await resolver.resolveLabelIds(target.projectId, [archiveLabel], true);
+	if (!archiveLabelId) {
+		return;
+	}
+	const item = await client.getWorkItem<{ labels?: Array<string | { id: string }> }>(
+		target.projectId,
+		target.workItemId,
+	);
+	const current = (item.labels ?? []).map((l) => (typeof l === "string" ? l : l.id));
+	if (current.includes(archiveLabelId)) {
+		return; // already archived
+	}
+	await client.updateWorkItem(target.projectId, target.workItemId, {
+		labels: [...current, archiveLabelId],
+	});
 }
 
 async function clearFiles(results: DeleteResult[]): Promise<void> {

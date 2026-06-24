@@ -42,6 +42,7 @@ export function registerExportCommand(program: Command) {
 		)
 		.option("-l, --label <name>", "Filter by label name")
 		.option("--sync-criteria", "Reconstruct acceptance criteria from sub-items", false)
+		.option("--include-archived", "Include items carrying the 'archived' label", false)
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
@@ -68,6 +69,7 @@ export function registerExportCommand(program: Command) {
 					project: options.project ?? config.defaultProject ?? undefined,
 					outputPath: options.output,
 					syncCriteria: options.syncCriteria,
+					includeArchived: options.includeArchived,
 				});
 
 				console.log(chalk.green(`Exported ${result.count} stories to ${result.outputPath}`));

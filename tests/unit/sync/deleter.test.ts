@@ -111,10 +111,15 @@ describe("deleteStories — file mode", () => {
 		expect(readFileSync(file, "utf-8")).toContain("plane_id: wi-aaa");
 	});
 
-	test("archive mode archives instead of deleting", async () => {
+	test("archive mode applies the archive label and does NOT delete or clear the file", async () => {
 		const file = join(tmpDir, "s.md");
 		writeFileSync(file, fileWithIds);
-		const { client, deletedItems, archivedItems } = makeFakeClient(baseData());
+		const { client, deletedItems, updatedItems } = makeFakeClient(
+			baseData({
+				labels: { [PROJECT_UUID]: [{ id: "lbl-archived", name: "archived" }] },
+				workItems: { [PROJECT_UUID]: [{ id: "wi-aaa", sequence_id: 1, name: "one", labels: [] }] },
+			}),
+		);
 
 		const summary = await deleteStories(client, {
 			config,
@@ -125,7 +130,11 @@ describe("deleteStories — file mode", () => {
 
 		expect(summary.archived).toBe(1);
 		expect(deletedItems).toHaveLength(0);
-		expect(archivedItems).toEqual([{ projectId: PROJECT_UUID, workItemId: "wi-aaa" }]);
+		// The archive label is merged onto the item's labels.
+		expect(updatedItems).toHaveLength(1);
+		expect(updatedItems[0]!.body.labels).toEqual(["lbl-archived"]);
+		// Archived items still exist, so the file's plane_* must be preserved.
+		expect(readFileSync(file, "utf-8")).toContain("plane_id: wi-aaa");
 	});
 });
 

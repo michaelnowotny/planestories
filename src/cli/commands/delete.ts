@@ -83,7 +83,12 @@ export function registerDeleteCommand(program: Command) {
 			"--external-source [source]",
 			"Delete items stamped with this external_source (default: planestories); requires --project",
 		)
-		.option("--archive", "Archive instead of hard delete (only completed/cancelled items)", false)
+		.option(
+			"--archive",
+			"Archive instead of hard delete (applies an 'archived' label; recoverable)",
+			false,
+		)
+		.option("--archive-label <name>", "Label to apply when archiving (default: archived)")
 		.option("--dry-run", "Show what would be deleted, change nothing", false)
 		.option("-y, --yes", "Confirm deletion (required to actually delete)", false)
 		.option("--no-write-back", "Don't clear plane_* out of files after deletion")
@@ -106,6 +111,7 @@ export function registerDeleteCommand(program: Command) {
 					project: options.project,
 					externalSource,
 					archive: options.archive,
+					archiveLabel: options.archiveLabel,
 					dryRun: options.dryRun,
 					confirmed: options.yes,
 					noWriteBack: !options.writeBack,

@@ -150,6 +150,7 @@ planestories export [options]
   -l, --label <name>        Filter by label name
   --external-source [src]   Only export items planestories created (default: planestories)
   --sync-criteria           Reconstruct acceptance criteria from sub-items
+  --include-archived        Include items carrying the 'archived' label (excluded by default)
 ```
 
 Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order.
@@ -173,11 +174,17 @@ Delete (or archive) work items — **scoped only**, never a blunt project wipe. 
 ```
 planestories delete <files...> [options]
 planestories delete --external-source [src] --project <name> [options]
-  --archive               Archive instead of hard delete (only completed/cancelled items)
+  --archive               Archive instead of hard delete (applies an 'archived' label)
+  --archive-label <name>  Label to apply when archiving (default: archived)
   --dry-run               Show what would be deleted, change nothing
   -y, --yes               Confirm deletion (required — without it, only the plan is shown)
   --no-write-back         Don't clear plane_* out of files after deletion
 ```
+
+**Archiving** uses a label, not Plane's native archive (which is restricted to
+completed/cancelled items). `delete --archive` applies the `archived` label (recoverable —
+just remove the label; works on any state) and leaves the work item in place. Archived
+items are excluded from `export` by default (pass `--include-archived` to see them).
 
 ## Self-hosting
 
