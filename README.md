@@ -145,6 +145,16 @@ Project names are matched within the workspace; an unknown name fails loudly
 
 On create, planestories stamps each work item with `external_id` (derived from the story title) and `external_source: "planestories"`. Re-running an import — even before write-back — matches the existing work item by `external_id` and **updates instead of duplicating**.
 
+### Identifying planestories items
+
+Every created work item is stamped with `external_source: "planestories"` — that's how
+`delete`/`export --external-source` and idempotent matching find them. That field is an
+API field, though, and isn't shown in Plane's normal board views. If you also want a
+**visible** marker, set a **source label** (opt-in, off by default): `sourceLabel` in
+config, `PLANE_SOURCE_LABEL` in the environment, or `--source-label <name>` per run. When
+set, every created item is tagged with that label (auto-created — no `--create-labels`
+needed), so humans can see and filter "what came from planestories" in the Plane UI.
+
 ### Missing labels
 
 By default, labels that don't exist in the project are **skipped with a warning** (deduped, one line per label). Pass `--create-labels` to create them instead.
@@ -163,6 +173,7 @@ planestories import <files...> [options]
   --context <name>        Select a named context from a multi-context config
   -p, --project <name>    Force all stories into this project (overrides frontmatter)
   --create-labels         Create labels that don't exist instead of skipping
+  --source-label <name>   Tag every created item with this label (auto-created)
   --sync-criteria         Sync each acceptance criterion to a Plane sub-item
   --dry-run               Preview without writing to Plane
   --check                 With --dry-run, validate read-only (project/state/assignee/labels)

@@ -61,6 +61,7 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 			baseUrl: entry.baseUrl,
 			defaultProject: entry.defaultProject,
 			defaultLabels: entry.defaultLabels,
+			sourceLabel: entry.sourceLabel,
 		};
 	} else {
 		if (options?.context) {
@@ -80,6 +81,9 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 	}
 	if (process.env.PLANE_BASE_URL) {
 		config.baseUrl = process.env.PLANE_BASE_URL;
+	}
+	if (process.env.PLANE_SOURCE_LABEL) {
+		config.sourceLabel = process.env.PLANE_SOURCE_LABEL;
 	}
 
 	if (!config.apiKey) {
@@ -165,5 +169,6 @@ function resolveConfig(config: CliConfig): ResolvedConfig {
 		baseUrl: config.baseUrl ?? DEFAULT_PLANE_BASE_URL,
 		defaultProject: config.defaultProject ?? null,
 		defaultLabels: config.defaultLabels ?? [],
+		sourceLabel: config.sourceLabel ?? null,
 	};
 }

@@ -51,6 +51,8 @@ export interface CliConfig {
 	baseUrl?: string;
 	defaultProject?: string;
 	defaultLabels?: string[];
+	/** When set, tag every created work item with this label (auto-created). Off by default. */
+	sourceLabel?: string;
 }
 
 export interface ContextEntry {
@@ -60,6 +62,7 @@ export interface ContextEntry {
 	baseUrl?: string;
 	defaultProject?: string;
 	defaultLabels?: string[];
+	sourceLabel?: string;
 }
 
 export interface MultiContextConfig {
@@ -72,6 +75,8 @@ export interface ResolvedConfig {
 	baseUrl: string;
 	defaultProject: string | null;
 	defaultLabels: string[];
+	/** Source label to tag created items with, or null when disabled. */
+	sourceLabel: string | null;
 }
 
 export interface ExportFilters {

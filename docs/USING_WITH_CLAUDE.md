@@ -81,6 +81,7 @@ bun run src/cli/index.ts import /path/to/stories.md
 
 #   --create-labels   create labels that don't exist instead of skipping them
 #   --sync-criteria   sync each acceptance criterion to a Plane sub-item (state from its checkbox)
+#   --source-label N  tag every created item with label N (auto-created; opt-in, also via config)
 #   --project "Name"  override the project for all stories
 #   --no-write-back   don't modify the markdown file
 

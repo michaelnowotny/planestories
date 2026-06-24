@@ -114,6 +114,7 @@ export function registerImportCommand(program: Command) {
 		.option("--context <name>", "Select a named context from multi-context config")
 		.option("-p, --project <name>", "Force all stories into this project (overrides frontmatter)")
 		.option("--create-labels", "Create labels that don't exist instead of skipping them", false)
+		.option("--source-label <name>", "Tag every created item with this label (auto-created)")
 		.option("--sync-criteria", "Sync each acceptance criterion to a Plane sub-item", false)
 		.option("--dry-run", "Preview without writing to Plane", false)
 		.option(
@@ -149,6 +150,7 @@ export function registerImportCommand(program: Command) {
 					dryRun: options.dryRun,
 					check: options.check,
 					createLabels: options.createLabels,
+					sourceLabel: options.sourceLabel,
 					syncCriteria: options.syncCriteria,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});

@@ -88,6 +88,7 @@ describe("loadConfig", () => {
 			baseUrl: "https://api.plane.so",
 			defaultProject: "Q1 2026 Release",
 			defaultLabels: ["User Story"],
+			sourceLabel: null,
 		} satisfies ResolvedConfig);
 	});
 
@@ -97,6 +98,31 @@ describe("loadConfig", () => {
 
 		const config = await loadConfig({ configPath });
 		expect(config.apiKey).toBe("plane_api_from_env");
+	});
+
+	test("reads sourceLabel from config; PLANE_SOURCE_LABEL overrides it; default null", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "planestories-srclabel-"));
+		try {
+			const rcPath = join(tempDir, ".planestoriesrc.json");
+			writeFileSync(
+				rcPath,
+				JSON.stringify({ apiKey: "k", workspaceSlug: "ws", sourceLabel: "planestories" }),
+			);
+
+			const fromConfig = await loadConfig({ configPath: rcPath });
+			expect(fromConfig.sourceLabel).toBe("planestories");
+
+			process.env.PLANE_SOURCE_LABEL = "from-env";
+			const fromEnv = await loadConfig({ configPath: rcPath });
+			expect(fromEnv.sourceLabel).toBe("from-env");
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("sourceLabel defaults to null when unset", async () => {
+		const config = await loadConfig({ configPath: join(FIXTURES_DIR, "minimal.json") });
+		expect(config.sourceLabel).toBeNull();
 	});
 
 	test("PLANE_BASE_URL env var overrides baseUrl", async () => {

@@ -15,6 +15,7 @@ const defaultConfig: ResolvedConfig = {
 	baseUrl: "https://api.plane.so",
 	defaultProject: "Q1 Release",
 	defaultLabels: [],
+	sourceLabel: null,
 };
 
 /** Fake-client data with a project, label, state and member that all resolve. */
@@ -416,6 +417,40 @@ Narrative text.
 
 		// First story: labels [Feature] + default [DefaultLabel]
 		expect(createdItems[0]!.body.labels).toEqual(["lbl-feature", "lbl-default"]);
+	});
+
+	test("sourceLabel tags every created item and auto-creates the label (no --create-labels)", async () => {
+		const file = writeTmpFile("src.md", markdownNewStories);
+		// "planestories" label does not exist in the project.
+		const { client, createdItems, createdLabels } = makeFakeClient(
+			baseData({ labels: { [PROJECT_UUID]: [{ id: "lbl-feature", name: "Feature" }] } }),
+		);
+
+		await importStories(client, {
+			files: [file],
+			config: defaultConfig,
+			sourceLabel: "planestories",
+		});
+
+		// auto-created even though --create-labels was not passed
+		expect(createdLabels.some((l) => l.name === "planestories")).toBe(true);
+		// every created item carries the source label
+		expect(
+			createdItems.every((i) => (i.body.labels as string[]).includes("label-planestories")),
+		).toBe(true);
+	});
+
+	test("config.sourceLabel applies when no flag is given; flag overrides config", async () => {
+		const { client, createdItems } = makeFakeClient(
+			baseData({ labels: { [PROJECT_UUID]: [{ id: "lbl-feature", name: "Feature" }] } }),
+		);
+
+		await importStories(client, {
+			files: [writeTmpFile("cfg.md", markdownNewStories)],
+			config: { ...defaultConfig, sourceLabel: "from-config" },
+		});
+
+		expect(createdItems[0]!.body.labels).toContain("label-from-config");
 	});
 
 	test("--project overrides frontmatter and routes all stories there", async () => {

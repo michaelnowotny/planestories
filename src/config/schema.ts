@@ -1,7 +1,13 @@
 import { ConfigError } from "../errors.ts";
 import type { CliConfig, ContextEntry, MultiContextConfig } from "../types.ts";
 
-const STRING_FIELDS = ["apiKey", "workspaceSlug", "baseUrl", "defaultProject"] as const;
+const STRING_FIELDS = [
+	"apiKey",
+	"workspaceSlug",
+	"baseUrl",
+	"defaultProject",
+	"sourceLabel",
+] as const;
 
 /**
  * Validates the optional config fields shared between flat configs and context entries.

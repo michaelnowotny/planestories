@@ -28,6 +28,8 @@ export interface ImportOptions {
 	check?: boolean;
 	/** Sync each acceptance criterion to a Plane sub-item (state from its checkbox). */
 	syncCriteria?: boolean;
+	/** Tag every created item with this label (auto-created); overrides config.sourceLabel. */
+	sourceLabel?: string;
 }
 
 /**
@@ -119,14 +121,14 @@ async function processStory(
 		// Merge labels: story.labels + config.defaultLabels (deduplicated).
 		// Never create labels during a dry-run, even with --create-labels.
 		const allLabels = deduplicateLabels(story.labels, options.config.defaultLabels);
-		const labelIds =
+		const labelIds: string[] =
 			allLabels.length > 0
 				? await resolver.resolveLabelIds(
 						project.id,
 						allLabels,
 						options.dryRun ? false : options.createLabels,
 					)
-				: undefined;
+				: [];
 
 		const assigneeId = story.assignee
 			? await resolver.resolveAssigneeId(project.id, story.assignee)
@@ -149,6 +151,16 @@ async function processStory(
 			};
 		}
 
+		// Opt-in source label: tag every created item, auto-creating the label
+		// regardless of --create-labels. Off unless configured / flagged.
+		const sourceLabel = options.sourceLabel ?? options.config.sourceLabel;
+		if (sourceLabel) {
+			const [sourceLabelId] = await resolver.resolveLabelIds(project.id, [sourceLabel], true);
+			if (sourceLabelId && !labelIds.includes(sourceLabelId)) {
+				labelIds.push(sourceLabelId);
+			}
+		}
+
 		// When syncing criteria to sub-items, the parent description holds the
 		// narrative only; the checklist lives as child work items.
 		const { narrative, criteria } = splitBody(story.body);
@@ -156,7 +168,7 @@ async function processStory(
 
 		const input: CreateWorkItemInput = { name: story.title };
 		if (bodyForParent) input.body = bodyForParent;
-		if (labelIds && labelIds.length > 0) input.labelIds = labelIds;
+		if (labelIds.length > 0) input.labelIds = labelIds;
 		if (assigneeId) input.assigneeId = assigneeId;
 		if (story.priority !== null) input.priority = story.priority;
 		if (story.estimate !== null) input.estimate = story.estimate;

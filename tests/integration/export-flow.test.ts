@@ -15,6 +15,7 @@ const config: ResolvedConfig = {
 	baseUrl: "https://api.plane.so",
 	defaultProject: "Q1 Release",
 	defaultLabels: [],
+	sourceLabel: null,
 };
 
 function data(): FakeData {
