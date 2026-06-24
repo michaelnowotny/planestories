@@ -2,8 +2,8 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { glob } from "glob";
 import { loadConfig } from "../../config/loader.ts";
-import { ConfigError, LinearApiError, ParseError, ResolverError } from "../../errors.ts";
-import { createLinearClient } from "../../linear/client.ts";
+import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
+import { createPlaneClient } from "../../plane/client.ts";
 import { importStories } from "../../sync/importer.ts";
 import type { ImportSummary } from "../../types.ts";
 
@@ -34,10 +34,11 @@ function printSummary(summary: ImportSummary): void {
 
 	// Print details for created/updated stories
 	for (const result of summary.results) {
-		if (result.action === "created" && result.linearId) {
-			console.log(chalk.green(`  + ${result.linearId} ${result.story.title}`));
-		} else if (result.action === "updated" && result.linearId) {
-			console.log(chalk.blue(`  ~ ${result.linearId} ${result.story.title}`));
+		const id = result.planeIdentifier ?? "";
+		if (result.action === "created") {
+			console.log(chalk.green(`  + ${id} ${result.story.title}`));
+		} else if (result.action === "updated") {
+			console.log(chalk.blue(`  ~ ${id} ${result.story.title}`));
 		} else if (result.action === "failed") {
 			console.log(chalk.red(`  x ${result.story.title}: ${result.error}`));
 		}
@@ -51,7 +52,7 @@ function handleError(error: unknown): never {
 	if (
 		error instanceof ConfigError ||
 		error instanceof ParseError ||
-		error instanceof LinearApiError ||
+		error instanceof PlaneApiError ||
 		error instanceof ResolverError
 	) {
 		console.error(chalk.red(`${error.name}: ${error.message}`));
@@ -66,14 +67,14 @@ function handleError(error: unknown): never {
 export function registerImportCommand(program: Command) {
 	program
 		.command("import")
-		.description("Import user stories from markdown files to Linear")
+		.description("Import user stories from markdown files to Plane")
 		.argument("<files...>", "Markdown file paths or glob patterns")
 		.option("-c, --config <path>", "Config file path")
 		.option("--context <name>", "Select a named context from multi-context config")
-		.option("-t, --team <name>", "Override default team")
 		.option("-p, --project <name>", "Override default project")
-		.option("--dry-run", "Validate without calling Linear", false)
-		.option("--no-write-back", "Skip writing Linear IDs back to markdown")
+		.option("--create-labels", "Create labels that don't exist instead of skipping them", false)
+		.option("--dry-run", "Validate parsing without calling Plane", false)
+		.option("--no-write-back", "Skip writing Plane IDs back to markdown")
 		.action(async (filePatterns: string[], options) => {
 			try {
 				// Resolve glob patterns to file paths
@@ -87,15 +88,19 @@ export function registerImportCommand(program: Command) {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
 
 				// Create client
-				const client = createLinearClient(config.apiKey);
+				const client = createPlaneClient({
+					apiKey: config.apiKey,
+					workspaceSlug: config.workspaceSlug,
+					baseUrl: config.baseUrl,
+				});
 
 				// Import
 				const summary = await importStories(client, {
 					files,
 					config,
-					team: options.team,
 					project: options.project,
 					dryRun: options.dryRun,
+					createLabels: options.createLabels,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});
 

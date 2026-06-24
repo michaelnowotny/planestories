@@ -6,8 +6,8 @@ import { registerImportCommand } from "./commands/import.ts";
 const program = new Command();
 
 program
-	.name("linearstories")
-	.description("Bridge markdown user stories and Linear issues")
+	.name("planestories")
+	.description("Bridge markdown user stories and Plane work items")
 	.version("0.1.0");
 
 registerImportCommand(program);

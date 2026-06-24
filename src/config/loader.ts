@@ -2,13 +2,14 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ConfigError } from "../errors.ts";
+import { DEFAULT_PLANE_BASE_URL } from "../plane/client.ts";
 import type { CliConfig, MultiContextConfig, ResolvedConfig } from "../types.ts";
 import { assertConfigFile, isMultiContextConfig } from "./schema.ts";
 
 export interface LoadConfigOptions {
 	/** Explicit path to a config file (e.g. from --config flag) */
 	configPath?: string;
-	/** Working directory used for .linearrc.json discovery */
+	/** Working directory used for .planestoriesrc.json discovery */
 	cwd?: string;
 	/** Named context to select from a multi-context config */
 	context?: string;
@@ -19,12 +20,13 @@ export interface LoadConfigOptions {
  *
  * Discovery order:
  *   1. `options.configPath` -- explicit --config flag
- *   2. `.linearrc.json` in `options.cwd` (or process.cwd())
- *   3. `~/.config/linearstories/config.json`
+ *   2. `.planestoriesrc.json` in `options.cwd` (or process.cwd())
+ *   3. `~/.config/planestories/config.json`
  *
- * After loading the file the LINEAR_API_KEY env var is merged in
- * (overrides the file value).  A ConfigError is thrown when no API key
- * is available from any source.
+ * After loading the file the PLANE_* env vars are merged in (they override file
+ * values). Credentials are expected to come from the environment (.env);
+ * committed config files should hold only non-secret defaults. A ConfigError is
+ * thrown when no API key or workspace slug is available from any source.
  */
 export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedConfig> {
 	const configPath = resolveConfigPath(options);
@@ -55,7 +57,8 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 
 		config = {
 			apiKey: entry.apiKey,
-			defaultTeam: entry.defaultTeam,
+			workspaceSlug: entry.workspaceSlug,
+			baseUrl: entry.baseUrl,
 			defaultProject: entry.defaultProject,
 			defaultLabels: entry.defaultLabels,
 		};
@@ -68,17 +71,28 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 		config = raw as CliConfig;
 	}
 
-	// Merge env var -- env takes precedence
-	const envApiKey = process.env.LINEAR_API_KEY;
-	if (envApiKey) {
-		config.apiKey = envApiKey;
+	// Merge env vars -- env takes precedence (credentials belong in .env).
+	if (process.env.PLANE_API_KEY) {
+		config.apiKey = process.env.PLANE_API_KEY;
+	}
+	if (process.env.PLANE_WORKSPACE_SLUG) {
+		config.workspaceSlug = process.env.PLANE_WORKSPACE_SLUG;
+	}
+	if (process.env.PLANE_BASE_URL) {
+		config.baseUrl = process.env.PLANE_BASE_URL;
 	}
 
-	// API key is required
 	if (!config.apiKey) {
 		throw new ConfigError(
-			"No API key found. Provide one via LINEAR_API_KEY environment variable, " +
-				'or set "apiKey" in your config file (.linearrc.json or ~/.config/linearstories/config.json).',
+			"No API key found. Set PLANE_API_KEY in your environment (.env). " +
+				"Do not commit credentials to a config file.",
+		);
+	}
+
+	if (!config.workspaceSlug) {
+		throw new ConfigError(
+			"No workspace slug found. Set PLANE_WORKSPACE_SLUG in your environment (.env) " +
+				'or "workspaceSlug" in your config file (.planestoriesrc.json).',
 		);
 	}
 
@@ -92,7 +106,7 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 /**
  * Determines which config file path to use based on discovery order.
  * Returns `undefined` when no config file is found (which is okay if
- * LINEAR_API_KEY is set in the environment).
+ * PLANE_API_KEY and PLANE_WORKSPACE_SLUG are set in the environment).
  */
 function resolveConfigPath(options?: LoadConfigOptions): string | undefined {
 	// 1. Explicit path
@@ -103,16 +117,16 @@ function resolveConfigPath(options?: LoadConfigOptions): string | undefined {
 		return options.configPath;
 	}
 
-	// 2. .linearrc.json in cwd
+	// 2. .planestoriesrc.json in cwd
 	const cwd = options?.cwd ?? process.cwd();
-	const rcPath = join(cwd, ".linearrc.json");
+	const rcPath = join(cwd, ".planestoriesrc.json");
 	if (existsSync(rcPath)) {
 		return rcPath;
 	}
 
-	// 3. ~/.config/linearstories/config.json
+	// 3. ~/.config/planestories/config.json
 	const home = process.env.HOME ?? homedir();
-	const globalPath = join(home, ".config", "linearstories", "config.json");
+	const globalPath = join(home, ".config", "planestories", "config.json");
 	if (existsSync(globalPath)) {
 		return globalPath;
 	}
@@ -147,7 +161,8 @@ async function readConfigFile(filePath: string): Promise<unknown> {
 function resolveConfig(config: CliConfig): ResolvedConfig {
 	return {
 		apiKey: config.apiKey as string,
-		defaultTeam: config.defaultTeam ?? null,
+		workspaceSlug: config.workspaceSlug as string,
+		baseUrl: config.baseUrl ?? DEFAULT_PLANE_BASE_URL,
 		defaultProject: config.defaultProject ?? null,
 		defaultLabels: config.defaultLabels ?? [],
 	};

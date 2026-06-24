@@ -1,6 +1,6 @@
 {
-	"apiKey": "lin_api_test1234567890abcdef",
-	"defaultTeam": "Engineering",
+	"apiKey": "plane_api_test1234567890abcdef",
+	"workspaceSlug": "engineering-ws",
 	"defaultProject": "Q1 2026 Release",
 	"defaultLabels": ["User Story"]
 }

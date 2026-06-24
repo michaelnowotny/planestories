@@ -1,14 +1,14 @@
 ---
 project: "Q1 2026 Release"
-team: "Engineering"
 ---
 
 ## As a user, I want to log in so that I can access my account
 
 ```yaml
-linear_id: ENG-42
-linear_url: https://linear.app/myorg/issue/ENG-42
-priority: 2
+plane_id: 11111111-1111-4111-8111-111111111111
+plane_identifier: ENG-42
+plane_url: https://app.plane.so/myworkspace/projects/22222222-2222-4222-8222-222222222222/issues/11111111-1111-4111-8111-111111111111
+priority: high
 labels: [Feature, Auth]
 estimate: 3
 assignee: jane@company.com
@@ -25,9 +25,10 @@ User should be able to log in with their email and password.
 ## As a user, I want to reset my password so that I can regain access
 
 ```yaml
-linear_id: ENG-43
-linear_url: https://linear.app/myorg/issue/ENG-43
-priority: 3
+plane_id: 33333333-3333-4333-8333-333333333333
+plane_identifier: ENG-43
+plane_url: https://app.plane.so/myworkspace/projects/22222222-2222-4222-8222-222222222222/issues/33333333-3333-4333-8333-333333333333
+priority: medium
 labels: [Feature, Auth]
 estimate: 2
 ```

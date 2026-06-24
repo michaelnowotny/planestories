@@ -2,11 +2,13 @@
 	"contexts": [
 		{
 			"name": "dev",
-			"apiKey": "lin_api_dev_minimal"
+			"apiKey": "plane_api_dev_minimal",
+			"workspaceSlug": "dev-ws"
 		},
 		{
 			"name": "prod",
-			"apiKey": "lin_api_prod_minimal"
+			"apiKey": "plane_api_prod_minimal",
+			"workspaceSlug": "prod-ws"
 		}
 	]
 }

@@ -1,0 +1,21 @@
+planestories
+=============
+
+planestories is a derivative work of linearstories, adapted to target
+Plane (https://plane.so) instead of Linear.
+
+Original project:
+  linearstories — https://github.com/stackingturtles/linearstories
+  Copyright (c) 2026 Stacking Turtles Ltd. (Ijonas Kisselbach)
+  Licensed under the MIT License.
+
+The original MIT License is retained in full in the LICENSE file, as required.
+All original copyright notices are preserved.
+
+Modifications for planestories (Plane REST API integration, data-model
+remapping, configuration, and documentation):
+  Copyright (c) 2026 Michael Nowotny
+  Licensed under the MIT License.
+
+Sincere thanks to Ijonas Kisselbach / Stacking Turtles Ltd. for authoring
+linearstories and releasing it under a permissive license.

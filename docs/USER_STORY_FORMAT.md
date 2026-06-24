@@ -1,28 +1,28 @@
 # User Story Markdown Format
 
-Reference for the markdown format consumed by the `linearstories` CLI.
+Reference for the markdown format consumed by the `planestories` CLI.
 
 ## File structure
 
 ```
 ---                          ← optional YAML frontmatter
 project: "Project Name"
-team: "Team Name"
 ---
 
 ## Story title               ← H2 = one story (multiple per file OK)
 
 ```yaml                      ← optional metadata block
-linear_id:
-linear_url:
-priority: 2
+plane_id:
+plane_identifier:
+plane_url:
+priority: high
 labels: [Feature, Auth]
 estimate: 3
 assignee: jane@company.com
 status: Backlog
 ```
 
-Description text.            ← body (markdown), becomes Linear issue description
+Description text.            ← body (markdown), becomes the work item description
 
 ### Acceptance Criteria      ← H3 heading, part of body
 
@@ -36,12 +36,11 @@ Optional. Sets defaults for all stories in the file.
 
 | Field     | Type   | Description          |
 |-----------|--------|----------------------|
-| `project` | string | Default project name |
-| `team`    | string | Default team name    |
+| `project` | string | Default project name (Plane has no "team" tier — the project is the routing key) |
 
 ## Story heading
 
-Each story starts with `## `. The heading text becomes the Linear issue title.
+Each story starts with `## `. The heading text becomes the Plane work item name.
 
 Recommended format: `As a [role], I want [goal] so that [benefit]`
 
@@ -49,23 +48,24 @@ Recommended format: `As a [role], I want [goal] so that [benefit]`
 
 Fenced YAML block (` ```yaml ` ... ` ``` `) immediately after the H2 heading. All fields optional.
 
-| Field        | Type     | Values / Notes                                         |
-|--------------|----------|--------------------------------------------------------|
-| `linear_id`  | string   | Linear identifier (e.g. `ENG-42`). Auto-filled on import. Leave empty for new stories. |
-| `linear_url` | string   | Linear URL. Auto-filled on import. Leave empty for new stories. |
-| `priority`   | number   | `0` None, `1` Urgent, `2` High, `3` Normal, `4` Low   |
-| `labels`     | string[] | Label names. Merged with `defaultLabels` from config.  |
-| `estimate`   | number   | Story points.                                          |
-| `assignee`   | string   | Email or display name.                                 |
-| `status`     | string   | Workflow state: `Backlog`, `Todo`, `In Progress`, `Done`, etc. |
+| Field              | Type     | Values / Notes                                                        |
+|--------------------|----------|-----------------------------------------------------------------------|
+| `plane_id`         | string   | Work item UUID. Auto-filled on import; used to update. Leave empty for new stories. |
+| `plane_identifier` | string   | Human-readable id (e.g. `ENG-42`). Auto-filled on import.             |
+| `plane_url`        | string   | Work item URL. Auto-filled on import.                                 |
+| `priority`         | string   | `urgent`, `high`, `medium`, `low`, `none` (legacy Linear integers `0–4` are also accepted) |
+| `labels`           | string[] | Label names (resolved within the project). Merged with `defaultLabels` from config. Missing labels are skipped unless `--create-labels`. |
+| `estimate`         | number   | Story points.                                                         |
+| `assignee`         | string   | Email or display name (resolved to a project member).                 |
+| `status`           | string   | State name: `Backlog`, `Todo`, `In Progress`, `Done`, etc. (resolved within the project) |
 
 ## Body
 
-Everything after the metadata block until the next `## ` or end-of-file. Standard markdown. Becomes the Linear issue description.
+Everything after the metadata block until the next `## ` or end-of-file. Standard markdown. Converted to HTML and stored as the work item's description.
 
 ## Acceptance criteria
 
-Convention: use an `### Acceptance Criteria` heading with a checkbox list. This section is part of the body and is included in the issue description.
+Convention: use an `### Acceptance Criteria` heading with a checkbox list. This section is part of the body and is included in the work item description.
 
 ```markdown
 ### Acceptance Criteria
@@ -92,15 +92,15 @@ Description of the feature.
 ````markdown
 ---
 project: "Q1 2026 Release"
-team: "Engineering"
 ---
 
 ## As a user, I want to log in so that I can access my account
 
 ```yaml
-linear_id:
-linear_url:
-priority: 2
+plane_id:
+plane_identifier:
+plane_url:
+priority: high
 labels: [Feature, Auth]
 estimate: 3
 assignee: jane@company.com
@@ -118,9 +118,10 @@ User should be able to log in with their email and password.
 ## As a user, I want to reset my password so that I can regain access
 
 ```yaml
-linear_id:
-linear_url:
-priority: 3
+plane_id:
+plane_identifier:
+plane_url:
+priority: medium
 labels: [Feature, Auth]
 estimate: 2
 ```
@@ -136,9 +137,9 @@ User should be able to reset their password via email link.
 
 ## Import behavior
 
-| `linear_id` state | Action                   |
-|--------------------|--------------------------|
-| Empty or missing   | Creates a new issue      |
-| Present            | Updates the existing issue |
+| `plane_id` state | Action                                                              |
+|------------------|---------------------------------------------------------------------|
+| Empty or missing | Looks up an existing work item by `external_id`; updates it if found, otherwise creates a new one |
+| Present          | Updates the existing work item by UUID                              |
 
-After import, `linear_id` and `linear_url` are written back into the file.
+After import, `plane_id`, `plane_identifier`, and `plane_url` are written back into the file. On create, planestories also stamps the work item with `external_id` (derived from the title) and `external_source: "planestories"` so re-imports are idempotent.

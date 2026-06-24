@@ -2,15 +2,15 @@
 	"contexts": [
 		{
 			"name": "orgA",
-			"apiKey": "lin_api_orgA_key123",
-			"defaultTeam": "Engineering",
+			"apiKey": "plane_api_orgA_key123",
+			"workspaceSlug": "org-a",
 			"defaultProject": "Q1 Release",
 			"defaultLabels": ["User Story", "Feature"]
 		},
 		{
 			"name": "orgB",
-			"apiKey": "lin_api_orgB_key456",
-			"defaultTeam": "Design",
+			"apiKey": "plane_api_orgB_key456",
+			"workspaceSlug": "org-b",
 			"defaultProject": "Brand Refresh",
 			"defaultLabels": ["Design Task"]
 		}

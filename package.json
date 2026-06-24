@@ -1,16 +1,17 @@
 {
-  "name": "linearstories",
-  "version": "1.1.0",
-  "description": "CLI tool that bridges markdown-based user stories and Linear issues, enforcing acceptance criteria discipline for AI agents",
+  "name": "planestories",
+  "version": "0.1.0",
+  "description": "CLI tool that bridges markdown-based user stories and Plane work items, enforcing acceptance criteria discipline for AI agents",
   "module": "src/cli/index.ts",
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/stackingturtles/linearstories.git"
+    "url": "https://github.com/michaelnowotny/planestories.git"
   },
   "keywords": [
-    "linear",
+    "plane",
+    "plane.so",
     "user-stories",
     "acceptance-criteria",
     "ai-agents",
@@ -25,17 +26,18 @@
     "src",
     "templates",
     "LICENSE",
+    "NOTICE",
     "README.md"
   ],
   "bin": {
-    "linearstories": "src/cli/index.ts"
+    "planestories": "src/cli/index.ts"
   },
   "scripts": {
     "dev": "bun run src/cli/index.ts",
     "test": "bun test",
     "lint": "bunx biome check ./src ./tests",
     "format": "bunx biome format --write ./src ./tests",
-    "build": "bun build src/cli/index.ts --compile --outfile linearstories"
+    "build": "bun build src/cli/index.ts --compile --outfile planestories"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.2",
@@ -43,10 +45,10 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@linear/sdk": "^75.0.0",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
     "glob": "^13.0.4",
-    "gray-matter": "^4.0.3"
+    "gray-matter": "^4.0.3",
+    "marked": "^14.0.0"
   }
 }

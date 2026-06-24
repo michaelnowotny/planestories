@@ -1,20 +1,16 @@
 import { ConfigError } from "../errors.ts";
 import type { CliConfig, ContextEntry, MultiContextConfig } from "../types.ts";
 
+const STRING_FIELDS = ["apiKey", "workspaceSlug", "baseUrl", "defaultProject"] as const;
+
 /**
  * Validates the optional config fields shared between flat configs and context entries.
  */
 function hasValidConfigFields(obj: Record<string, unknown>): boolean {
-	if (obj.apiKey !== undefined && typeof obj.apiKey !== "string") {
-		return false;
-	}
-
-	if (obj.defaultTeam !== undefined && typeof obj.defaultTeam !== "string") {
-		return false;
-	}
-
-	if (obj.defaultProject !== undefined && typeof obj.defaultProject !== "string") {
-		return false;
+	for (const field of STRING_FIELDS) {
+		if (obj[field] !== undefined && typeof obj[field] !== "string") {
+			return false;
+		}
 	}
 
 	if (obj.defaultLabels !== undefined) {
@@ -30,6 +26,9 @@ function hasValidConfigFields(obj: Record<string, unknown>): boolean {
 
 	return true;
 }
+
+const SHAPE_MESSAGE =
+	"Invalid config shape: expected an object with optional apiKey (string), workspaceSlug (string), baseUrl (string), defaultProject (string), and defaultLabels (string[])";
 
 /**
  * Type guard that checks whether a value conforms to the CliConfig shape.
@@ -97,9 +96,7 @@ export function isMultiContextConfig(value: unknown): value is MultiContextConfi
  */
 export function assertCliConfig(value: unknown): asserts value is CliConfig {
 	if (!isCliConfig(value)) {
-		throw new ConfigError(
-			"Invalid config shape: expected an object with optional apiKey (string), defaultTeam (string), defaultProject (string), and defaultLabels (string[])",
-		);
+		throw new ConfigError(SHAPE_MESSAGE);
 	}
 }
 
@@ -109,9 +106,7 @@ export function assertCliConfig(value: unknown): asserts value is CliConfig {
  */
 export function assertConfigFile(value: unknown): asserts value is CliConfig | MultiContextConfig {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		throw new ConfigError(
-			"Invalid config shape: expected an object with optional apiKey (string), defaultTeam (string), defaultProject (string), and defaultLabels (string[])",
-		);
+		throw new ConfigError(SHAPE_MESSAGE);
 	}
 
 	const obj = value as Record<string, unknown>;
@@ -124,9 +119,7 @@ export function assertConfigFile(value: unknown): asserts value is CliConfig | M
 		}
 	} else {
 		if (!isCliConfig(value)) {
-			throw new ConfigError(
-				"Invalid config shape: expected an object with optional apiKey (string), defaultTeam (string), defaultProject (string), and defaultLabels (string[])",
-			);
+			throw new ConfigError(SHAPE_MESSAGE);
 		}
 	}
 }

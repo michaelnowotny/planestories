@@ -14,24 +14,22 @@ describe("loadConfig", () => {
 	beforeEach(() => {
 		// Clone env so we can safely mutate it per test
 		process.env = { ...originalEnv };
-		// Remove LINEAR_API_KEY so it doesn't leak between tests
-		delete process.env.LINEAR_API_KEY;
+		// Remove PLANE_* so they don't leak between tests
+		delete process.env.PLANE_API_KEY;
+		delete process.env.PLANE_WORKSPACE_SLUG;
+		delete process.env.PLANE_BASE_URL;
 	});
 
 	afterEach(() => {
 		process.env = originalEnv;
 	});
 
-	// ------------------------------------------------------------------
-	// Explicit path (--config flag)
-	// ------------------------------------------------------------------
-
 	test("loads config from explicit path (--config flag)", async () => {
 		const configPath = join(FIXTURES_DIR, "valid.json");
 		const config = await loadConfig({ configPath });
 
-		expect(config.apiKey).toBe("lin_api_test1234567890abcdef");
-		expect(config.defaultTeam).toBe("Engineering");
+		expect(config.apiKey).toBe("plane_api_test1234567890abcdef");
+		expect(config.workspaceSlug).toBe("engineering-ws");
 		expect(config.defaultProject).toBe("Q1 2026 Release");
 		expect(config.defaultLabels).toEqual(["User Story"]);
 	});
@@ -41,44 +39,38 @@ describe("loadConfig", () => {
 		expect(loadConfig({ configPath: bogusPath })).rejects.toThrow(ConfigError);
 	});
 
-	// ------------------------------------------------------------------
-	// Discovery: .linearrc.json in cwd
-	// ------------------------------------------------------------------
-
-	test("discovers .linearrc.json in current working directory", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "linearstories-test-"));
+	test("discovers .planestoriesrc.json in current working directory", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "planestories-test-"));
 		try {
-			const rcPath = join(tempDir, ".linearrc.json");
-			writeFileSync(rcPath, JSON.stringify({ apiKey: "lin_api_from_cwd_rc" }));
+			const rcPath = join(tempDir, ".planestoriesrc.json");
+			writeFileSync(
+				rcPath,
+				JSON.stringify({ apiKey: "plane_api_from_cwd_rc", workspaceSlug: "ws" }),
+			);
 
 			const config = await loadConfig({ cwd: tempDir });
-			expect(config.apiKey).toBe("lin_api_from_cwd_rc");
+			expect(config.apiKey).toBe("plane_api_from_cwd_rc");
+			expect(config.workspaceSlug).toBe("ws");
 		} finally {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
 	});
 
-	// ------------------------------------------------------------------
-	// Fallback: ~/.config/linearstories/config.json
-	// ------------------------------------------------------------------
-
-	test("falls back to ~/.config/linearstories/config.json", async () => {
-		// We simulate by pointing HOME to a temp dir with the expected structure
-		const tempHome = mkdtempSync(join(tmpdir(), "linearstories-home-"));
+	test("falls back to ~/.config/planestories/config.json", async () => {
+		const tempHome = mkdtempSync(join(tmpdir(), "planestories-home-"));
 		try {
-			const configDir = join(tempHome, ".config", "linearstories");
+			const configDir = join(tempHome, ".config", "planestories");
 			mkdirSync(configDir, { recursive: true });
 			writeFileSync(
 				join(configDir, "config.json"),
-				JSON.stringify({ apiKey: "lin_api_from_home" }),
+				JSON.stringify({ apiKey: "plane_api_from_home", workspaceSlug: "home-ws" }),
 			);
 
-			// Point HOME / XDG to our temp dir, and use a cwd with no .linearrc.json
-			const emptyCwd = mkdtempSync(join(tmpdir(), "linearstories-empty-"));
+			const emptyCwd = mkdtempSync(join(tmpdir(), "planestories-empty-"));
 			process.env.HOME = tempHome;
 
 			const config = await loadConfig({ cwd: emptyCwd });
-			expect(config.apiKey).toBe("lin_api_from_home");
+			expect(config.apiKey).toBe("plane_api_from_home");
 
 			rmSync(emptyCwd, { recursive: true, force: true });
 		} finally {
@@ -86,45 +78,40 @@ describe("loadConfig", () => {
 		}
 	});
 
-	// ------------------------------------------------------------------
-	// Parsing
-	// ------------------------------------------------------------------
-
 	test("parses all JSON fields correctly", async () => {
 		const configPath = join(FIXTURES_DIR, "valid.json");
 		const config = await loadConfig({ configPath });
 
-		// Verify shape matches ResolvedConfig
 		expect(config).toEqual({
-			apiKey: "lin_api_test1234567890abcdef",
-			defaultTeam: "Engineering",
+			apiKey: "plane_api_test1234567890abcdef",
+			workspaceSlug: "engineering-ws",
+			baseUrl: "https://api.plane.so",
 			defaultProject: "Q1 2026 Release",
 			defaultLabels: ["User Story"],
 		} satisfies ResolvedConfig);
 	});
 
-	// ------------------------------------------------------------------
-	// Env var override
-	// ------------------------------------------------------------------
-
-	test("LINEAR_API_KEY env var overrides apiKey in config", async () => {
-		process.env.LINEAR_API_KEY = "lin_api_from_env";
+	test("PLANE_API_KEY env var overrides apiKey in config", async () => {
+		process.env.PLANE_API_KEY = "plane_api_from_env";
 		const configPath = join(FIXTURES_DIR, "valid.json");
 
 		const config = await loadConfig({ configPath });
-		expect(config.apiKey).toBe("lin_api_from_env");
+		expect(config.apiKey).toBe("plane_api_from_env");
 	});
 
-	// ------------------------------------------------------------------
-	// Missing API key
-	// ------------------------------------------------------------------
+	test("PLANE_BASE_URL env var overrides baseUrl", async () => {
+		process.env.PLANE_BASE_URL = "https://plane.internal.example.com";
+		const configPath = join(FIXTURES_DIR, "valid.json");
+
+		const config = await loadConfig({ configPath });
+		expect(config.baseUrl).toBe("https://plane.internal.example.com");
+	});
 
 	test("throws ConfigError when no API key from any source", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "linearstories-nokey-"));
+		const tempDir = mkdtempSync(join(tmpdir(), "planestories-nokey-"));
 		try {
-			// Config file with no apiKey, and no env var
-			const rcPath = join(tempDir, ".linearrc.json");
-			writeFileSync(rcPath, JSON.stringify({ defaultTeam: "Design" }));
+			const rcPath = join(tempDir, ".planestoriesrc.json");
+			writeFileSync(rcPath, JSON.stringify({ workspaceSlug: "ws" }));
 
 			expect(loadConfig({ configPath: rcPath })).rejects.toThrow(ConfigError);
 		} finally {
@@ -132,12 +119,20 @@ describe("loadConfig", () => {
 		}
 	});
 
-	// ------------------------------------------------------------------
-	// Malformed JSON
-	// ------------------------------------------------------------------
+	test("throws ConfigError when no workspace slug from any source", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "planestories-noslug-"));
+		try {
+			const rcPath = join(tempDir, ".planestoriesrc.json");
+			writeFileSync(rcPath, JSON.stringify({ apiKey: "plane_api_x" }));
+
+			expect(loadConfig({ configPath: rcPath })).rejects.toThrow(ConfigError);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
 
 	test("throws ConfigError on malformed JSON", async () => {
-		const tempDir = mkdtempSync(join(tmpdir(), "linearstories-bad-json-"));
+		const tempDir = mkdtempSync(join(tmpdir(), "planestories-bad-json-"));
 		try {
 			const badPath = join(tempDir, "bad.json");
 			writeFileSync(badPath, "{ this is not valid json }}}");
@@ -148,31 +143,24 @@ describe("loadConfig", () => {
 		}
 	});
 
-	// ------------------------------------------------------------------
-	// Defaults for optional fields
-	// ------------------------------------------------------------------
-
 	test("returns defaults for missing optional fields", async () => {
 		const configPath = join(FIXTURES_DIR, "minimal.json");
 		const config = await loadConfig({ configPath });
 
-		expect(config.apiKey).toBe("lin_api_minimalkey1234567890");
-		expect(config.defaultTeam).toBeNull();
+		expect(config.apiKey).toBe("plane_api_minimalkey1234567890");
+		expect(config.workspaceSlug).toBe("minimal-ws");
+		expect(config.baseUrl).toBe("https://api.plane.so");
 		expect(config.defaultProject).toBeNull();
 		expect(config.defaultLabels).toEqual([]);
 	});
-
-	// ------------------------------------------------------------------
-	// Multi-context config
-	// ------------------------------------------------------------------
 
 	describe("multi-context config", () => {
 		test("selects correct context by name (orgA)", async () => {
 			const configPath = join(FIXTURES_DIR, "multi-context.json");
 			const config = await loadConfig({ configPath, context: "orgA" });
 
-			expect(config.apiKey).toBe("lin_api_orgA_key123");
-			expect(config.defaultTeam).toBe("Engineering");
+			expect(config.apiKey).toBe("plane_api_orgA_key123");
+			expect(config.workspaceSlug).toBe("org-a");
 			expect(config.defaultProject).toBe("Q1 Release");
 			expect(config.defaultLabels).toEqual(["User Story", "Feature"]);
 		});
@@ -181,8 +169,8 @@ describe("loadConfig", () => {
 			const configPath = join(FIXTURES_DIR, "multi-context.json");
 			const config = await loadConfig({ configPath, context: "orgB" });
 
-			expect(config.apiKey).toBe("lin_api_orgB_key456");
-			expect(config.defaultTeam).toBe("Design");
+			expect(config.apiKey).toBe("plane_api_orgB_key456");
+			expect(config.workspaceSlug).toBe("org-b");
 			expect(config.defaultProject).toBe("Brand Refresh");
 			expect(config.defaultLabels).toEqual(["Design Task"]);
 		});
@@ -208,20 +196,20 @@ describe("loadConfig", () => {
 			);
 		});
 
-		test("LINEAR_API_KEY env var overrides selected context's apiKey", async () => {
-			process.env.LINEAR_API_KEY = "lin_api_from_env_override";
+		test("PLANE_API_KEY env var overrides selected context's apiKey", async () => {
+			process.env.PLANE_API_KEY = "plane_api_from_env_override";
 			const configPath = join(FIXTURES_DIR, "multi-context.json");
 			const config = await loadConfig({ configPath, context: "orgA" });
 
-			expect(config.apiKey).toBe("lin_api_from_env_override");
+			expect(config.apiKey).toBe("plane_api_from_env_override");
 		});
 
 		test("fills defaults for missing optional fields in context", async () => {
 			const configPath = join(FIXTURES_DIR, "multi-context-minimal.json");
 			const config = await loadConfig({ configPath, context: "dev" });
 
-			expect(config.apiKey).toBe("lin_api_dev_minimal");
-			expect(config.defaultTeam).toBeNull();
+			expect(config.apiKey).toBe("plane_api_dev_minimal");
+			expect(config.workspaceSlug).toBe("dev-ws");
 			expect(config.defaultProject).toBeNull();
 			expect(config.defaultLabels).toEqual([]);
 		});
@@ -230,8 +218,8 @@ describe("loadConfig", () => {
 			const configPath = join(FIXTURES_DIR, "valid.json");
 			const config = await loadConfig({ configPath });
 
-			expect(config.apiKey).toBe("lin_api_test1234567890abcdef");
-			expect(config.defaultTeam).toBe("Engineering");
+			expect(config.apiKey).toBe("plane_api_test1234567890abcdef");
+			expect(config.workspaceSlug).toBe("engineering-ws");
 		});
 	});
 });

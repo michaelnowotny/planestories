@@ -36,13 +36,13 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build binary
-        run: bun build src/cli/index.ts --compile --target ${{ matrix.target }} --outfile linearstories-${{ matrix.target }}
+        run: bun build src/cli/index.ts --compile --target ${{ matrix.target }} --outfile planestories-${{ matrix.target }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: linearstories-${{ matrix.target }}
-          path: linearstories-${{ matrix.target }}*
+          name: planestories-${{ matrix.target }}
+          path: planestories-${{ matrix.target }}*
 
   release:
     name: Release

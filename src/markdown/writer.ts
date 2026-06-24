@@ -1,42 +1,56 @@
+export interface WriteBackUpdate {
+	title: string;
+	planeId: string;
+	planeIdentifier: string;
+	planeUrl: string;
+}
+
+/** The YAML keys we upsert, in the order they should appear. */
+const FIELD_ORDER: ReadonlyArray<keyof Omit<WriteBackUpdate, "title">> = [
+	"planeId",
+	"planeIdentifier",
+	"planeUrl",
+];
+
+const FIELD_TO_YAML: Record<keyof Omit<WriteBackUpdate, "title">, string> = {
+	planeId: "plane_id",
+	planeIdentifier: "plane_identifier",
+	planeUrl: "plane_url",
+};
+
 /**
- * Write-back linear_id and linear_url into existing markdown file content.
+ * Write-back plane_id, plane_identifier and plane_url into existing markdown
+ * file content.
  *
  * This function takes the original file content and returns updated content
- * with linear_id and linear_url filled in for the specified stories.
- * It does NOT write to disk -- the caller handles that.
+ * with the Plane identifiers filled in for the specified stories. It does NOT
+ * write to disk -- the caller handles that.
  *
  * Strategy:
- * - Split the content into story sections at H2 boundaries
+ * - Walk the content line-by-line, tracking the current H2 story
  * - For each update, find the matching story by title
- * - If the story has a fenced YAML block, update linear_id and linear_url lines
+ * - If the story has a fenced YAML block, update/insert the plane_* lines
  * - If the story has no YAML block, insert one after the H2 heading
  * - Reassemble the full content preserving everything else exactly
  */
 export function writeBackIds(
 	_filePath: string,
 	content: string,
-	updates: Array<{ title: string; linearId: string; linearUrl: string }>,
+	updates: WriteBackUpdate[],
 ): string {
 	if (updates.length === 0) {
 		return content;
 	}
 
-	// Build a lookup map from title to update
-	const updateMap = new Map<string, { linearId: string; linearUrl: string }>();
+	const updateMap = new Map<string, WriteBackUpdate>();
 	for (const update of updates) {
-		updateMap.set(update.title, {
-			linearId: update.linearId,
-			linearUrl: update.linearUrl,
-		});
+		updateMap.set(update.title, update);
 	}
 
-	// Split at H2 boundaries while preserving the full structure.
-	// We process line-by-line to preserve exact formatting.
 	const lines = content.split("\n");
 	const result: string[] = [];
 
 	let currentTitle: string | null = null;
-	let hasYamlBlock = false;
 	let i = 0;
 
 	while (i < lines.length) {
@@ -44,21 +58,14 @@ export function writeBackIds(
 
 		// Detect H2 heading
 		if (line.startsWith("## ")) {
-			// Before processing a new story, check if the previous story needed
-			// a YAML block inserted (had no YAML block but had an update)
-			if (currentTitle !== null && !hasYamlBlock && updateMap.has(currentTitle)) {
-				// This case is handled by the lookahead below
-			}
-
 			currentTitle = line.replace(/^## /, "").trim();
-			hasYamlBlock = false;
 
 			result.push(line);
 			i++;
 
-			// If this story has an update and we need to check if it has a YAML block,
-			// look ahead to see if there's a ```yaml block coming
 			if (updateMap.has(currentTitle)) {
+				const update = updateMap.get(currentTitle) as WriteBackUpdate;
+
 				// Look ahead past any blank lines to see if ```yaml comes next
 				let lookAhead = i;
 				while (lookAhead < lines.length && lines[lookAhead]?.trim() === "") {
@@ -66,52 +73,40 @@ export function writeBackIds(
 				}
 
 				if (lookAhead < lines.length && lines[lookAhead]?.trim() === "```yaml") {
-					// There IS a YAML block - process it normally
-					hasYamlBlock = true;
-
+					// There IS a YAML block - update plane_* lines inside it.
 					// Output any blank lines between H2 and ```yaml
 					while (i < lookAhead) {
 						result.push(lines[i] as string);
 						i++;
 					}
 
-					// Now process the YAML block
-					result.push(lines[i] as string); // ```yaml line
+					// ```yaml opening line
+					result.push(lines[i] as string);
 					i++;
 
-					const update = updateMap.get(currentTitle) as {
-						linearId: string;
-						linearUrl: string;
-					};
-					let foundLinearId = false;
-					let foundLinearUrl = false;
-
-					// Process lines inside the YAML block until closing ```
+					const found = new Set<string>();
 					while (i < lines.length && lines[i]?.trim() !== "```") {
 						const yamlLine = lines[i] as string;
-
-						if (yamlLine.match(/^linear_id:/)) {
-							result.push(`linear_id: ${update.linearId}`);
-							foundLinearId = true;
-						} else if (yamlLine.match(/^linear_url:/)) {
-							result.push(`linear_url: ${update.linearUrl}`);
-							foundLinearUrl = true;
+						const matchedField = FIELD_ORDER.find((field) =>
+							yamlLine.match(new RegExp(`^${FIELD_TO_YAML[field]}:`)),
+						);
+						if (matchedField) {
+							result.push(`${FIELD_TO_YAML[matchedField]}: ${update[matchedField]}`);
+							found.add(matchedField);
 						} else {
 							result.push(yamlLine);
 						}
 						i++;
 					}
 
-					// If linear_id or linear_url weren't found in the YAML block, add them
-					// (insert before the closing ```)
-					if (!foundLinearId) {
-						result.push(`linear_id: ${update.linearId}`);
-					}
-					if (!foundLinearUrl) {
-						result.push(`linear_url: ${update.linearUrl}`);
+					// Append any plane_* fields that weren't already present
+					for (const field of FIELD_ORDER) {
+						if (!found.has(field)) {
+							result.push(`${FIELD_TO_YAML[field]}: ${update[field]}`);
+						}
 					}
 
-					// Output closing ```
+					// Closing ```
 					if (i < lines.length) {
 						result.push(lines[i] as string);
 						i++;
@@ -119,13 +114,10 @@ export function writeBackIds(
 				} else {
 					// No YAML block - insert one after the H2 heading
 					result.push("");
-					const update = updateMap.get(currentTitle) as {
-						linearId: string;
-						linearUrl: string;
-					};
 					result.push("```yaml");
-					result.push(`linear_id: ${update.linearId}`);
-					result.push(`linear_url: ${update.linearUrl}`);
+					for (const field of FIELD_ORDER) {
+						result.push(`${FIELD_TO_YAML[field]}: ${update[field]}`);
+					}
 					result.push("```");
 				}
 			}

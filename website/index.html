@@ -3,22 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="linearstories — CLI tool that imports and exports structured user stories with acceptance criteria to Linear. Built for AI agent developers and engineering managers." />
+  <meta name="description" content="planestories — CLI tool that imports and exports structured user stories with acceptance criteria to Plane. Built for AI agent developers and engineering managers." />
   <meta name="robots" content="index, follow" />
 
   <!-- Open Graph -->
   <meta property="og:type"        content="website" />
-  <meta property="og:title"       content="linearstories — User Stories with Real Acceptance Criteria" />
-  <meta property="og:description" content="Your AI agents are only as good as the instructions you give them. linearstories ensures every Linear task has clear, testable acceptance criteria." />
-  <meta property="og:url"         content="https://linear-stories.vercel.app/" />
-  <meta property="og:image"       content="https://linear-stories.vercel.app/og-image.png" />
+  <meta property="og:title"       content="planestories — User Stories with Real Acceptance Criteria" />
+  <meta property="og:description" content="Your AI agents are only as good as the instructions you give them. planestories ensures every Plane task has clear, testable acceptance criteria." />
+  <meta property="og:url"         content="https://github.com/michaelnowotny/planestories" />
 
   <!-- Twitter Card -->
   <meta name="twitter:card"        content="summary_large_image" />
-  <meta name="twitter:title"       content="linearstories CLI" />
-  <meta name="twitter:description" content="Structured user stories with acceptance criteria for Linear. Built for AI agents and engineering managers." />
+  <meta name="twitter:title"       content="planestories CLI" />
+  <meta name="twitter:description" content="Structured user stories with acceptance criteria for Plane. Built for AI agents and engineering managers." />
 
-  <title>linearstories — Clear acceptance criteria for every Linear issue</title>
+  <title>planestories — Clear acceptance criteria for every Plane issue</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -39,7 +38,7 @@
           <path d="M4 6h16M4 10h10M4 14h12M4 18h8" stroke="#fff" stroke-width="2.5" stroke-linecap="round" fill="none"/>
         </svg>
       </span>
-      linearstories
+      planestories
     </a>
 
     <ul class="nav-links">
@@ -51,7 +50,7 @@
     </ul>
 
     <div class="nav-cta">
-      <a href="https://github.com/stackingturtles/linearstories" class="btn-ghost" target="_blank" rel="noopener">
+      <a href="https://github.com/michaelnowotny/planestories" class="btn-ghost" target="_blank" rel="noopener">
         <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
           <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
         </svg>
@@ -80,21 +79,21 @@
 
     <p class="hero-sub">
       Your AI agents are only as good as the instructions you give them.
-      <strong>linearstories</strong> ensures every Linear task has clear,
+      <strong>planestories</strong> ensures every Plane task has clear,
       testable acceptance criteria — so agents know exactly what "done" looks like.
     </p>
 
     <div class="hero-actions">
       <a href="#quick-start" class="btn-primary btn-large">Get started</a>
-      <a href="https://github.com/stackingturtles/linearstories/releases" class="btn-ghost btn-large" target="_blank" rel="noopener">
+      <a href="https://github.com/michaelnowotny/planestories/releases" class="btn-ghost btn-large" target="_blank" rel="noopener">
         Download binary
       </a>
     </div>
 
     <div class="hero-install">
       <span class="hero-install-label">$</span>
-      <code>bunx linearstories import stories/*.md</code>
-      <button class="copy-btn" onclick="navigator.clipboard.writeText('bunx linearstories import stories/*.md')" title="Copy to clipboard">
+      <code>bunx planestories import stories/*.md</code>
+      <button class="copy-btn" onclick="navigator.clipboard.writeText('bunx planestories import stories/*.md')" title="Copy to clipboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -141,7 +140,7 @@
       <ul class="problem-points">
         <li>Agents produce code that technically compiles but misses the intent</li>
         <li>No definition of "done" means no reliable way to verify output</li>
-        <li>Vague Linear issues create ambiguity that compounds across sprints</li>
+        <li>Vague Plane issues create ambiguity that compounds across sprints</li>
         <li>Engineering managers lose visibility into what was actually built</li>
       </ul>
     </div>
@@ -152,7 +151,7 @@
         <p>What should I build for the login feature?</p>
       </div>
       <div class="msg-bubble msg-vague">
-        <span class="msg-bubble-label">Linear issue</span>
+        <span class="msg-bubble-label">Plane issue</span>
         <p>Build the login page. Make it nice.</p>
       </div>
       <div class="msg-bubble msg-confused">
@@ -198,7 +197,7 @@
       <span class="section-label">The solution</span>
       <h2 class="section-heading">Structured user stories with testable acceptance criteria</h2>
       <p class="section-sub">
-        linearstories brings the user story format to Linear. Write your
+        planestories brings the user story format to Plane. Write your
         stories in Markdown with explicit acceptance criteria, then import
         them directly into your board. Agents read the AC, build to spec,
         and know exactly when they are finished.
@@ -206,7 +205,7 @@
       <ul class="solution-list">
         <li>Every issue carries machine-readable acceptance criteria</li>
         <li>Agents verify their own output against a clear checklist</li>
-        <li>Managers export Linear issues back to Markdown for documentation</li>
+        <li>Managers export Plane issues back to Markdown for documentation</li>
         <li>Bi-directional sync keeps stories and tickets in lock-step</li>
       </ul>
     </div>
@@ -227,7 +226,7 @@
       <span class="section-label">How it works</span>
       <h2 class="section-heading">Three steps from story to shipped</h2>
       <p class="section-sub">
-        Write structured Markdown, push it to Linear, and give your agents
+        Write structured Markdown, push it to Plane, and give your agents
         a precise target to build toward.
       </p>
     </div>
@@ -262,10 +261,10 @@
             <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
           </svg>
         </div>
-        <h3>Import to Linear</h3>
+        <h3>Import to Plane</h3>
         <p>
-          Run <code style="font-family:var(--font-mono);font-size:0.9em;color:var(--accent-mid)">linearstories import</code>
-          to push every story as a properly structured Linear issue, complete
+          Run <code style="font-family:var(--font-mono);font-size:0.9em;color:var(--accent-mid)">planestories import</code>
+          to push every story as a properly structured Plane issue, complete
           with labels, priority, estimates, and assignees.
         </p>
       </div>
@@ -280,7 +279,7 @@
         </div>
         <h3>Agents build with clarity</h3>
         <p>
-          AI agents pick up tasks from Linear with full context: the user
+          AI agents pick up tasks from Plane with full context: the user
           story, acceptance criteria, and definition of done. No guesswork.
           No wasted iterations.
         </p>
@@ -303,7 +302,7 @@
       <span class="section-label">Features</span>
       <h2 class="section-heading">Everything your workflow needs</h2>
       <p class="section-sub">
-        From solo engineers to multi-team orgs, linearstories covers the full
+        From solo engineers to multi-team orgs, planestories covers the full
         lifecycle of a user story.
       </p>
     </div>
@@ -318,9 +317,9 @@
             <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
           </svg>
         </div>
-        <h3>Import to Linear</h3>
+        <h3>Import to Plane</h3>
         <p>
-          Push Markdown user stories directly into Linear as properly formatted
+          Push Markdown user stories directly into Plane as properly formatted
           issues. Labels, priority, estimates, and assignees are all set
           automatically from frontmatter.
         </p>
@@ -334,11 +333,11 @@
             <line x1="3" y1="20" x2="21" y2="20"></line>
           </svg>
         </div>
-        <h3>Export from Linear</h3>
+        <h3>Export from Plane</h3>
         <p>
-          Pull any project or team's issues back into Markdown. Ideal for
+          Pull a project's work items back into Markdown. Ideal for
           documentation, audits, and sharing context with stakeholders who
-          do not live in Linear.
+          do not live in Plane.
         </p>
       </div>
 
@@ -352,8 +351,8 @@
         </div>
         <h3>Bi-directional sync</h3>
         <p>
-          Stories updated in Linear flow back to Markdown. Changes in your
-          editor push back to Linear. Keep your source of truth wherever
+          Stories updated in Plane flow back to Markdown. Changes in your
+          editor push back to Plane. Keep your source of truth wherever
           your team prefers.
         </p>
       </div>
@@ -369,9 +368,9 @@
         </div>
         <h3>Multi-org contexts</h3>
         <p>
-          Define named contexts for each Linear organization in a single config
+          Define named contexts for each Plane workspace in a single config
           file. Switch between them with <code style="font-family:var(--font-mono);font-size:0.9em;color:var(--accent-mid)">--context orgA</code> — each
-          context carries its own API key, default team, and project.
+          context carries its own workspace slug and default project.
         </p>
       </div>
 
@@ -386,7 +385,7 @@
         <h3>Cross-platform binaries</h3>
         <p>
           Pre-built binaries for macOS (Apple Silicon and Intel), Linux, and
-          Windows. Download and run, or install via <code style="font-family:var(--font-mono);font-size:0.9em;color:var(--accent-mid)">npm install -g linearstories</code>.
+          Windows. Download and run, or install via <code style="font-family:var(--font-mono);font-size:0.9em;color:var(--accent-mid)">npm install -g planestories</code>.
         </p>
       </div>
 
@@ -491,7 +490,7 @@
 
     <div class="showcase-content">
       <span class="section-label">Template format</span>
-      <h2 class="section-heading">One file, everything Linear needs</h2>
+      <h2 class="section-heading">One file, everything Plane needs</h2>
       <p class="section-sub">
         A single Markdown file can contain multiple user stories. Frontmatter
         sets project-level defaults; each story overrides what it needs.
@@ -501,22 +500,17 @@
 
         <div class="template-field">
           <span class="template-field-key">project</span>
-          <span class="template-field-desc">Maps to a Linear project. Creates it if it does not exist.</span>
-        </div>
-
-        <div class="template-field">
-          <span class="template-field-key">team</span>
-          <span class="template-field-desc">Target Linear team. Used to scope labels and workflows.</span>
+          <span class="template-field-desc">The work item's Plane project (required — resolved by name).</span>
         </div>
 
         <div class="template-field">
           <span class="template-field-key">priority</span>
-          <span class="template-field-desc">0 = None, 1 = Urgent, 2 = High, 3 = Normal, 4 = Low.</span>
+          <span class="template-field-desc">urgent, high, medium, low, or none.</span>
         </div>
 
         <div class="template-field">
           <span class="template-field-key">labels</span>
-          <span class="template-field-desc">Array of Linear label names to apply to the issue.</span>
+          <span class="template-field-desc">Array of Plane label names to apply to the issue.</span>
         </div>
 
         <div class="template-field">
@@ -526,12 +520,12 @@
 
         <div class="template-field">
           <span class="template-field-key">assignee</span>
-          <span class="template-field-desc">Email address of the Linear workspace member.</span>
+          <span class="template-field-desc">Email address of the Plane workspace member.</span>
         </div>
 
         <div class="template-field">
           <span class="template-field-key">status</span>
-          <span class="template-field-desc">Maps to a Linear workflow state: Backlog, In Progress, Done, etc.</span>
+          <span class="template-field-desc">Maps to a Plane state: Backlog, In Progress, Done, etc.</span>
         </div>
 
       </div>
@@ -547,16 +541,16 @@
       <div class="code-window-body">
         <pre><span class="tok-comment">---</span>
 <span class="tok-key">project</span>: <span class="tok-string">"Q1 2026 Release"</span>
-<span class="tok-key">team</span>: <span class="tok-string">"Engineering"</span>
 <span class="tok-comment">---</span>
 
 <span class="tok-heading">## As a user, I want to log in so that</span>
 <span class="tok-heading">## I can access my account</span>
 
 <span class="tok-comment">```yaml</span>
-<span class="tok-key">linear_id</span>:
-<span class="tok-key">linear_url</span>:
-<span class="tok-key">priority</span>: <span class="tok-number">2</span>
+<span class="tok-key">plane_id</span>:
+<span class="tok-key">plane_identifier</span>:
+<span class="tok-key">plane_url</span>:
+<span class="tok-key">priority</span>: <span class="tok-string">high</span>
 <span class="tok-key">labels</span>: <span class="tok-bracket">[</span><span class="tok-string">Feature</span>, <span class="tok-string">Auth</span><span class="tok-bracket">]</span>
 <span class="tok-key">estimate</span>: <span class="tok-number">3</span>
 <span class="tok-key">assignee</span>: <span class="tok-string">jane@company.com</span>
@@ -591,28 +585,28 @@ email and password.
       <span class="section-label">Quick start</span>
       <h2 class="section-heading">Three commands to your first import</h2>
       <p class="section-sub">
-        Get from zero to a fully populated Linear board in under five minutes.
+        Get from zero to a fully populated Plane board in under five minutes.
         No configuration file needed for a basic setup — just your API key.
       </p>
 
       <div class="quickstart-tips">
         <div class="tip">
-          <strong>Linear API key</strong>
-          Generate a personal API key at
-          <code>linear.app/settings/api</code>.
-          Set it as <code>LINEAR_API_KEY</code> in your environment or
-          pass it with the <code>--token</code> flag.
+          <strong>Plane credentials</strong>
+          Generate a personal access token in Plane under
+          <code>Profile Settings &rarr; Personal Access Tokens</code>.
+          Put <code>PLANE_API_KEY</code> and <code>PLANE_WORKSPACE_SLUG</code>
+          in a gitignored <code>.env</code> file — never commit them.
         </div>
         <div class="tip">
           <strong>Binary users</strong>
           Download the binary for your platform from
-          <code>github.com/stackingturtles/linearstories/releases</code>
+          <code>github.com/michaelnowotny/planestories/releases</code>
           and place it on your PATH. The commands are identical.
         </div>
         <div class="tip">
           <strong>Dry run first</strong>
           Add the <code>--dry-run</code> flag to any import command to
-          preview what would be created in Linear without making any changes.
+          validate parsing without making any API calls.
         </div>
       </div>
     </div>
@@ -629,56 +623,58 @@ email and password.
           <span class="t-comment"># 1. Install globally (or use bunx/npx without installing)</span>
         </span>
         <span class="t-line">
-          <span class="t-prompt">$ </span><span class="t-cmd">npm install -g linearstories</span>
+          <span class="t-prompt">$ </span><span class="t-cmd">npm install -g planestories</span>
         </span>
-        <span class="t-line t-out">+ linearstories@1.1.0</span>
+        <span class="t-line t-out">+ planestories@0.1.0</span>
         <br />
 
         <span class="t-line">
-          <span class="t-comment"># 2. Set your Linear API key</span>
+          <span class="t-comment"># 2. Set your Plane credentials (.env, gitignored)</span>
         </span>
         <span class="t-line">
-          <span class="t-prompt">$ </span><span class="t-cmd">export LINEAR_API_KEY=lin_api_xxxx</span>
+          <span class="t-prompt">$ </span><span class="t-cmd">export PLANE_API_KEY=plane_api_xxxx</span>
+        </span>
+        <span class="t-line">
+          <span class="t-prompt">$ </span><span class="t-cmd">export PLANE_WORKSPACE_SLUG=your-workspace</span>
         </span>
         <br />
 
         <span class="t-line">
-          <span class="t-comment"># 3. Create a stories file (or use your own)</span>
+          <span class="t-comment"># 3. Start from the bundled template (or use your own)</span>
         </span>
         <span class="t-line">
-          <span class="t-prompt">$ </span><span class="t-cmd">linearstories init stories.md</span>
+          <span class="t-prompt">$ </span><span class="t-cmd">cp templates/user-story.md stories.md</span>
         </span>
-        <span class="t-line t-out">Created stories.md with example template</span>
         <br />
 
         <span class="t-line">
-          <span class="t-comment"># 4. Import into Linear</span>
+          <span class="t-comment"># 4. Import into Plane</span>
         </span>
         <span class="t-line">
-          <span class="t-prompt">$ </span><span class="t-cmd">linearstories import stories.md</span>
+          <span class="t-prompt">$ </span><span class="t-cmd">planestories import stories.md</span>
         </span>
         <span class="t-line t-out">Parsing stories.md...</span>
         <span class="t-line t-out">Found 3 user stories</span>
         <span class="t-line t-out">Importing to project "Q1 2026 Release"...</span>
-        <span class="t-line t-success">Done. 3 issues created in Linear.</span>
+        <span class="t-line t-success">Done. 3 work items created in Plane.</span>
         <br />
 
         <span class="t-line">
           <span class="t-comment"># Export existing issues back to Markdown</span>
         </span>
         <span class="t-line">
-          <span class="t-prompt">$ </span><span class="t-cmd">linearstories export --project "Q1 2026 Release"</span>
+          <span class="t-prompt">$ </span><span class="t-cmd">planestories export --project "Q1 2026 Release"</span>
         </span>
-        <span class="t-line t-success">Exported 3 issues to q1-2026-release.md</span>
+        <span class="t-line t-success">Exported 3 work items to q1-2026-release.md</span>
         <br />
 
         <span class="t-line">
           <span class="t-comment"># Multi-org: import using a named context</span>
         </span>
         <span class="t-line">
-          <span class="t-prompt">$ </span><span class="t-cmd">linearstories import --context orgB stories.md</span>
+          <span class="t-prompt">$ </span><span class="t-cmd">planestories import --context orgB stories.md</span>
         </span>
-        <span class="t-line t-success">Done. 3 issues created in Linear (orgB).</span>
+        <span class="t-line t-success">Done. 3 work items created in Plane (orgB).</span>
       </div>
     </div>
 
@@ -701,21 +697,21 @@ email and password.
             <path d="M4 6h16M4 10h10M4 14h12M4 18h8" stroke="#fff" stroke-width="2.5" stroke-linecap="round" fill="none"/>
           </svg>
         </span>
-        linearstories
+        planestories
       </a>
-      <span class="footer-tagline">Clear acceptance criteria for every Linear issue.</span>
+      <span class="footer-tagline">Clear acceptance criteria for every Plane issue.</span>
     </div>
 
     <ul class="footer-links">
-      <li><a href="https://github.com/stackingturtles/linearstories" target="_blank" rel="noopener">GitHub</a></li>
-      <li><a href="https://github.com/stackingturtles/linearstories/releases" target="_blank" rel="noopener">Releases</a></li>
-      <li><a href="https://github.com/stackingturtles/linearstories/issues" target="_blank" rel="noopener">Issues</a></li>
-      <li><a href="https://github.com/stackingturtles/linearstories/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
+      <li><a href="https://github.com/michaelnowotny/planestories" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/michaelnowotny/planestories/releases" target="_blank" rel="noopener">Releases</a></li>
+      <li><a href="https://github.com/michaelnowotny/planestories/issues" target="_blank" rel="noopener">Issues</a></li>
+      <li><a href="https://github.com/michaelnowotny/planestories/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
     </ul>
 
     <div class="footer-meta">
-      <div>&copy; Stacking Turtles 2026</div>
-      <div>Released under the MIT License.</div>
+      <div>Fork of <a href="https://github.com/stackingturtles/linearstories" target="_blank" rel="noopener">linearstories</a> by Stacking Turtles Ltd.</div>
+      <div>&copy; 2026 &middot; Released under the MIT License.</div>
     </div>
 
   </div>

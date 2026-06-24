@@ -5,8 +5,9 @@ import type { FileFrontmatter, UserStory } from "../../../src/types.ts";
 function makeStory(overrides: Partial<UserStory> = {}): UserStory {
 	return {
 		title: "As a user, I want to log in so that I can access my account",
-		linearId: null,
-		linearUrl: null,
+		planeId: null,
+		planeIdentifier: null,
+		planeUrl: null,
 		priority: null,
 		labels: [],
 		estimate: null,
@@ -14,19 +15,14 @@ function makeStory(overrides: Partial<UserStory> = {}): UserStory {
 		status: null,
 		body: "User should be able to log in.\n\n### Acceptance Criteria\n\n- [ ] Login works",
 		project: null,
-		team: null,
 		...overrides,
 	};
 }
 
 describe("serializeStories", () => {
-	// ------------------------------------------------------------------
-	// Serialize single UserStory to markdown
-	// ------------------------------------------------------------------
-
 	test("serializes single UserStory to markdown", () => {
 		const story = makeStory({
-			priority: 2,
+			priority: "high",
 			labels: ["Feature", "Auth"],
 			estimate: 3,
 			assignee: "jane@company.com",
@@ -37,7 +33,7 @@ describe("serializeStories", () => {
 
 		expect(result).toContain("## As a user, I want to log in so that I can access my account");
 		expect(result).toContain("```yaml");
-		expect(result).toContain("priority: 2");
+		expect(result).toContain("priority: high");
 		expect(result).toContain("labels: [Feature, Auth]");
 		expect(result).toContain("estimate: 3");
 		expect(result).toContain("assignee: jane@company.com");
@@ -47,20 +43,13 @@ describe("serializeStories", () => {
 		expect(result).toContain("### Acceptance Criteria");
 	});
 
-	// ------------------------------------------------------------------
-	// Serialize array of UserStory[] with file frontmatter
-	// ------------------------------------------------------------------
-
 	test("serializes array of UserStory[] with file frontmatter", () => {
-		const frontmatter: FileFrontmatter = {
-			project: "Q1 2026 Release",
-			team: "Engineering",
-		};
+		const frontmatter: FileFrontmatter = { project: "Q1 2026 Release" };
 		const stories = [
-			makeStory({ priority: 2 }),
+			makeStory({ priority: "high" }),
 			makeStory({
 				title: "As a user, I want to reset my password",
-				priority: 3,
+				priority: "medium",
 				body: "Password reset flow.\n\n### Acceptance Criteria\n\n- [ ] Reset works",
 			}),
 		];
@@ -70,7 +59,6 @@ describe("serializeStories", () => {
 		// Frontmatter
 		expect(result).toMatch(/^---\n/);
 		expect(result).toContain('project: "Q1 2026 Release"');
-		expect(result).toContain('team: "Engineering"');
 		expect(result).toContain("---\n");
 
 		// Both stories present
@@ -78,19 +66,15 @@ describe("serializeStories", () => {
 		expect(result).toContain("## As a user, I want to reset my password");
 	});
 
-	// ------------------------------------------------------------------
-	// Omit null/empty optional fields from YAML blocks
-	// ------------------------------------------------------------------
-
 	test("omits null/empty optional fields from YAML blocks", () => {
 		const story = makeStory({
-			priority: 2,
+			priority: "high",
 			// labels is empty [], assignee is null, status is null, estimate is null
 		});
 
 		const result = serializeStories([story]);
 
-		expect(result).toContain("priority: 2");
+		expect(result).toContain("priority: high");
 		expect(result).not.toContain("assignee:");
 		expect(result).not.toContain("status:");
 		expect(result).not.toContain("estimate:");
@@ -98,34 +82,25 @@ describe("serializeStories", () => {
 		expect(result).not.toMatch(/^labels:/m);
 	});
 
-	// ------------------------------------------------------------------
-	// Include linear_id and linear_url when present
-	// ------------------------------------------------------------------
-
-	test("includes linear_id and linear_url when present", () => {
+	test("includes plane ids when present", () => {
 		const story = makeStory({
-			linearId: "ENG-42",
-			linearUrl: "https://linear.app/myorg/issue/ENG-42",
-			priority: 2,
+			planeId: "11111111-1111-4111-8111-111111111111",
+			planeIdentifier: "ENG-42",
+			planeUrl: "https://app.plane.so/ws/projects/p/issues/11111111-1111-4111-8111-111111111111",
+			priority: "high",
 		});
 
 		const result = serializeStories([story]);
 
-		expect(result).toContain("linear_id: ENG-42");
-		expect(result).toContain("linear_url: https://linear.app/myorg/issue/ENG-42");
+		expect(result).toContain("plane_id: 11111111-1111-4111-8111-111111111111");
+		expect(result).toContain("plane_identifier: ENG-42");
+		expect(result).toContain("plane_url: https://app.plane.so/ws/projects/p/issues/");
 	});
 
-	// ------------------------------------------------------------------
-	// Produce valid markdown matching import template format
-	// ------------------------------------------------------------------
-
 	test("produces valid markdown that can be round-tripped through the parser", () => {
-		const frontmatter: FileFrontmatter = {
-			project: "Q1 2026 Release",
-			team: "Engineering",
-		};
+		const frontmatter: FileFrontmatter = { project: "Q1 2026 Release" };
 		const story = makeStory({
-			priority: 2,
+			priority: "high",
 			labels: ["Feature", "Auth"],
 			estimate: 3,
 			assignee: "jane@company.com",
@@ -135,20 +110,12 @@ describe("serializeStories", () => {
 		const result = serializeStories([story], frontmatter);
 
 		// Structural checks
-		// Starts with frontmatter
 		expect(result).toMatch(/^---\n/);
-		// Has H2 heading
 		expect(result).toContain("\n## ");
-		// Has fenced YAML block
 		expect(result).toContain("```yaml\n");
 		expect(result).toContain("\n```\n");
-		// Ends with newline
 		expect(result.endsWith("\n")).toBe(true);
 	});
-
-	// ------------------------------------------------------------------
-	// Handle story with no metadata (no YAML block if all metadata null/empty)
-	// ------------------------------------------------------------------
 
 	test("handles story with no metadata - no YAML block emitted", () => {
 		const story = makeStory();

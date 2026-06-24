@@ -12,10 +12,10 @@ export class ParseError extends Error {
 	}
 }
 
-export class LinearApiError extends Error {
+export class PlaneApiError extends Error {
 	constructor(message: string) {
 		super(message);
-		this.name = "LinearApiError";
+		this.name = "PlaneApiError";
 	}
 }
 

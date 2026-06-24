@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ConfigError, LinearApiError, ParseError, ResolverError } from "../../src/errors.ts";
+import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../src/errors.ts";
 import type { UserStory } from "../../src/types.ts";
 
 describe("smoke test", () => {
@@ -10,8 +10,9 @@ describe("smoke test", () => {
 	test("types are importable", () => {
 		const story: UserStory = {
 			title: "Test story",
-			linearId: null,
-			linearUrl: null,
+			planeId: null,
+			planeIdentifier: null,
+			planeUrl: null,
 			priority: null,
 			labels: [],
 			estimate: null,
@@ -19,7 +20,6 @@ describe("smoke test", () => {
 			status: null,
 			body: "Test body",
 			project: null,
-			team: null,
 		};
 		expect(story.title).toBe("Test story");
 	});
@@ -35,9 +35,9 @@ describe("smoke test", () => {
 		expect(parseErr).toBeInstanceOf(ParseError);
 		expect(parseErr.name).toBe("ParseError");
 
-		const apiErr = new LinearApiError("api failed");
-		expect(apiErr).toBeInstanceOf(LinearApiError);
-		expect(apiErr.name).toBe("LinearApiError");
+		const apiErr = new PlaneApiError("api failed");
+		expect(apiErr).toBeInstanceOf(PlaneApiError);
+		expect(apiErr.name).toBe("PlaneApiError");
 
 		const resolverErr = new ResolverError("not found");
 		expect(resolverErr).toBeInstanceOf(ResolverError);

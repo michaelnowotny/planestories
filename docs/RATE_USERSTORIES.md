@@ -1,10 +1,10 @@
 # `/rate-userstories` — Acceptance Criteria Quality Evaluator
 
-A Claude Code skill that evaluates user stories in a markdown file, grading each story's acceptance criteria on verifiability and quality, detecting contradictions within and across stories, and producing reviewable replacement markdown in the canonical `linearstories` format.
+A Claude Code skill that evaluates user stories in a markdown file, grading each story's acceptance criteria on verifiability and quality, detecting contradictions within and across stories, and producing reviewable replacement markdown in the canonical `planestories` format.
 
 ## Usage
 
-In any Claude Code session within a project that has linearstories installed:
+In any Claude Code session within a project that has planestories installed:
 
 ```
 /rate-userstories <path-to-markdown-file>
@@ -25,12 +25,12 @@ In any Claude Code session within a project that has linearstories installed:
 
 ## What it does
 
-The skill reads a markdown file in the [linearstories format](./USER_STORY_FORMAT.md) and produces a structured quality report for every user story in the file.
+The skill reads a markdown file in the [planestories format](./USER_STORY_FORMAT.md) and produces a structured quality report for every user story in the file.
 
 It is designed for agentic coding workflows, so it does more than assign a score:
 
 - Parses the entire file first, rather than judging stories in isolation
-- Checks that each story actually follows the expected `linearstories` structure
+- Checks that each story actually follows the expected `planestories` structure
 - Scores each story on clarity and verifiability
 - Detects contradictions within a story and across stories in the same file
 - Emits replacement markdown blocks that a human can review and then copy back into the source document
@@ -129,13 +129,13 @@ The report is structured as:
 
 1. **Summary table** — Every story with its score, pass/fail status, and whether it failed due to hard contradiction, tension (warning only), structural issue, or score
 2. **Contradictions and tensions** — A dedicated section listing every hard contradiction and tension found, with severity level, affected stories, quoted conflicting statements, and why they conflict. For hard contradictions, the normalization choice (which interpretation the skill picked and which it discarded). For tensions, the risk if both stories are implemented as-is.
-3. **Detailed breakdown with inline replacement markdown** — Every failed story gets per-dimension scores, flagged criteria with rewrites, contradiction notes when applicable, suggested additions, and immediately after the breakdown, a full replacement markdown block in the canonical `linearstories` format. Placing the replacement inline means the reader sees the diagnosis and fix together rather than cross-referencing a separate section.
+3. **Detailed breakdown with inline replacement markdown** — Every failed story gets per-dimension scores, flagged criteria with rewrites, contradiction notes when applicable, suggested additions, and immediately after the breakdown, a full replacement markdown block in the canonical `planestories` format. Placing the replacement inline means the reader sees the diagnosis and fix together rather than cross-referencing a separate section.
 4. **Style guide recommendation** — Included only when UI/visual anti-patterns are detected
 5. **Passing stories** — Brief listing of stories that passed with one-line notes
 
 ## Installation
 
-The skill is a project-local Claude Code command. It is included automatically when you clone the linearstories repository — no additional installation is needed.
+The skill is a project-local Claude Code command. It is included automatically when you clone the planestories repository — no additional installation is needed.
 
 The skill file lives at `.claude/commands/rate-userstories.md`.
 
@@ -145,10 +145,10 @@ To add this skill to any project, copy the skill file:
 
 ```bash
 mkdir -p .claude/commands
-cp path/to/linearstories/.claude/commands/rate-userstories.md .claude/commands/
+cp path/to/planestories/.claude/commands/rate-userstories.md .claude/commands/
 ```
 
-The skill works with any markdown file that follows the linearstories format (H2 story headings, `### Acceptance Criteria` sections with checkbox lists).
+The skill works with any markdown file that follows the planestories format (H2 story headings, `### Acceptance Criteria` sections with checkbox lists).
 
 ## Replacement markdown requirements
 

@@ -1,14 +1,14 @@
 ---
 project: "Q1 2026 Release"
-team: "Engineering"
 ---
 
 ## As a user, I want to log in so that I can access my account
 
 ```yaml
-linear_id:
-linear_url:
-priority: 2
+plane_id:
+plane_identifier:
+plane_url:
+priority: high
 labels: [Feature, Auth]
 estimate: 3
 assignee: jane@company.com

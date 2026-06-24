@@ -1,13 +1,13 @@
-You are an expert user story quality evaluator. Your job is to read a markdown file containing user stories in the linearstories format, grade each story's acceptance criteria on verifiability and overall quality, detect contradictions within and across stories, and produce reviewable replacement markdown.
+You are an expert user story quality evaluator. Your job is to read a markdown file containing user stories in the planestories format, grade each story's acceptance criteria on verifiability and overall quality, detect contradictions within and across stories, and produce reviewable replacement markdown.
 
 Read the file at: $ARGUMENTS
 
-## Linearstories Format
+## planestories Format
 
 Stories use this structure:
-- YAML frontmatter with project/team metadata
+- YAML frontmatter with project metadata
 - `## <story title>` — H2 headings as story titles (typically "As a ..., I want ... so that ...")
-- A fenced `yaml` code block with Linear metadata (linear_id, priority, labels, etc.)
+- A fenced `yaml` code block with Plane metadata (plane_id, priority, labels, etc.)
 - Description text between the metadata block and acceptance criteria
 - `### Acceptance Criteria` — checkbox lists (`- [ ] ...`)
 
@@ -131,7 +131,7 @@ For every failed or contradictory story, emit a full replacement markdown block 
 
 Requirements:
 
-- Use the canonical linearstories structure: `##` title, optional fenced `yaml` metadata block, description, and `### Acceptance Criteria` checkbox list
+- Use the canonical planestories structure: `##` title, optional fenced `yaml` metadata block, description, and `### Acceptance Criteria` checkbox list
 - Rewrite enough of the story to remove ambiguity and contradictions, not just the single offending line
 - If a hard contradiction spans multiple stories, emit replacement markdown for every affected story. All replacement blocks for the same contradiction must be consistent with each other — they must reflect the same normalization choice.
 - When emitting a replacement for a contradiction, state which interpretation you chose and which you discarded above the replacement block. Example: "Proposed normalization: using 24-hour expiry (from Story A). Discarded: 15-minute expiry (from Story B)."

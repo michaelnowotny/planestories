@@ -1,17 +1,17 @@
-# linearstories
+# planestories
 
-A CLI tool that bridges markdown-based user stories and Linear issues, enforcing user story and acceptance criteria discipline for AI agent-driven development.
+A CLI tool that bridges markdown-based user stories and [Plane](https://plane.so) work items, enforcing user story and acceptance-criteria discipline for AI agent-driven development.
+
+> **Attribution.** planestories is a fork of [**linearstories**](https://github.com/stackingturtles/linearstories) by **Ijonas Kisselbach / Stacking Turtles Ltd.**, adapted to target Plane instead of Linear. The original is MIT-licensed; that license is preserved in full (see [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE)). Huge thanks to the original author.
 
 ## Why structured acceptance criteria matter for AI agents
 
-AI coding agents -- Claude Code, Cursor, Copilot Workspace, and others -- perform dramatically better when given precise, testable acceptance criteria. Vague tickets like "improve the login flow" lead to ambiguous implementations and wasted iteration cycles. Structured user stories with explicit acceptance criteria give agents the deterministic guardrails they need:
+AI coding agents — Claude Code, Cursor, Copilot Workspace, and others — perform dramatically better when given precise, testable acceptance criteria. Vague tickets like "improve the login flow" lead to ambiguous implementations and wasted iteration cycles. Structured user stories with explicit acceptance criteria give agents the deterministic guardrails they need:
 
-- **Clear scope boundaries.** Each acceptance criterion is a discrete, verifiable condition. Agents can work through them one at a time and know when they are done.
-- **Testable by default.** Criteria written as checkboxes (`- [ ] ...`) map directly to test cases. Agents can generate tests that match the specification.
-- **Markdown as the source of truth.** Stories live in your repository alongside the code. Agents can read them directly without API access to your project management tool.
-- **Two-way sync with Linear.** Engineering managers keep their board current; agents keep their specs current. Neither workflow is disrupted.
-
-`linearstories` closes the gap between how AI agents consume work (structured markdown files in a repo) and how engineering teams manage work (Linear issues on a board).
+- **Clear scope boundaries.** Each acceptance criterion is a discrete, verifiable condition.
+- **Testable by default.** Criteria written as checkboxes (`- [ ] ...`) map directly to test cases.
+- **Markdown as the source of truth.** Stories live in your repository alongside the code.
+- **Two-way sync with Plane.** Managers keep their board current; agents keep their specs current.
 
 ## Quick start
 
@@ -20,53 +20,59 @@ AI coding agents -- Claude Code, Cursor, Copilot Workspace, and others -- perfor
 Run directly with `bunx` (no install required):
 
 ```bash
-bunx linearstories import stories/*.md
+bunx planestories import stories/*.md
 ```
 
-Or install globally:
+Or install globally / build a binary:
 
 ```bash
-bun install -g linearstories
-```
-
-Alternatively, download a compiled binary for your platform from the [releases page](https://github.com/stackingturtles/linearstories/releases), or build from source:
-
-```bash
+bun install -g planestories
+# or build from source:
 bun install
-bun build src/cli/index.ts --compile --outfile linearstories
+bun build src/cli/index.ts --compile --outfile planestories
 ```
 
-### 2. Create a config file
+### 2. Provide credentials (never commit them)
 
-Create `.linearrc.json` in your project root:
+Credentials live in a **gitignored `.env`** file — never in a committed config. Copy `.env.example` to `.env` and fill in:
+
+```bash
+PLANE_API_KEY=plane_api_xxxxxxxxxxxxxxxxxxxx      # Plane > Profile Settings > Personal Access Tokens
+PLANE_WORKSPACE_SLUG=your-workspace-slug          # the app.plane.so/<slug>/... part of your URL
+# PLANE_BASE_URL=https://api.plane.so             # only override when self-hosting
+```
+
+### 3. Add non-secret defaults (optional)
+
+Create `.planestoriesrc.json` in your project root for **non-secret** defaults. **Do not put `apiKey` here** — it comes from `.env`.
 
 ```json
 {
-  "apiKey": "lin_api_xxxxxxxxxxxxxxxxxxxx",
-  "defaultTeam": "Engineering",
+  "workspaceSlug": "your-workspace-slug",
+  "baseUrl": "https://api.plane.so",
   "defaultProject": "Q1 2026 Release",
   "defaultLabels": ["User Story"]
 }
 ```
 
-Alternatively, set the `LINEAR_API_KEY` environment variable and skip the `apiKey` field.
+`PLANE_API_KEY`, `PLANE_WORKSPACE_SLUG`, and `PLANE_BASE_URL` from the environment always override config-file values.
 
-### 3. Write your first story
+### 4. Write your first story
 
-Create a file called `stories/login.md`:
+Create `stories/login.md` (see [`templates/user-story.md`](./templates/user-story.md)):
 
 ````markdown
 ---
 project: "Q1 2026 Release"
-team: "Engineering"
 ---
 
 ## As a user, I want to log in so that I can access my account
 
 ```yaml
-linear_id:
-linear_url:
-priority: 2
+plane_id:
+plane_identifier:
+plane_url:
+priority: high
 labels: [Feature, Auth]
 estimate: 3
 assignee: jane@company.com
@@ -74,645 +80,96 @@ status: Backlog
 ```
 
 User should be able to log in with their email and password.
-The system should support rate limiting after 5 failed attempts.
 
 ### Acceptance Criteria
 
 - [ ] User can enter email and password on the login page
 - [ ] Invalid credentials show a clear error message
-- [ ] User is redirected to the dashboard on successful login
-- [ ] Account locks after 5 consecutive failed attempts
 ````
 
-### 4. Import to Linear
+### 5. Import
 
 ```bash
-linearstories import stories/login.md
+planestories import stories/*.md            # create/update work items, write ids back
+planestories import stories/*.md --dry-run  # parse + validate only, no API calls
 ```
 
-The CLI creates issues in Linear and writes the `linear_id` and `linear_url` back into your markdown file so that subsequent imports update the existing issues rather than creating duplicates.
+After a successful import, `plane_id` (the work item UUID), `plane_identifier` (e.g. `ENG-42`), and `plane_url` are written back into each story's YAML block.
 
-## User story markdown template
+## How fields map to Plane
 
-Each markdown file can contain one or more user stories. The file structure is:
+| Story field | Plane |
+|---|---|
+| `project` (frontmatter or `--project`) | the work item's **project** (required — Plane has no "team" tier) |
+| `## Heading` | work item name |
+| body markdown | `description_html` (converted to HTML) |
+| `priority` | `urgent` / `high` / `medium` / `low` / `none` (legacy Linear integers `0–4` are also accepted) |
+| `status` | work item **state** (resolved by name within the project) |
+| `labels` | label UUIDs (resolved by name within the project) |
+| `assignee` | member UUID (resolved by email or display name) |
+| `estimate` | story `point` |
+| `plane_id` | work item UUID (used to update) |
+
+### Idempotency
+
+On create, planestories stamps each work item with `external_id` (derived from the story title) and `external_source: "planestories"`. Re-running an import — even before write-back — matches the existing work item by `external_id` and **updates instead of duplicating**.
+
+### Missing labels
+
+By default, labels that don't exist in the project are **skipped with a warning**. Pass `--create-labels` to create them instead.
+
+## Commands
+
+### `import`
 
 ```
-[YAML frontmatter]        -- optional, sets file-level defaults
-[Story 1]                  -- H2 heading + metadata block + body
-[Story 2]                  -- another H2 heading + metadata block + body
-...
+planestories import <files...> [options]
+  -c, --config <path>     Config file path
+  --context <name>        Select a named context from a multi-context config
+  -p, --project <name>    Override the default project
+  --create-labels         Create labels that don't exist instead of skipping
+  --dry-run               Validate parsing without calling Plane
+  --no-write-back         Skip writing Plane ids back into the markdown
 ```
 
-### Frontmatter
+### `export`
 
-Optional YAML frontmatter at the top of the file sets defaults for all stories in that file:
-
-```yaml
----
-project: "Q1 2026 Release"
-team: "Engineering"
----
+```
+planestories export [options]
+  -o, --output <file>     Output file (default ./exported-stories.md)
+  -p, --project <name>    Project to export from (required if no defaultProject)
+  -i, --issues <ids>      Comma-separated work item identifiers (e.g. ENG-8)
+  -s, --status <state>    Filter by status
+  -a, --assignee <email>  Filter by assignee email
 ```
 
-Both fields are optional. They can be overridden per-story or via CLI flags.
+> Export currently writes each work item's plain-text description as the story body; rich formatting is not round-tripped.
 
-### Story heading
+## Self-hosting
 
-Each story starts with an H2 heading (`##`). The heading text becomes the Linear issue title:
+planestories works against Plane Cloud by default (`https://api.plane.so`). To target a self-hosted instance, set `PLANE_BASE_URL` (env) or `baseUrl` (config) to your instance URL — no code changes required.
 
-```markdown
-## As a user, I want to reset my password so that I can regain access
-```
+## Multiple workspaces (contexts)
 
-You are free to use any title format, but the "As a [role], I want [goal] so that [benefit]" pattern is recommended for clarity.
-
-### Metadata block
-
-Immediately after the heading, include a fenced YAML code block with story metadata:
-
-````markdown
-```yaml
-linear_id:
-linear_url:
-priority: 2
-labels: [Feature, Auth]
-estimate: 3
-assignee: jane@company.com
-status: Backlog
-```
-````
-
-All fields are optional. Here is what each field does:
-
-| Field        | Type       | Description                                                                 |
-|------------- |----------- |---------------------------------------------------------------------------- |
-| `linear_id`  | string     | Linear issue identifier (e.g., `ENG-42`). Populated automatically on import. |
-| `linear_url` | string     | Linear issue URL. Populated automatically on import.                        |
-| `priority`   | number     | Priority level: `0` = None, `1` = Urgent, `2` = High, `3` = Normal, `4` = Low |
-| `labels`     | string[]   | Label names to apply. Merged with `defaultLabels` from config.              |
-| `estimate`   | number     | Story point estimate.                                                       |
-| `assignee`   | string     | Assignee email address or display name.                                     |
-| `status`     | string     | Workflow state name: `Backlog`, `Todo`, `In Progress`, `Done`, etc.         |
-
-Leave `linear_id` and `linear_url` empty for new stories. The import command fills them in automatically.
-
-### Story body
-
-Everything after the metadata block and before the next H2 heading is the story body. It becomes the Linear issue description. Use standard markdown -- paragraphs, lists, code blocks, and so on.
-
-### Acceptance criteria
-
-Include acceptance criteria as a checklist under an H3 heading:
-
-```markdown
-### Acceptance Criteria
-
-- [ ] User can request a password reset from the login page
-- [ ] Reset email is sent within 60 seconds
-- [ ] Reset link expires after 24 hours
-```
-
-This section is part of the story body and is included in the Linear issue description.
-
-### Complete annotated example
-
-A file with two stories:
-
-````markdown
----
-project: "Q1 2026 Release"
-team: "Engineering"
----
-
-## As a user, I want to log in so that I can access my account
-
-```yaml
-linear_id:               # left empty for new stories
-linear_url:              # left empty for new stories
-priority: 2              # High priority
-labels: [Feature, Auth]  # merged with defaultLabels from config
-estimate: 3              # 3 story points
-assignee: jane@company.com
-status: Backlog
-```
-
-User should be able to log in with their email and password.
-The system should support rate limiting after 5 failed attempts.
-
-### Acceptance Criteria
-
-- [ ] User can enter email and password on the login page
-- [ ] Invalid credentials show a clear error message
-- [ ] User is redirected to the dashboard on successful login
-- [ ] Account locks after 5 consecutive failed attempts
-
-## As a user, I want to reset my password so that I can regain access
-
-```yaml
-linear_id:
-linear_url:
-priority: 3              # Normal priority
-labels: [Feature, Auth]
-estimate: 2
-```
-
-User should be able to reset their password via email link.
-
-### Acceptance Criteria
-
-- [ ] User can request a password reset from the login page
-- [ ] Reset email is sent within 60 seconds
-- [ ] Reset link expires after 24 hours
-````
-
-## Configuration
-
-### Config file format
-
-The config file is a JSON object with the following fields:
-
-```json
-{
-  "apiKey": "lin_api_xxxxxxxxxxxxxxxxxxxx",
-  "defaultTeam": "Engineering",
-  "defaultProject": "Q1 2026 Release",
-  "defaultLabels": ["User Story"]
-}
-```
-
-| Field            | Type     | Required | Description                                              |
-|----------------- |--------- |--------- |--------------------------------------------------------- |
-| `apiKey`         | string   | Yes*     | Linear API key. Can also be set via `LINEAR_API_KEY` env var. |
-| `defaultTeam`    | string   | No       | Default team name for stories that do not specify one.   |
-| `defaultProject` | string   | No       | Default project name for stories that do not specify one.|
-| `defaultLabels`  | string[] | No       | Labels applied to every imported story. Merged with per-story labels. |
-
-*Required either in the config file or as the `LINEAR_API_KEY` environment variable.
-
-### Config discovery order
-
-The CLI looks for configuration in this order, using the first one found:
-
-1. **Explicit path** -- the `--config` flag: `linearstories import --config ./my-config.json stories/*.md`
-2. **Project-level** -- `.linearrc.json` in the current working directory
-3. **User-level** -- `~/.config/linearstories/config.json`
-
-If no config file is found, the CLI still works as long as `LINEAR_API_KEY` is set in the environment.
-
-### Environment variable
-
-The `LINEAR_API_KEY` environment variable always takes precedence over the `apiKey` field in any config file. This is useful for CI pipelines and shared environments where you do not want API keys in committed files:
-
-```bash
-export LINEAR_API_KEY=lin_api_xxxxxxxxxxxxxxxxxxxx
-linearstories import stories/*.md
-```
-
-### Multi-context config
-
-If you work across multiple Linear organizations or environments, you can define named contexts in a single config file:
+A config file may define named contexts; select one with `--context <name>`:
 
 ```json
 {
   "contexts": [
-    {
-      "name": "orgA",
-      "apiKey": "lin_api_orgA_xxxxxxxxxxxx",
-      "defaultTeam": "Engineering",
-      "defaultProject": "Q1 2026 Release",
-      "defaultLabels": ["User Story"]
-    },
-    {
-      "name": "orgB",
-      "apiKey": "lin_api_orgB_xxxxxxxxxxxx",
-      "defaultTeam": "Design",
-      "defaultProject": "Brand Refresh",
-      "defaultLabels": ["Design Task"]
-    }
+    { "name": "orgA", "workspaceSlug": "org-a", "defaultProject": "Q1 Release" },
+    { "name": "orgB", "workspaceSlug": "org-b", "defaultProject": "Brand Refresh" }
   ]
 }
 ```
 
-Select a context with the `--context` flag:
-
-```bash
-# Use orgA context
-linearstories import --context orgA stories/*.md
-
-# Use orgB context
-linearstories export --context orgB -o design-stories.md
-```
-
-Each context entry supports the same fields as the flat config (`apiKey`, `defaultTeam`, `defaultProject`, `defaultLabels`) plus a required `name`. Only `name` is required per entry; other fields are optional.
-
-If a multi-context config is detected and no `--context` flag is provided, the CLI prints the available context names and exits with an error.
-
-The `LINEAR_API_KEY` environment variable still takes precedence over the selected context's `apiKey`.
-
-The flat config format continues to work unchanged -- no migration is needed unless you want multi-context support.
-
-Alternatively, you can use separate config files and pass the appropriate one with `--config`:
-
-```bash
-linearstories import --config ~/.config/linearstories/org-a.json stories/*.md
-```
-
-## CLI reference
-
-### `linearstories import`
-
-Import user stories from markdown files into Linear. Creates new issues or updates existing ones based on whether `linear_id` is present in the metadata block.
-
-```
-linearstories import <files...> [options]
-```
-
-**Arguments:**
-
-| Argument      | Description                                      |
-|-------------- |------------------------------------------------- |
-| `<files...>`  | One or more markdown file paths or glob patterns |
-
-**Options:**
-
-| Flag                       | Description                                                           |
-|--------------------------- |---------------------------------------------------------------------- |
-| `-c, --config <path>`      | Path to a config file                                                |
-| `--context <name>`         | Select a named context from a multi-context config                   |
-| `-t, --team <name>`        | Override the default team                                            |
-| `-p, --project <name>`     | Override the default project                                         |
-| `--dry-run`                | Validate and parse without making any Linear API calls               |
-| `--no-write-back`          | Skip writing `linear_id` and `linear_url` back to the markdown files |
-
-**Examples:**
-
-```bash
-# Import a single file
-linearstories import stories/login.md
-
-# Import all markdown files in a directory
-linearstories import stories/*.md
-
-# Import with team override
-linearstories import -t "Platform" stories/infra/*.md
-
-# Dry run to validate without creating issues
-linearstories import --dry-run stories/*.md
-
-# Import without modifying the source files
-linearstories import --no-write-back stories/*.md
-
-# Import with an explicit config file
-linearstories import -c ./team-config.json stories/*.md
-```
-
-### `linearstories export`
-
-Export Linear issues to a markdown file in the user story format. The exported file can be edited and re-imported.
-
-```
-linearstories export [options]
-```
-
-**Options:**
-
-| Flag                       | Description                                              | Default                 |
-|--------------------------- |--------------------------------------------------------- |------------------------ |
-| `-c, --config <path>`      | Path to a config file                                   |                         |
-| `--context <name>`         | Select a named context from a multi-context config      |                         |
-| `-t, --team <name>`        | Override the default team                               |                         |
-| `-o, --output <file>`      | Output file path                                        | `./exported-stories.md` |
-| `-p, --project <name>`     | Filter by project name                                  |                         |
-| `-i, --issues <ids>`       | Comma-separated issue identifiers (e.g., `ENG-1,ENG-2`) |                         |
-| `-s, --status <state>`     | Filter by workflow status                               |                         |
-| `-a, --assignee <email>`   | Filter by assignee email                                |                         |
-| `--creator <email>`        | Filter by creator email                                 |                         |
-
-**Examples:**
-
-```bash
-# Export all issues from the default team
-linearstories export
-
-# Export to a specific file
-linearstories export -o backlog.md
-
-# Export only issues in a specific project
-linearstories export -t "Engineering" -p "Q1 2026 Release"
-
-# Export specific issues by ID
-linearstories export -i ENG-1,ENG-2,ENG-3
-
-# Export issues with a specific status
-linearstories export -s "In Progress"
-
-# Export issues assigned to a specific person
-linearstories export -a jane@company.com
-
-# Export issues created by a specific person
-linearstories export --creator alex@company.com
-
-# Combine filters
-linearstories export -t "Engineering" -p "Q1 2026 Release" -s "Todo" -o sprint-todo.md
-```
-
-## Import workflow
-
-The import command is the primary workflow. Here is what happens step by step.
-
-### Step 1: Write stories in markdown
-
-Create a markdown file with one or more stories. Leave `linear_id` and `linear_url` empty:
-
-````markdown
----
-project: "Q1 2026 Release"
-team: "Engineering"
----
-
-## As a user, I want to log in so that I can access my account
-
-```yaml
-linear_id:
-linear_url:
-priority: 2
-labels: [Feature, Auth]
-estimate: 3
-assignee: jane@company.com
-status: Backlog
-```
-
-User should be able to log in with their email and password.
-
-### Acceptance Criteria
-
-- [ ] User can enter email and password on the login page
-- [ ] Invalid credentials show a clear error message
-- [ ] User is redirected to the dashboard on successful login
-````
-
-### Step 2: Run the import
-
-```bash
-linearstories import stories/login.md
-```
-
-The CLI:
-1. Parses the markdown file and extracts stories.
-2. Resolves team, project, label, assignee, and status names to Linear UUIDs.
-3. Creates a new Linear issue for each story (or updates if `linear_id` is already set).
-4. Writes the `linear_id` and `linear_url` back into the markdown file.
-
-### Step 3: Inspect the write-back
-
-After import, the markdown file is updated in place. The **before** and **after** difference is in the metadata block:
-
-**Before:**
-
-```yaml
-linear_id:
-linear_url:
-```
-
-**After:**
-
-```yaml
-linear_id: ENG-42
-linear_url: https://linear.app/myorg/issue/ENG-42
-```
-
-The full file now looks like this:
-
-````markdown
----
-project: "Q1 2026 Release"
-team: "Engineering"
----
-
-## As a user, I want to log in so that I can access my account
-
-```yaml
-linear_id: ENG-42
-linear_url: https://linear.app/myorg/issue/ENG-42
-priority: 2
-labels: [Feature, Auth]
-estimate: 3
-assignee: jane@company.com
-status: Backlog
-```
-
-User should be able to log in with their email and password.
-
-### Acceptance Criteria
-
-- [ ] User can enter email and password on the login page
-- [ ] Invalid credentials show a clear error message
-- [ ] User is redirected to the dashboard on successful login
-````
-
-Subsequent imports of this file will **update** the existing issue `ENG-42` instead of creating a duplicate.
-
-### Step 4: Edit and re-import
-
-Make changes to the story -- update acceptance criteria, change the priority, reassign -- and re-run the import. The existing Linear issue is updated in place:
-
-```bash
-# Edit the file, then re-import
-linearstories import stories/login.md
-```
-
-### Create vs. update logic
-
-| `linear_id` field          | Behavior                     |
-|--------------------------- |----------------------------- |
-| Empty or missing           | Creates a new Linear issue   |
-| Present (e.g., `ENG-42`)  | Updates the existing issue   |
-
-### Label merging
-
-Per-story labels and `defaultLabels` from the config are merged and deduplicated. If your config has `"defaultLabels": ["User Story"]` and a story specifies `labels: [Feature, Auth]`, the resulting issue gets all three labels: `Feature`, `Auth`, and `User Story`.
-
-### Team and project resolution order
-
-For both team and project, the CLI resolves in this order:
-
-1. Value specified in the story metadata block
-2. Value passed via CLI flag (`--team`, `--project`)
-3. Default from config file (`defaultTeam`, `defaultProject`)
-
-## Export workflow
-
-The export command pulls issues from Linear and writes them to a markdown file in the standard user story format.
-
-### Basic export
-
-```bash
-linearstories export -t "Engineering" -o stories/exported.md
-```
-
-This fetches all issues from the Engineering team and writes them to `stories/exported.md`.
-
-### Filtering examples
-
-Export only backlog items for a specific project:
-
-```bash
-linearstories export -t "Engineering" -p "Q1 2026 Release" -s "Backlog" -o backlog.md
-```
-
-Export a handful of specific issues:
-
-```bash
-linearstories export -i ENG-1,ENG-5,ENG-12 -o selected.md
-```
-
-Export everything assigned to one person:
-
-```bash
-linearstories export -a jane@company.com -o janes-stories.md
-```
-
-### Round-trip workflow
-
-Export, edit, and re-import to update issues from markdown:
-
-```bash
-# Pull current state from Linear
-linearstories export -t "Engineering" -p "Q1 2026 Release" -o stories/current.md
-
-# Edit the file: update acceptance criteria, reprioritize, etc.
-
-# Push changes back to Linear
-linearstories import stories/current.md
-```
-
-Because exported stories include `linear_id`, the re-import updates existing issues rather than creating new ones.
-
-## Claude Code skill: `/rate-userstories`
-
-linearstories ships with a built-in Claude Code skill that evaluates the quality of your acceptance criteria. Run it in any Claude Code session:
-
-```
-/rate-userstories stories/q1-2026.md
-```
-
-The skill reads your markdown file and produces a structured report:
-
-- **Scores each story 0-100%** across specificity, testability, completeness, and description quality
-- **Flags anti-patterns** like subjective language ("intuitive", "fast", "looks good") and ambiguous scope ("etc.", "as needed")
-- **Rewrites failing criteria** with concrete, testable alternatives
-- **Recommends a style guide** when UI/visual criteria are unverifiable
-
-Stories scoring below 80% get a detailed breakdown with suggested improvements. See [docs/RATE_USERSTORIES.md](docs/RATE_USERSTORIES.md) for full documentation.
-
-## Building from source
-
-### Prerequisites
-
-- [Bun](https://bun.sh) v1.0 or later
-
-### Install dependencies
+## Development
 
 ```bash
 bun install
-```
-
-### Run in development
-
-```bash
-bun run src/cli/index.ts import stories/*.md
-```
-
-### Run tests
-
-```bash
-bun test
-```
-
-### Lint and format
-
-```bash
-bun run lint
-bun run format
-```
-
-### Build the binary
-
-```bash
-bun build src/cli/index.ts --compile --outfile linearstories
-```
-
-This produces a self-contained `linearstories` executable that does not require Bun at runtime.
-
-## Contributing
-
-### Running the test suite
-
-The project has both unit and integration tests:
-
-```bash
-# Run all tests
-bun test
-
-# Run only unit tests
-bun test tests/unit
-
-# Run only integration tests
-bun test tests/integration
-
-# Run a specific test file
-bun test tests/unit/markdown/parser.test.ts
-```
-
-### TDD expectations
-
-All changes should follow test-driven development:
-
-1. Write a failing test that describes the expected behavior.
-2. Implement the minimal code to make the test pass.
-3. Refactor while keeping tests green.
-
-New features and bug fixes must include tests. The test suite covers parsing, serialization, config loading, Linear API interactions, resolver logic, and end-to-end import/export flows.
-
-### Project structure
-
-```
-src/
-  cli/
-    index.ts              CLI entry point
-    commands/
-      import.ts           Import command registration
-      export.ts           Export command registration
-  config/
-    loader.ts             Config discovery and loading
-    schema.ts             Config validation
-  linear/
-    client.ts             Linear SDK client factory
-    issues.ts             Issue create/update/fetch operations
-    filters.ts            Issue filter construction
-    resolvers.ts          Name-to-UUID resolution (teams, projects, labels, etc.)
-  markdown/
-    parser.ts             Markdown-to-UserStory parsing
-    serializer.ts         UserStory-to-markdown serialization
-    writer.ts             Write-back of linear_id/linear_url into existing files
-  sync/
-    importer.ts           Import orchestration
-    exporter.ts           Export orchestration
-  types.ts                Shared TypeScript interfaces
-  errors.ts               Custom error classes
-templates/
-  user-story.md           Example user story template
-docs/
-  USER_STORY_FORMAT.md    Markdown format reference
-  RATE_USERSTORIES.md     /rate-userstories skill documentation
-.claude/
-  commands/
-    rate-userstories.md   Claude Code skill for AC quality evaluation
-tests/
-  unit/                   Unit tests
-  integration/            Integration tests
+bun test            # run the test suite
+bun run lint        # biome
 ```
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT. See [`LICENSE`](./LICENSE) (original © Stacking Turtles Ltd.) and [`NOTICE`](./NOTICE) for attribution and modification copyright.

@@ -13,14 +13,9 @@ export function serializeStories(stories: UserStory[], frontmatter?: FileFrontma
 	const parts: string[] = [];
 
 	// Emit file-level frontmatter if provided
-	if (frontmatter && (frontmatter.project || frontmatter.team)) {
+	if (frontmatter?.project) {
 		parts.push("---");
-		if (frontmatter.project) {
-			parts.push(`project: "${frontmatter.project}"`);
-		}
-		if (frontmatter.team) {
-			parts.push(`team: "${frontmatter.team}"`);
-		}
+		parts.push(`project: "${frontmatter.project}"`);
 		parts.push("---");
 		parts.push("");
 	}
@@ -60,12 +55,15 @@ export function serializeStories(stories: UserStory[], frontmatter?: FileFrontma
 function buildYamlLines(story: UserStory): string[] {
 	const lines: string[] = [];
 
-	// linear_id and linear_url come first when present
-	if (story.linearId !== null) {
-		lines.push(`linear_id: ${story.linearId}`);
+	// Plane identifiers come first when present
+	if (story.planeId !== null) {
+		lines.push(`plane_id: ${story.planeId}`);
 	}
-	if (story.linearUrl !== null) {
-		lines.push(`linear_url: ${story.linearUrl}`);
+	if (story.planeIdentifier !== null) {
+		lines.push(`plane_identifier: ${story.planeIdentifier}`);
+	}
+	if (story.planeUrl !== null) {
+		lines.push(`plane_url: ${story.planeUrl}`);
 	}
 
 	if (story.priority !== null) {

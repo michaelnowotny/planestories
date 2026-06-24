@@ -1,12 +1,12 @@
 import matter from "gray-matter";
 import { ParseError } from "../errors.ts";
-import type { FileFrontmatter, ParsedFile, UserStory } from "../types.ts";
+import type { FileFrontmatter, ParsedFile, PlanePriority, UserStory } from "../types.ts";
 
 /**
  * Parse a markdown file containing user stories into a structured ParsedFile.
  *
  * Format rules:
- * - File-level YAML frontmatter (---...---) contains project/team defaults
+ * - File-level YAML frontmatter (---...---) contains the project default
  * - H2 headings (## ) separate individual stories
  * - After each H2, an optional fenced YAML block (```yaml ... ```) contains per-story metadata
  * - Everything between the YAML block (or H2 if no YAML) and the next H2/EOF is the story body
@@ -18,9 +18,6 @@ export function parseMarkdownFile(content: string, filePath: string): ParsedFile
 	const frontmatter: FileFrontmatter = {};
 	if (rawFrontmatter.project) {
 		frontmatter.project = String(rawFrontmatter.project);
-	}
-	if (rawFrontmatter.team) {
-		frontmatter.team = String(rawFrontmatter.team);
 	}
 
 	// 2. Split at H2 boundaries
@@ -88,22 +85,23 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 	}
 
 	// Extract metadata fields with proper null handling
-	const linearId = extractStringOrNull(metadata.linear_id);
-	const linearUrl = extractStringOrNull(metadata.linear_url);
-	const priority = extractNumberOrNull(metadata.priority);
+	const planeId = extractStringOrNull(metadata.plane_id);
+	const planeIdentifier = extractStringOrNull(metadata.plane_identifier);
+	const planeUrl = extractStringOrNull(metadata.plane_url);
+	const priority = normalizePriority(metadata.priority);
 	const labels = extractLabels(metadata.labels);
 	const estimate = extractNumberOrNull(metadata.estimate);
 	const assignee = extractStringOrNull(metadata.assignee);
 	const status = extractStringOrNull(metadata.status);
 
-	// Inherit project/team from frontmatter
+	// Inherit project from frontmatter
 	const project = frontmatter.project ?? null;
-	const team = frontmatter.team ?? null;
 
 	return {
 		title,
-		linearId,
-		linearUrl,
+		planeId,
+		planeIdentifier,
+		planeUrl,
 		priority,
 		labels,
 		estimate,
@@ -111,8 +109,44 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 		status,
 		body,
 		project,
-		team,
 	};
+}
+
+const VALID_PRIORITIES: ReadonlySet<string> = new Set(["urgent", "high", "medium", "low", "none"]);
+
+/** Legacy Linear integer priorities → Plane strings (0/None map to unset). */
+const LEGACY_PRIORITY: Record<number, PlanePriority | null> = {
+	0: null,
+	1: "urgent",
+	2: "high",
+	3: "medium",
+	4: "low",
+};
+
+/**
+ * Normalize a priority value to a Plane priority string.
+ * Accepts Plane strings (urgent|high|medium|low|none) case-insensitively, and
+ * legacy Linear integers 0-4 for backward compatibility. "none" and 0 map to
+ * null (unset); Plane defaults a work item to "none" anyway.
+ */
+export function normalizePriority(value: unknown): PlanePriority | null {
+	if (value === undefined || value === null || value === "") {
+		return null;
+	}
+
+	if (typeof value === "number" || /^\d+$/.test(String(value))) {
+		const num = Number(value);
+		return LEGACY_PRIORITY[num] ?? null;
+	}
+
+	const str = String(value).trim().toLowerCase();
+	if (str === "none") {
+		return null;
+	}
+	if (VALID_PRIORITIES.has(str)) {
+		return str as PlanePriority;
+	}
+	return null;
 }
 
 function extractStringOrNull(value: unknown): string | null {
