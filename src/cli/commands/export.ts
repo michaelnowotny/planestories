@@ -36,6 +36,11 @@ export function registerExportCommand(program: Command) {
 		.option("-i, --issues <ids>", "Comma-separated work item identifiers (e.g. BLOOM-8)")
 		.option("-s, --status <state>", "Filter by status")
 		.option("-a, --assignee <email>", "Filter by assignee email")
+		.option(
+			"--external-source [source]",
+			"Only export items stamped with this external_source (default: planestories)",
+		)
+		.option("-l, --label <name>", "Filter by label name")
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
@@ -50,6 +55,11 @@ export function registerExportCommand(program: Command) {
 				if (options.issues) filters.issues = options.issues.split(",").map((s: string) => s.trim());
 				if (options.status) filters.status = options.status;
 				if (options.assignee) filters.assignee = options.assignee;
+				if (options.externalSource) {
+					filters.externalSource =
+						options.externalSource === true ? "planestories" : options.externalSource;
+				}
+				if (options.label) filters.label = options.label;
 
 				const result = await exportStories(client, {
 					config,

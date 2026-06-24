@@ -7,6 +7,10 @@ export interface WorkItemFilterInput {
 	statusName?: string;
 	/** Assignee email to keep (case-insensitive). */
 	assigneeEmail?: string;
+	/** external_source to keep (exact). */
+	externalSource?: string;
+	/** Label name to keep (case-insensitive). */
+	label?: string;
 }
 
 /**
@@ -39,6 +43,15 @@ export function filterWorkItems(
 	if (input.assigneeEmail) {
 		const needle = input.assigneeEmail.toLowerCase();
 		result = result.filter((item) => item.assigneeEmail?.toLowerCase() === needle);
+	}
+
+	if (input.externalSource) {
+		result = result.filter((item) => item.externalSource === input.externalSource);
+	}
+
+	if (input.label) {
+		const needle = input.label.toLowerCase();
+		result = result.filter((item) => item.labels.some((l) => l.toLowerCase() === needle));
 	}
 
 	return result;

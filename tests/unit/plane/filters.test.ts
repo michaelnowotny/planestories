@@ -59,4 +59,19 @@ describe("filterWorkItems", () => {
 		);
 		expect(result.map((i) => i.id)).toEqual(["a"]);
 	});
+
+	test("filters by external_source", () => {
+		const tagged = [
+			item({ id: "a", externalSource: "planestories" }),
+			item({ id: "b", externalSource: undefined }),
+		];
+		const result = filterWorkItems(tagged, { externalSource: "planestories" }, IDENT);
+		expect(result.map((i) => i.id)).toEqual(["a"]);
+	});
+
+	test("filters by label (case-insensitive)", () => {
+		const labeled = [item({ id: "a", labels: ["Bug", "UI"] }), item({ id: "b", labels: ["Docs"] })];
+		const result = filterWorkItems(labeled, { label: "bug" }, IDENT);
+		expect(result.map((i) => i.id)).toEqual(["a"]);
+	});
 });

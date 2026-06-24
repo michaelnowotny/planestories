@@ -102,6 +102,43 @@ describe("exportStories", () => {
 		expect(md).not.toContain("## Log in");
 	});
 
+	test("exports in ascending sequence_id order", async () => {
+		// data() lists wi-1 (seq 8) then wi-2 (seq 9); prepend an out-of-order item.
+		const d = dataWithItems();
+		const earliest = {
+			id: "wi-0",
+			sequence_id: 3,
+			name: "Earliest",
+			priority: "none",
+			state: { id: "s", name: "Todo" },
+			assignees: [],
+			labels: [],
+		};
+		d.workItems = { [PROJECT_UUID]: [earliest, ...(d.workItems?.[PROJECT_UUID] ?? [])] };
+		const { client } = makeFakeClient(d);
+		const outputPath = join(tmpDir, "out.md");
+
+		await exportStories(client, { config, filters: {}, outputPath });
+		const md = readFileSync(outputPath, "utf-8");
+		// "Earliest" (seq 3) must appear before "Log in" (seq 8).
+		expect(md.indexOf("## Earliest")).toBeLessThan(md.indexOf("## Log in"));
+	});
+
+	test("filters by external_source", async () => {
+		const { client } = makeFakeClient(dataWithItems());
+		const outputPath = join(tmpDir, "out.md");
+
+		const result = await exportStories(client, {
+			config,
+			filters: { externalSource: "planestories" },
+			outputPath,
+		});
+
+		// Only wi-1 carries external_source: planestories.
+		expect(result.count).toBe(1);
+		expect(readFileSync(outputPath, "utf-8")).toContain("## Log in");
+	});
+
 	test("throws when no project can be resolved", async () => {
 		const { client } = makeFakeClient(dataWithItems());
 		const outputPath = join(tmpDir, "out.md");

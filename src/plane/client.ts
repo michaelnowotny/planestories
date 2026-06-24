@@ -178,6 +178,26 @@ export class PlaneClient {
 		return this.listAll<T>(`/projects/${projectId}/issues/`, query);
 	}
 
+	/** Permanently delete a work item (204 on success). */
+	deleteWorkItem(projectId: string, workItemId: string): Promise<void> {
+		return this.request<void>(
+			"DELETE",
+			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/`),
+		);
+	}
+
+	/**
+	 * Archive a work item (recoverable). Plane only permits archiving items whose
+	 * state group is completed or cancelled; otherwise it returns a 400 with
+	 * INVALID_ARCHIVE_STATE_GROUP, which surfaces as a PlaneApiError.
+	 */
+	archiveWorkItem<T>(projectId: string, workItemId: string): Promise<T> {
+		return this.request<T>(
+			"POST",
+			this.workspacePath(`/projects/${projectId}/work-items/${workItemId}/archive/`),
+		);
+	}
+
 	/**
 	 * Look up a work item by external id. Plane treats this as a single-object
 	 * lookup: it returns the work item on a match and a 404 when none exists, so
@@ -226,7 +246,7 @@ async function safeErrorDetail(response: Response): Promise<string | undefined> 
 		// Surface the most useful field from a JSON error body when present.
 		try {
 			const parsed = JSON.parse(text) as Record<string, unknown>;
-			const message = parsed.error ?? parsed.detail ?? parsed.message;
+			const message = parsed.error ?? parsed.error_message ?? parsed.detail ?? parsed.message;
 			return message ? String(message) : text.slice(0, 500);
 		} catch {
 			return text.slice(0, 500);

@@ -5,6 +5,36 @@ export interface WriteBackUpdate {
 	planeUrl: string;
 }
 
+/**
+ * Clear the plane_id / plane_identifier / plane_url VALUES (keeping the keys) for
+ * the given story titles. This is the inverse of write-back, used by `delete` so
+ * a deleted-then-re-imported story is treated as new.
+ */
+export function clearWriteBack(content: string, titles: string[]): string {
+	if (titles.length === 0) {
+		return content;
+	}
+	const wanted = new Set(titles);
+	let currentTitle: string | null = null;
+
+	return content
+		.split("\n")
+		.map((line) => {
+			if (line.startsWith("## ")) {
+				currentTitle = line.replace(/^## /, "").trim();
+				return line;
+			}
+			if (currentTitle && wanted.has(currentTitle)) {
+				const match = line.match(/^(\s*)(plane_id|plane_identifier|plane_url):/);
+				if (match) {
+					return `${match[1]}${match[2]}:`;
+				}
+			}
+			return line;
+		})
+		.join("\n");
+}
+
 /** The YAML keys we upsert, in the order they should appear. */
 const FIELD_ORDER: ReadonlyArray<keyof Omit<WriteBackUpdate, "title">> = [
 	"planeId",

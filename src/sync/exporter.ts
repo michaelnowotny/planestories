@@ -55,8 +55,17 @@ export async function exportStories(
 	if (options.filters.assignee) {
 		filterInput.assigneeEmail = options.filters.assignee;
 	}
+	if (options.filters.externalSource) {
+		filterInput.externalSource = options.filters.externalSource;
+	}
+	if (options.filters.label) {
+		filterInput.label = options.filters.label;
+	}
 
-	const filtered = filterWorkItems(items, filterInput, project.identifier);
+	// Stable ascending order so a round-tripped file matches creation order.
+	const filtered = filterWorkItems(items, filterInput, project.identifier).sort(
+		(a, b) => a.sequenceId - b.sequenceId,
+	);
 
 	const stories = filtered.map((item) =>
 		workItemToUserStory(client, item, project.id, project.identifier, projectName),

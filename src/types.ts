@@ -79,7 +79,10 @@ export interface ExportFilters {
 	issues?: string[];
 	status?: string;
 	assignee?: string;
-	creator?: string;
+	/** Only export items stamped with this external_source (e.g. "planestories"). */
+	externalSource?: string;
+	/** Only export items carrying this label name. */
+	label?: string;
 }
 
 /** A Plane work item normalized into a flat, name-resolved shape for serialization. */

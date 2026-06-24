@@ -31,6 +31,8 @@ export interface FakeClient {
 	createdLabels: Array<{ projectId: string; name: string }>;
 	createdItems: Array<{ projectId: string; body: Record<string, unknown> }>;
 	updatedItems: Array<{ projectId: string; workItemId: string; body: Record<string, unknown> }>;
+	deletedItems: Array<{ projectId: string; workItemId: string }>;
+	archivedItems: Array<{ projectId: string; workItemId: string }>;
 }
 
 /**
@@ -42,6 +44,8 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 	const createdLabels: FakeClient["createdLabels"] = [];
 	const createdItems: FakeClient["createdItems"] = [];
 	const updatedItems: FakeClient["updatedItems"] = [];
+	const deletedItems: FakeClient["deletedItems"] = [];
+	const archivedItems: FakeClient["archivedItems"] = [];
 	let sequence = 100;
 
 	const record = (method: string, args: unknown[]) => calls.push({ method, args });
@@ -123,6 +127,17 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			const match = items.find((i) => i.external_id === externalId);
 			return (match ?? null) as T | null;
 		},
+
+		async deleteWorkItem(projectId: string, workItemId: string): Promise<void> {
+			record("deleteWorkItem", [projectId, workItemId]);
+			deletedItems.push({ projectId, workItemId });
+		},
+
+		async archiveWorkItem<T>(projectId: string, workItemId: string): Promise<T> {
+			record("archiveWorkItem", [projectId, workItemId]);
+			archivedItems.push({ projectId, workItemId });
+			return {} as T;
+		},
 	};
 
 	return {
@@ -131,5 +146,7 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 		createdLabels,
 		createdItems,
 		updatedItems,
+		deletedItems,
+		archivedItems,
 	};
 }

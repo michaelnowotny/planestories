@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
+import { registerDeleteCommand } from "./commands/delete.ts";
 import { registerExportCommand } from "./commands/export.ts";
 import { registerImportCommand } from "./commands/import.ts";
 
@@ -12,5 +13,6 @@ program
 
 registerImportCommand(program);
 registerExportCommand(program);
+registerDeleteCommand(program);
 
 program.parse();
