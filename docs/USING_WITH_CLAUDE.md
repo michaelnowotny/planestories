@@ -73,15 +73,29 @@ export PATH="$HOME/.bun/bin:$PATH"
 # Validate parsing only — no API calls:
 bun run src/cli/index.ts import /path/to/stories.md --dry-run
 
+# Validate read-only against Plane (catches bad project/state/assignee/labels):
+bun run src/cli/index.ts import /path/to/stories.md --dry-run --check
+
 # Create/update work items and write plane_id/plane_identifier/plane_url back into the file:
 bun run src/cli/index.ts import /path/to/stories.md
 
 #   --create-labels   create labels that don't exist instead of skipping them
+#   --sync-criteria   sync each acceptance criterion to a Plane sub-item (state from its checkbox)
 #   --project "Name"  override the project for all stories
 #   --no-write-back   don't modify the markdown file
 
-# Export work items from a project back to markdown:
+# Export back to markdown (HTML description -> markdown; checklists survive):
 bun run src/cli/index.ts export --project "My Project" -o exported.md
+#   --external-source         export only items planestories created (no demo/other noise)
+#   --label NAME / --status S filters; --sync-criteria rebuilds checklists from sub-items
+
+# Move a card's state without editing YAML:
+bun run src/cli/index.ts set PROJ-12 --status "In Progress" --project "My Project"
+
+# Clean up test items — scoped + safe (dry-run, then --yes to confirm):
+bun run src/cli/index.ts delete /path/to/stories.md --dry-run
+bun run src/cli/index.ts delete /path/to/stories.md --yes               # by the file's plane_ids
+bun run src/cli/index.ts delete --external-source --project "My Project" --yes  # all items it created
 ```
 
 The stories markdown file can live anywhere — pass any path.
@@ -108,8 +122,11 @@ real work, pick or create the appropriate project.
 - `status` must match an existing **state name** in the project (e.g. `Backlog`, `Todo`,
   `In Progress`, `Done`); unknown states are ignored.
 - `assignee` resolves by email (or display name) to a **project member**.
-- Export writes the work item's plain-text description; rich formatting is not
-  round-tripped.
+- Export converts Plane's HTML description back to markdown — headings and
+  `- [ ]`/`- [x]` checklists survive an export → re-import round-trip.
+- Use `delete` to clean up after a sandbox run (scoped to your files or to
+  `--external-source`; archive-default is unavailable because Plane only
+  archives completed/cancelled items, so hard-delete is the default behind `--yes`).
 - Targets Plane Cloud by default; `PLANE_BASE_URL` / `baseUrl` can point at a self-hosted
   instance.
 

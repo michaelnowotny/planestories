@@ -116,7 +116,11 @@ On create, planestories stamps each work item with `external_id` (derived from t
 
 ### Missing labels
 
-By default, labels that don't exist in the project are **skipped with a warning**. Pass `--create-labels` to create them instead.
+By default, labels that don't exist in the project are **skipped with a warning** (deduped, one line per label). Pass `--create-labels` to create them instead.
+
+### Acceptance criteria as sub-items (`--sync-criteria`)
+
+By default a story's `### Acceptance Criteria` checklist is stored in the work item's description. Pass `--sync-criteria` to instead sync **each criterion to a Plane sub-item** (a child work item). A `- [x]` maps to a completed-group state and `- [ ]` to an open state, so ticking a box in markdown moves the sub-item — and `export --sync-criteria` reconstructs the checklist from the sub-items' states. The mapping is idempotent (keyed per criterion), so re-imports update in place.
 
 ## Commands
 
@@ -128,7 +132,9 @@ planestories import <files...> [options]
   --context <name>        Select a named context from a multi-context config
   -p, --project <name>    Override the default project
   --create-labels         Create labels that don't exist instead of skipping
-  --dry-run               Validate parsing without calling Plane
+  --sync-criteria         Sync each acceptance criterion to a Plane sub-item
+  --dry-run               Preview without writing to Plane
+  --check                 With --dry-run, validate read-only (project/state/assignee/labels)
   --no-write-back         Skip writing Plane ids back into the markdown
 ```
 
@@ -136,14 +142,42 @@ planestories import <files...> [options]
 
 ```
 planestories export [options]
-  -o, --output <file>     Output file (default ./exported-stories.md)
-  -p, --project <name>    Project to export from (required if no defaultProject)
-  -i, --issues <ids>      Comma-separated work item identifiers (e.g. ENG-8)
-  -s, --status <state>    Filter by status
-  -a, --assignee <email>  Filter by assignee email
+  -o, --output <file>       Output file (default ./exported-stories.md)
+  -p, --project <name>      Project to export from (required if no defaultProject)
+  -i, --issues <ids>        Comma-separated work item identifiers (e.g. ENG-8)
+  -s, --status <state>      Filter by status
+  -a, --assignee <email>    Filter by assignee email
+  -l, --label <name>        Filter by label name
+  --external-source [src]   Only export items planestories created (default: planestories)
+  --sync-criteria           Reconstruct acceptance criteria from sub-items
 ```
 
-> Export currently writes each work item's plain-text description as the story body; rich formatting is not round-tripped.
+Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order.
+
+### `set`
+
+Update fields on existing work items by identifier — handy for moving a card without editing YAML.
+
+```
+planestories set <identifiers...> [options]   # e.g. set ENG-12 ENG-13 --status "In Progress"
+  -p, --project <name>    Project (required if no defaultProject)
+  -s, --status <state>    Set the state by name
+  --priority <level>      urgent | high | medium | low | none
+  -a, --assignee <email>  Set the assignee by email
+```
+
+### `delete`
+
+Delete (or archive) work items — **scoped only**, never a blunt project wipe. Either by the files' `plane_id`s (which clears `plane_*` back out as the inverse of import) or by `external_source` within a project.
+
+```
+planestories delete <files...> [options]
+planestories delete --external-source [src] --project <name> [options]
+  --archive               Archive instead of hard delete (only completed/cancelled items)
+  --dry-run               Show what would be deleted, change nothing
+  -y, --yes               Confirm deletion (required — without it, only the plan is shown)
+  --no-write-back         Don't clear plane_* out of files after deletion
+```
 
 ## Self-hosting
 
