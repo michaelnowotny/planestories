@@ -111,6 +111,18 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			}
 			return items as unknown as T[];
 		},
+
+		// Mirrors Plane's single-object lookup: returns the matching work item or null.
+		async findWorkItemByExternalId<T>(
+			projectId: string,
+			externalId: string,
+			externalSource: string,
+		): Promise<T | null> {
+			record("findWorkItemByExternalId", [projectId, externalId, externalSource]);
+			const items = data.workItems?.[projectId] ?? [];
+			const match = items.find((i) => i.external_id === externalId);
+			return (match ?? null) as T | null;
+		},
 	};
 
 	return {

@@ -12,6 +12,8 @@ export interface PlaneClientOptions {
 interface RequestOptions {
 	query?: Record<string, string | number | boolean | undefined>;
 	body?: unknown;
+	/** When true, a 404 response resolves to null instead of throwing. */
+	allowNotFound?: boolean;
 }
 
 /** A single page of a cursor-paginated Plane list response. */
@@ -78,6 +80,10 @@ export class PlaneClient {
 					error instanceof Error ? error.message : String(error)
 				}`,
 			);
+		}
+
+		if (response.status === 404 && options.allowNotFound) {
+			return null as T;
 		}
 
 		if (!response.ok) {
@@ -151,7 +157,7 @@ export class PlaneClient {
 	}
 
 	createWorkItem<T>(projectId: string, body: Record<string, unknown>): Promise<T> {
-		return this.request<T>("POST", this.workspacePath(`/projects/${projectId}/work-items/`), {
+		return this.request<T>("POST", this.workspacePath(`/projects/${projectId}/issues/`), {
 			body,
 		});
 	}
@@ -163,13 +169,29 @@ export class PlaneClient {
 	): Promise<T> {
 		return this.request<T>(
 			"PATCH",
-			this.workspacePath(`/projects/${projectId}/work-items/${workItemId}/`),
+			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/`),
 			{ body },
 		);
 	}
 
 	listWorkItems<T>(projectId: string, query: RequestOptions["query"] = {}): Promise<T[]> {
-		return this.listAll<T>(`/projects/${projectId}/work-items/`, query);
+		return this.listAll<T>(`/projects/${projectId}/issues/`, query);
+	}
+
+	/**
+	 * Look up a work item by external id. Plane treats this as a single-object
+	 * lookup: it returns the work item on a match and a 404 when none exists, so
+	 * the response is NOT a paginated list. Returns null when not found.
+	 */
+	findWorkItemByExternalId<T>(
+		projectId: string,
+		externalId: string,
+		externalSource: string,
+	): Promise<T | null> {
+		return this.request<T | null>("GET", this.workspacePath(`/projects/${projectId}/issues/`), {
+			query: { external_id: externalId, external_source: externalSource },
+			allowNotFound: true,
+		});
 	}
 }
 

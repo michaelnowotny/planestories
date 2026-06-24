@@ -132,12 +132,19 @@ export async function findWorkItemByExternalId(
 	externalId: string,
 	externalSource: string,
 ): Promise<WorkItemRef | null> {
-	const items = await client.listWorkItems<RawWorkItem>(projectId, {
-		external_id: externalId,
-		external_source: externalSource,
-	});
-	const match = items[0];
-	return match ? { id: match.id, sequenceId: match.sequence_id } : null;
+	// Plane's external_id filter returns a single object on a hit (or a 404 →
+	// null on a miss), but defend against a paginated shape just in case.
+	const data = await client.findWorkItemByExternalId<RawWorkItem | { results?: RawWorkItem[] }>(
+		projectId,
+		externalId,
+		externalSource,
+	);
+	if (!data) {
+		return null;
+	}
+	const match =
+		"results" in data && Array.isArray(data.results) ? data.results[0] : (data as RawWorkItem);
+	return match?.id ? { id: match.id, sequenceId: match.sequence_id } : null;
 }
 
 /** Fetch work items in a project for export, resolving related names via `expand`. */
