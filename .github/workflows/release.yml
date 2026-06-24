@@ -5,27 +5,16 @@ on:
     tags:
       - 'v*'
 
-jobs:
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - target: bun-linux-x64
-            os: [self-hosted, linux, x64]
-          - target: bun-linux-arm64
-            os: [self-hosted, linux, x64]
-          - target: bun-darwin-x64
-            os: [self-hosted, macos, arm64]
-          - target: bun-darwin-arm64
-            os: [self-hosted, macos, arm64]
-          - target: bun-windows-x64
-            os: [self-hosted, linux, x64]
+permissions:
+  contents: write
 
+jobs:
+  release:
+    name: Build and release
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -35,30 +24,19 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build binary
-        run: bun build src/cli/index.ts --compile --target ${{ matrix.target }} --outfile planestories-${{ matrix.target }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: planestories-${{ matrix.target }}
-          path: planestories-${{ matrix.target }}*
-
-  release:
-    name: Release
-    needs: build
-    runs-on: [self-hosted, linux, x64]
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: artifacts
+      - name: Build binaries (cross-compiled for all targets)
+        run: |
+          mkdir -p dist
+          for target in bun-linux-x64 bun-linux-arm64 bun-darwin-x64 bun-darwin-arm64 bun-windows-x64; do
+            out="dist/planestories-${target}"
+            if [ "$target" = "bun-windows-x64" ]; then out="${out}.exe"; fi
+            echo "Building ${target} -> ${out}"
+            bun build src/cli/index.ts --compile --target "${target}" --outfile "${out}"
+          done
+          ls -la dist
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: artifacts/**/*
+          files: dist/*
