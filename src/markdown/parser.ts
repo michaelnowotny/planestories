@@ -94,8 +94,8 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 	const assignee = extractStringOrNull(metadata.assignee);
 	const status = extractStringOrNull(metadata.status);
 
-	// Inherit project from frontmatter
-	const project = frontmatter.project ?? null;
+	// Per-story `project:` overrides the file frontmatter; falls back to it.
+	const project = extractStringOrNull(metadata.project) ?? frontmatter.project ?? null;
 
 	return {
 		title,

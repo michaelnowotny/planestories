@@ -100,7 +100,7 @@ After a successful import, `plane_id` (the work item UUID), `plane_identifier` (
 
 | Story field | Plane |
 |---|---|
-| `project` (frontmatter or `--project`) | the work item's **project** (required — Plane has no "team" tier) |
+| `project` (per-story / frontmatter / `--project`) | the work item's **project** (required — Plane has no "team" tier) |
 | `## Heading` | work item name |
 | body markdown | `description_html` (converted to HTML) |
 | `priority` | `urgent` / `high` / `medium` / `low` / `none` (legacy Linear integers `0–4` are also accepted) |
@@ -109,6 +109,37 @@ After a successful import, `plane_id` (the work item UUID), `plane_identifier` (
 | `assignee` | member UUID (resolved by email or display name) |
 | `estimate` | story `point` |
 | `plane_id` | work item UUID (used to update) |
+
+### Choosing the project
+
+A workspace usually has several projects. You can target any of them at three levels of
+granularity (highest precedence first):
+
+1. **`--project "Name"`** on the command — forces *all* stories in that run into one project.
+2. **Per-story `project:`** in a story's YAML block — routes that single story.
+3. **File frontmatter `project:`** — the default for every story in the file.
+4. **`defaultProject`** in config — the fallback when nothing else is set.
+
+So one file can fan stories out to different projects:
+
+````markdown
+---
+project: "True Cost"          # file default
+---
+
+## A story that goes to Infrastructure Setup
+
+```yaml
+project: Infrastructure Setup  # per-story override
+```
+...
+
+## A story that uses the file default (True Cost)
+...
+````
+
+Project names are matched within the workspace; an unknown name fails loudly
+(`Project not found: "..."`). Use `--dry-run --check` to validate routing before importing.
 
 ### Idempotency
 
@@ -130,7 +161,7 @@ By default a story's `### Acceptance Criteria` checklist is stored in the work i
 planestories import <files...> [options]
   -c, --config <path>     Config file path
   --context <name>        Select a named context from a multi-context config
-  -p, --project <name>    Override the default project
+  -p, --project <name>    Force all stories into this project (overrides frontmatter)
   --create-labels         Create labels that don't exist instead of skipping
   --sync-criteria         Sync each acceptance criterion to a Plane sub-item
   --dry-run               Preview without writing to Plane

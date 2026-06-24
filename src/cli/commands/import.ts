@@ -112,7 +112,7 @@ export function registerImportCommand(program: Command) {
 		.argument("<files...>", "Markdown file paths or glob patterns")
 		.option("-c, --config <path>", "Config file path")
 		.option("--context <name>", "Select a named context from multi-context config")
-		.option("-p, --project <name>", "Override default project")
+		.option("-p, --project <name>", "Force all stories into this project (overrides frontmatter)")
 		.option("--create-labels", "Create labels that don't exist instead of skipping them", false)
 		.option("--sync-criteria", "Sync each acceptance criterion to a Plane sub-item", false)
 		.option("--dry-run", "Preview without writing to Plane", false)

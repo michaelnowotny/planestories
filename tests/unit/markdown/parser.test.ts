@@ -131,6 +131,30 @@ describe("parseMarkdownFile", () => {
 		expect(story.body).toContain("- [ ] Account locks after 5 consecutive failed attempts");
 	});
 
+	test("per-story project overrides frontmatter; falls back to it", () => {
+		const content = [
+			"---",
+			'project: "File Default"',
+			"---",
+			"",
+			"## Story A",
+			"",
+			"```yaml",
+			"project: Story Specific",
+			"```",
+			"",
+			"body",
+			"",
+			"## Story B",
+			"",
+			"body",
+		].join("\n");
+
+		const result = parseMarkdownFile(content, "x.md");
+		expect(result.stories[0]?.project).toBe("Story Specific");
+		expect(result.stories[1]?.project).toBe("File Default");
+	});
+
 	test("throws ParseError for file with no H2 headings", () => {
 		const content = "# Just a top-level heading\n\nSome text without any H2.";
 		expect(() => parseMarkdownFile(content, "no-stories.md")).toThrow(ParseError);

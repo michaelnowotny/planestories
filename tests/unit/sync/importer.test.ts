@@ -418,6 +418,67 @@ Narrative text.
 		expect(createdItems[0]!.body.labels).toEqual(["lbl-feature", "lbl-default"]);
 	});
 
+	test("--project overrides frontmatter and routes all stories there", async () => {
+		const OTHER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+		const md = `---
+project: "Q1 Release"
+---
+
+## S1
+
+body one
+
+## S2
+
+body two
+`;
+		const file = writeTmpFile("route-flag.md", md);
+		const { client, createdItems } = makeFakeClient({
+			projects: [
+				{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" },
+				{ id: OTHER, name: "Other Project", identifier: "OTH" },
+			],
+		});
+
+		await importStories(client, { files: [file], config: defaultConfig, project: "Other Project" });
+
+		expect(createdItems).toHaveLength(2);
+		expect(createdItems.every((i) => i.projectId === OTHER)).toBe(true);
+	});
+
+	test("per-story project routes stories to different projects", async () => {
+		const OTHER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+		const md = `---
+project: "Q1 Release"
+---
+
+## S1
+
+\`\`\`yaml
+project: Other Project
+\`\`\`
+
+body one
+
+## S2
+
+body two
+`;
+		const file = writeTmpFile("route-perstory.md", md);
+		const { client, createdItems } = makeFakeClient({
+			projects: [
+				{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" },
+				{ id: OTHER, name: "Other Project", identifier: "OTH" },
+			],
+		});
+
+		await importStories(client, { files: [file], config: defaultConfig });
+
+		// S1 -> Other Project (per-story), S2 -> Q1 Release (frontmatter)
+		expect(createdItems[0]!.projectId).toBe(OTHER);
+		expect(createdItems[1]!.projectId).toBe(PROJECT_UUID);
+	});
+
 	test("fails the story when no project can be resolved anywhere", async () => {
 		const filePath = writeTmpFile("noproject.md", "## A story with no project\n\nBody.\n");
 		const { client } = makeFakeClient(baseData());

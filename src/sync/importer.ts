@@ -104,7 +104,8 @@ async function processStory(
 	}
 
 	try {
-		const projectName = story.project ?? options.project ?? options.config.defaultProject;
+		// Precedence: --project (force all) > per-story/frontmatter > defaultProject.
+		const projectName = options.project ?? story.project ?? options.config.defaultProject;
 		if (!projectName) {
 			return {
 				story,

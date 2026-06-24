@@ -102,9 +102,15 @@ The stories markdown file can live anywhere — pass any path.
 
 ## Choosing a Plane project
 
-Confirm the target project with the operator. For a low-risk first run, use a sandbox
-project (e.g. the Plane demo project) and delete the test work items afterward. To track
-real work, pick or create the appropriate project.
+A workspace usually has several projects; target one at four levels (highest first):
+`--project "Name"` (forces all stories) → a per-story `project:` in the YAML block →
+the file's frontmatter `project:` → `defaultProject` in config. So one file can route
+different stories to different projects, and `--project` overrides everything. Unknown
+project names fail loudly — use `--dry-run --check` to validate routing first.
+
+Confirm the target project(s) with the operator. For a low-risk first run, use a sandbox
+project and clean up afterward with `delete`. To track real work, pick the appropriate
+project.
 
 ## Idempotency & write-back
 

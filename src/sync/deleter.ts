@@ -137,7 +137,7 @@ async function collectFromFiles(
 			if (!story.planeId) {
 				continue;
 			}
-			const projectName = story.project ?? options.project ?? options.config.defaultProject;
+			const projectName = options.project ?? story.project ?? options.config.defaultProject;
 			if (!projectName) {
 				throw new ConfigError(
 					`No project for story "${story.title}" in ${file}; set one in frontmatter, --project, or defaultProject.`,

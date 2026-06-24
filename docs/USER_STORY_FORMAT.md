@@ -36,7 +36,7 @@ Optional. Sets defaults for all stories in the file.
 
 | Field     | Type   | Description          |
 |-----------|--------|----------------------|
-| `project` | string | Default project name (Plane has no "team" tier — the project is the routing key) |
+| `project` | string | Default project for every story in the file (Plane has no "team" tier — the project is the routing key). A per-story `project:` or the `--project` flag overrides it. |
 
 ## Story heading
 
@@ -50,6 +50,7 @@ Fenced YAML block (` ```yaml ` ... ` ``` `) immediately after the H2 heading. Al
 
 | Field              | Type     | Values / Notes                                                        |
 |--------------------|----------|-----------------------------------------------------------------------|
+| `project`          | string   | Project for this story; overrides the file frontmatter. `--project` overrides both. |
 | `plane_id`         | string   | Work item UUID. Auto-filled on import; used to update. Leave empty for new stories. |
 | `plane_identifier` | string   | Human-readable id (e.g. `ENG-42`). Auto-filled on import.             |
 | `plane_url`        | string   | Work item URL. Auto-filled on import.                                 |
