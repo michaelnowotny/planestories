@@ -13,7 +13,7 @@ const program = new Command();
 program
 	.name("planestories")
 	.description("Bridge markdown user stories and Plane work items")
-	.version("0.1.0");
+	.version("0.2.0");
 
 registerImportCommand(program);
 registerExportCommand(program);

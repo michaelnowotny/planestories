@@ -1,6 +1,6 @@
 {
   "name": "planestories",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI tool that bridges markdown-based user stories and Plane work items, enforcing acceptance criteria discipline for AI agents",
   "module": "src/cli/index.ts",
   "type": "module",
