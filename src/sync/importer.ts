@@ -34,6 +34,12 @@ export interface ImportOptions {
 	sourceLabel?: string;
 	/** Re-import even when the content hash matches (bypass skip-unchanged). */
 	force?: boolean;
+	/**
+	 * Only update the state of already-linked items (by plane_id) from their yaml
+	 * `status`; ignore all other fields. Unlinked stories are skipped with a
+	 * warning. Does not write back plane_hash. Useful for bulk status transitions.
+	 */
+	statusOnly?: boolean;
 }
 
 /**
@@ -152,6 +158,55 @@ async function processStory(
 		}
 
 		const project = await resolver.resolveProject(projectName);
+
+		// --status-only: PATCH just the state of already-linked items. No description
+		// re-render, no label/assignee touch, no create. Deliberately does NOT write
+		// back plane_hash (only the state was synced, not the full payload — claiming
+		// a full sync would let a later import skip a genuinely-changed body).
+		if (options.statusOnly) {
+			const stateId = story.status
+				? await resolver.resolveStateId(project.id, story.status)
+				: undefined;
+
+			if (options.dryRun) {
+				const notes: string[] = [];
+				if (!story.planeId) notes.push("no plane_id — would be skipped");
+				if (story.status && !stateId) notes.push(`status "${story.status}" not found`);
+				return {
+					story,
+					action: "skipped",
+					wouldAction: "update",
+					note: notes.join("; ") || undefined,
+				};
+			}
+
+			if (!story.planeId) {
+				return {
+					story,
+					action: "skipped",
+					note: "status-only: no plane_id — skipped (import fully first to link it)",
+				};
+			}
+			if (!stateId) {
+				return {
+					story,
+					action: "skipped",
+					note: story.status
+						? `status "${story.status}" not found in project`
+						: "status-only: no status set — nothing to update",
+				};
+			}
+
+			const ref = await updateWorkItem(client, project.id, story.planeId, { stateId });
+			return {
+				story,
+				action: "updated",
+				planeId: ref.id,
+				planeIdentifier: `${project.identifier}-${ref.sequenceId}`,
+				planeUrl: client.workItemWebUrl(project.id, ref.id),
+				projectUrl: client.projectBoardUrl(project.id),
+			};
+		}
 
 		// Merge labels: story.labels + config.defaultLabels (deduplicated).
 		// Never create labels during a dry-run, even with --create-labels.

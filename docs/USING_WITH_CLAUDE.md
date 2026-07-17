@@ -84,6 +84,7 @@ bun run src/cli/index.ts import /path/to/stories.md
 #   --source-label N  tag every created item with label N (auto-created; opt-in, also via config)
 #   --project "Name"  override the project for all stories
 #   --force           re-import even when content is unchanged (bypass skip-unchanged)
+#   --status-only     update ONLY the state of already-linked items (skip unlinked)
 #   --no-write-back   don't modify the markdown file
 
 # Export back to markdown (HTML description -> markdown; checklists survive):
@@ -126,6 +127,12 @@ project.
 - Re-running an import is **idempotent**: a story with a `plane_id` updates by UUID; a
   story without one is matched by `external_id` (derived from the title) and updated —
   never duplicated.
+- **`--status-only`** is a targeted mode for bulk state transitions (e.g. closing a batch
+  of tickets): for each story that already has a `plane_id`, it PATCHes only the `state`
+  (from the yaml `status`) and touches nothing else — no description re-render, no title or
+  label clobber. Stories without a `plane_id` are skipped with a warning (import them fully
+  first). It deliberately does NOT rewrite `plane_hash` (only the state was synced), so a
+  later full import still re-pushes a genuinely-changed body.
 - **Skip-unchanged:** a linked story whose content matches its stored `plane_hash` is
   reported as `unchanged` and makes **zero** API writes — so re-importing a large,
   mostly-static board is cheap and safe. `plane_hash` is a hash of the rendered payload

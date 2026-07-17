@@ -86,6 +86,9 @@ function printSummary(summary: ImportSummary): void {
 			console.log(chalk.blue(`  ~ ${id} ${result.story.title}`));
 		} else if (result.action === "failed") {
 			console.log(chalk.red(`  x ${result.story.title}: ${result.error}`));
+		} else if (result.action === "skipped" && result.note) {
+			// Surface actionable skips (e.g. --status-only on an unlinked story).
+			console.log(chalk.yellow(`  - ${result.story.title}: ${result.note}`));
 		}
 	}
 
@@ -137,6 +140,11 @@ export function registerImportCommand(program: Command) {
 		.option("--source-label <name>", "Tag every created item with this label (auto-created)")
 		.option("--sync-criteria", "Sync each acceptance criterion to a Plane sub-item", false)
 		.option("--force", "Re-import even when content is unchanged (bypass skip-unchanged)", false)
+		.option(
+			"--status-only",
+			"Only update the state of already-linked items (skip unlinked; no other fields touched)",
+			false,
+		)
 		.option("--dry-run", "Preview without writing to Plane", false)
 		.option(
 			"--check",
@@ -175,6 +183,7 @@ export function registerImportCommand(program: Command) {
 					sourceLabel: options.sourceLabel,
 					syncCriteria: options.syncCriteria,
 					force: options.force,
+					statusOnly: options.statusOnly,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});
 

@@ -143,3 +143,80 @@ describe("import flow (end to end)", () => {
 		expect(second.updatedItems).toHaveLength(1);
 	});
 });
+
+describe("import flow --status-only", () => {
+	const withDone = () =>
+		baseData({
+			states: {
+				[PROJECT_UUID]: [
+					{ id: "state-backlog", name: "Backlog" },
+					{ id: "state-done", name: "Done" },
+				],
+			},
+		});
+
+	test("patches only the state of a linked item (no title/body clobber, no hash rewrite)", async () => {
+		const filePath = join(tmpDir, "stories.md");
+		writeFileSync(filePath, markdown);
+
+		// Full import links the story and writes plane_id + plane_hash.
+		const first = makeFakeClient(withDone());
+		await importStories(first.client, { files: [filePath], config });
+		const linked = readFileSync(filePath, "utf-8");
+		const hashLine = linked.split("\n").find((l) => l.startsWith("plane_hash:"));
+		expect(hashLine).toBeDefined();
+
+		// Flip the status; run status-only.
+		writeFileSync(filePath, linked.replace("status: Backlog", "status: Done"));
+		const second = makeFakeClient(withDone());
+		const summary = await importStories(second.client, {
+			files: [filePath],
+			config,
+			statusOnly: true,
+		});
+
+		expect(summary.updated).toBe(1);
+		expect(second.updatedItems).toHaveLength(1);
+		// ONLY the state is sent — name/description are not re-sent.
+		expect(second.updatedItems[0]?.body).toEqual({ state: "state-done" });
+
+		// status-only does not rewrite plane_hash (it did not sync the full payload).
+		const after = readFileSync(filePath, "utf-8");
+		expect(after.split("\n").find((l) => l.startsWith("plane_hash:"))).toBe(hashLine);
+	});
+
+	test("skips an unlinked story with a warning (no writes)", async () => {
+		const filePath = join(tmpDir, "stories.md");
+		writeFileSync(filePath, markdown); // no plane_id yet
+		const { client, createdItems, updatedItems } = makeFakeClient(withDone());
+
+		const summary = await importStories(client, { files: [filePath], config, statusOnly: true });
+
+		expect(summary.updated).toBe(0);
+		expect(summary.skipped).toBe(1);
+		expect(createdItems).toHaveLength(0);
+		expect(updatedItems).toHaveLength(0);
+		const skipped = summary.results.find((r) => r.action === "skipped");
+		expect(skipped?.note).toContain("no plane_id");
+	});
+
+	test("makes zero writes when the file is fully unchanged", async () => {
+		const filePath = join(tmpDir, "stories.md");
+		writeFileSync(filePath, markdown);
+
+		const first = makeFakeClient(withDone());
+		await importStories(first.client, { files: [filePath], config });
+
+		// Nothing edited: the content hash still matches, so it short-circuits.
+		const second = makeFakeClient(withDone());
+		const summary = await importStories(second.client, {
+			files: [filePath],
+			config,
+			statusOnly: true,
+		});
+
+		expect(summary.updated).toBe(0);
+		expect(summary.unchanged).toBe(1);
+		expect(second.updatedItems).toHaveLength(0);
+	});
+});

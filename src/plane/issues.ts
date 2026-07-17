@@ -19,7 +19,15 @@ export interface CreateWorkItemInput {
 	parent?: string;
 }
 
-export type UpdateWorkItemInput = Omit<CreateWorkItemInput, "externalId" | "externalSource">;
+/**
+ * Update payload. `name` is optional here (unlike create) so a partial update —
+ * e.g. --status-only — can PATCH just the state without re-sending (and thus
+ * clobbering) a board-side title edit.
+ */
+export type UpdateWorkItemInput = Omit<
+	CreateWorkItemInput,
+	"externalId" | "externalSource" | "name"
+> & { name?: string };
 
 export interface WorkItemRef {
 	id: string;
@@ -55,8 +63,13 @@ export interface FetchedWorkItem {
 
 /** Build the Plane work item request body shared by create and update. */
 function buildBody(input: CreateWorkItemInput | UpdateWorkItemInput): Record<string, unknown> {
-	const body: Record<string, unknown> = { name: input.name };
+	const body: Record<string, unknown> = {};
 
+	// Only send name when provided. Create always provides it; a partial update
+	// (status-only) omits it so the board-side title is left untouched.
+	if (input.name !== undefined) {
+		body.name = input.name;
+	}
 	if (input.body !== undefined) {
 		const html = markdownToHtml(input.body);
 		if (html) {
