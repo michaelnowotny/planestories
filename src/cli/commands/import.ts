@@ -145,6 +145,16 @@ export function registerImportCommand(program: Command) {
 			"Only update the state of already-linked items (skip unlinked; no other fields touched)",
 			false,
 		)
+		.option(
+			"--adopt-duplicates",
+			"When a new story's title exactly matches one existing item, adopt it instead of skipping",
+			false,
+		)
+		.option(
+			"--force-create",
+			"Create even when a same-title item already exists (bypass the duplicate guard)",
+			false,
+		)
 		.option("--dry-run", "Preview without writing to Plane", false)
 		.option(
 			"--check",
@@ -184,6 +194,8 @@ export function registerImportCommand(program: Command) {
 					syncCriteria: options.syncCriteria,
 					force: options.force,
 					statusOnly: options.statusOnly,
+					adoptDuplicates: options.adoptDuplicates,
+					forceCreate: options.forceCreate,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});
 

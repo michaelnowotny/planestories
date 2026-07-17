@@ -1,13 +1,12 @@
 import { ARCHIVE_LABEL } from "../constants.ts";
 import { ConfigError } from "../errors.ts";
-import { buildAcceptanceCriteria, joinBody, splitBody } from "../markdown/criteria.ts";
 import { serializeStories } from "../markdown/serializer.ts";
 import type { PlaneClient } from "../plane/client.ts";
 import { filterWorkItems, type WorkItemFilterInput } from "../plane/filters.ts";
 import { type FetchedWorkItem, fetchWorkItems } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
-import type { ExportFilters, FileFrontmatter, ResolvedConfig, UserStory } from "../types.ts";
-import { hashStoryPayload } from "./story-hash.ts";
+import type { ExportFilters, FileFrontmatter, ResolvedConfig } from "../types.ts";
+import { boardItemToStory, isCriterionChild } from "./board-story.ts";
 
 export interface ExportOptions {
 	config: ResolvedConfig;
@@ -19,16 +18,6 @@ export interface ExportOptions {
 	syncCriteria?: boolean;
 	/** Include items carrying the archive label (excluded by default). */
 	includeArchived?: boolean;
-}
-
-/** A criterion child has a parent and an external_id of the form `<parent>::ac<n>`. */
-function isCriterionChild(item: FetchedWorkItem): boolean {
-	return Boolean(item.parent && item.externalId && /::ac\d+$/.test(item.externalId));
-}
-
-function criterionIndex(item: FetchedWorkItem): number {
-	const match = item.externalId?.match(/::ac(\d+)$/);
-	return match ? Number(match[1]) : 0;
 }
 
 /**
@@ -102,7 +91,7 @@ export async function exportStories(
 	}
 
 	const stories = filtered.map((item) =>
-		workItemToUserStory(
+		boardItemToStory(
 			client,
 			item,
 			project.id,
@@ -119,57 +108,4 @@ export async function exportStories(
 	await Bun.write(options.outputPath, markdown);
 
 	return { count: stories.length, outputPath: options.outputPath };
-}
-
-/**
- * Convert a fetched Plane work item to a UserStory. When `children` (criterion
- * sub-items) are provided, the story body's acceptance criteria are rebuilt from
- * them, with each child's completed state group rendering as a checked box.
- *
- * A `plane_hash` is computed and written so an export->import round-trip starts
- * warm: a subsequent import (with the same --sync-criteria flag and no extra
- * default/source labels) recomputes the identical hash and skips as unchanged
- * rather than blind-rewriting every description. The hash reflects the export's
- * syncCriteria flag so it matches the corresponding import invocation.
- */
-function workItemToUserStory(
-	client: PlaneClient,
-	item: FetchedWorkItem,
-	projectId: string,
-	projectIdentifier: string,
-	projectName: string,
-	syncCriteria: boolean,
-	children?: FetchedWorkItem[],
-): UserStory {
-	let body = item.description ?? "";
-
-	if (children && children.length > 0) {
-		const sorted = [...children].sort((a, b) => criterionIndex(a) - criterionIndex(b));
-		const criteria = sorted.map((child) => ({
-			text: child.name,
-			checked: child.stateGroup === "completed",
-		}));
-		const narrative = splitBody(body).narrative;
-		body = joinBody(narrative, buildAcceptanceCriteria(criteria));
-	}
-
-	const story: UserStory = {
-		title: item.name,
-		planeId: item.id,
-		planeIdentifier: `${projectIdentifier}-${item.sequenceId}`,
-		planeUrl: client.workItemWebUrl(projectId, item.id),
-		planeHash: null,
-		priority: item.priority ?? null,
-		labels: item.labels,
-		estimate: item.estimate ?? null,
-		assignee: item.assigneeEmail ?? item.assigneeDisplayName ?? null,
-		status: item.stateName ?? null,
-		body,
-		project: projectName,
-	};
-
-	// Same effective-label set the common re-import sees (the item's own labels;
-	// default/source labels are an import-time concern the export can't know).
-	story.planeHash = hashStoryPayload(story, { syncCriteria, labels: story.labels });
-	return story;
 }

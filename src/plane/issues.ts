@@ -172,6 +172,68 @@ export async function findWorkItemByExternalId(
 	return match?.id ? { id: match.id, sequenceId: match.sequence_id } : null;
 }
 
+/** Normalize a title for duplicate detection: trim, lowercase, collapse whitespace. */
+export function normalizeTitle(title: string): string {
+	return title.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * A one-shot, in-memory index of every work item in a project, with the lookup
+ * maps the importer needs (duplicate guard, hashless-linked adopt) and export
+ * completeness needs. Built from ONE paginated list — never a per-item GET — so
+ * it is cheap to consult across a whole import run.
+ */
+export interface ProjectIndex {
+	items: FetchedWorkItem[];
+	/** Work item UUID -> item. */
+	byId: Map<string, FetchedWorkItem>;
+	/** Human identifier ("ENG-42") -> item. */
+	byIdentifier: Map<string, FetchedWorkItem>;
+	/** Normalized title -> items (a list, since duplicate titles are the thing we detect). */
+	byNormalizedTitle: Map<string, FetchedWorkItem[]>;
+	/** Parent UUID -> child items (e.g. acceptance-criteria sub-items). */
+	childrenByParent: Map<string, FetchedWorkItem[]>;
+}
+
+/** Fetch a project's entire work-item set once and build lookup maps over it. */
+export async function fetchProjectIndex(
+	client: PlaneClient,
+	projectId: string,
+	projectIdentifier: string,
+): Promise<ProjectIndex> {
+	const items = await fetchWorkItems(client, projectId);
+	const byId = new Map<string, FetchedWorkItem>();
+	const byIdentifier = new Map<string, FetchedWorkItem>();
+	const byNormalizedTitle = new Map<string, FetchedWorkItem[]>();
+	const childrenByParent = new Map<string, FetchedWorkItem[]>();
+
+	for (const item of items) {
+		byId.set(item.id, item);
+		byIdentifier.set(`${projectIdentifier}-${item.sequenceId}`, item);
+
+		// Defensive: a work item always has a name in Plane, but tolerate a missing
+		// one rather than throwing while building the index.
+		const titleKey = normalizeTitle(item.name ?? "");
+		const titled = byNormalizedTitle.get(titleKey);
+		if (titled) {
+			titled.push(item);
+		} else {
+			byNormalizedTitle.set(titleKey, [item]);
+		}
+
+		if (item.parent) {
+			const kids = childrenByParent.get(item.parent);
+			if (kids) {
+				kids.push(item);
+			} else {
+				childrenByParent.set(item.parent, [item]);
+			}
+		}
+	}
+
+	return { items, byId, byIdentifier, byNormalizedTitle, childrenByParent };
+}
+
 /** Fetch work items in a project for export, resolving related names via `expand`. */
 export async function fetchWorkItems(
 	client: PlaneClient,

@@ -5,14 +5,21 @@ import type { PlaneClient } from "../plane/client.ts";
 import {
 	type CreateWorkItemInput,
 	createWorkItem,
+	fetchProjectIndex,
 	findWorkItemByExternalId,
+	normalizeTitle,
+	type ProjectIndex,
 	type UpdateWorkItemInput,
 	updateWorkItem,
 	type WorkItemRef,
 } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ImportResult, ImportSummary, ResolvedConfig, UserStory } from "../types.ts";
+import { boardItemToStory } from "./board-story.ts";
 import { hashStoryPayload } from "./story-hash.ts";
+
+/** Lazily fetch (and memoize) a project's work-item index — one list per project per run. */
+type IndexProvider = (projectId: string, projectIdentifier: string) => Promise<ProjectIndex>;
 
 /** Identifies work items this tool created, used for idempotent re-imports. */
 export const EXTERNAL_SOURCE = "planestories";
@@ -39,6 +46,14 @@ export interface ImportOptions {
 	 * warning. Does not write back plane_hash. Useful for bulk status transitions.
 	 */
 	statusOnly?: boolean;
+	/**
+	 * When a new story's title exactly matches an existing item, adopt that item
+	 * (update it + write its plane_id back) instead of skipping. A single exact
+	 * match only — multiple matches are a hard error.
+	 */
+	adoptDuplicates?: boolean;
+	/** Create even when a same-title item already exists (bypass the duplicate guard). */
+	forceCreate?: boolean;
 }
 
 /**
@@ -60,6 +75,18 @@ export async function importStories(
 	const resolver = new Resolver(client);
 	const results: ImportResult[] = [];
 
+	// One work-item index per project, fetched lazily (only creates, adopts, and
+	// hashless-linked stories need it) and reused across every story in the run.
+	const indexCache = new Map<string, Promise<ProjectIndex>>();
+	const getIndex: IndexProvider = (projectId, projectIdentifier) => {
+		let pending = indexCache.get(projectId);
+		if (!pending) {
+			pending = fetchProjectIndex(client, projectId, projectIdentifier);
+			indexCache.set(projectId, pending);
+		}
+		return pending;
+	};
+
 	for (const filePath of options.files) {
 		const fileContent = await Bun.file(filePath).text();
 		const parsed = parseMarkdownFile(fileContent, filePath);
@@ -67,19 +94,22 @@ export async function importStories(
 		const writeBackUpdates: WriteBackUpdate[] = [];
 
 		for (const story of parsed.stories) {
-			const result = await processStory(client, resolver, story, options);
+			const result = await processStory(client, resolver, story, options, getIndex);
 			results.push(result);
 
-			// Write back identifiers + content hash for any created/updated story.
-			// Covers fresh creates, external_id matches, and in-place updates whose
-			// hash changed (the plane_id/identifier/url re-emit is idempotent; the
-			// point is to refresh plane_hash). Unchanged/failed/skipped write nothing.
+			// Write back identifiers + content hash for created/updated stories, and
+			// for an ADOPTED hashless-but-linked story (action "unchanged" but the file
+			// had no plane_hash yet — store it so it is warm next time). In-place hash
+			// refreshes are idempotent on plane_id/identifier/url. Fast-path unchanged
+			// (file already had a matching hash) and failed/skipped write nothing.
 			if (
-				(result.action === "created" || result.action === "updated") &&
 				result.planeId &&
 				result.planeIdentifier &&
 				result.planeUrl &&
-				result.planeHash
+				result.planeHash &&
+				(result.action === "created" ||
+					result.action === "updated" ||
+					(result.action === "unchanged" && story.planeHash === null))
 			) {
 				writeBackUpdates.push({
 					title: story.title,
@@ -111,6 +141,7 @@ async function processStory(
 	resolver: Resolver,
 	story: UserStory,
 	options: ImportOptions,
+	getIndex: IndexProvider,
 ): Promise<ImportResult> {
 	// Content hash of the intended payload (no network). A linked story whose hash
 	// matches its stored plane_hash would be a no-op, so it is skipped with zero API
@@ -200,6 +231,40 @@ async function processStory(
 			};
 		}
 
+		// Hashless-but-linked (P0-1 warm start for legacy files): the file carries a
+		// plane_id but no plane_hash, so the fast-path skip can't fire. Rather than
+		// blind-rewrite, reconstruct the board item from the project index (ONE list,
+		// not a per-item GET) and compare hashes; if equal, skip + adopt the hash.
+		if (story.planeId && !story.planeHash && !options.force) {
+			const index = await getIndex(project.id, project.identifier);
+			const boardItem = index.byId.get(story.planeId);
+			if (boardItem) {
+				const children = options.syncCriteria
+					? index.childrenByParent.get(boardItem.id)
+					: undefined;
+				const boardStory = boardItemToStory(
+					client,
+					boardItem,
+					project.id,
+					project.identifier,
+					projectName,
+					Boolean(options.syncCriteria),
+					children,
+				);
+				if (boardStory.planeHash === contentHash) {
+					return {
+						story,
+						action: "unchanged",
+						planeId: boardItem.id,
+						planeIdentifier: `${project.identifier}-${boardItem.sequenceId}`,
+						planeUrl: client.workItemWebUrl(project.id, boardItem.id),
+						planeHash: contentHash,
+					};
+				}
+			}
+			// Not found or differs -> fall through to the normal update (writes the hash).
+		}
+
 		// Merge labels: story.labels + config.defaultLabels (deduplicated).
 		// Never create labels during a dry-run, even with --create-labels.
 		const allLabels = deduplicateLabels(story.labels, options.config.defaultLabels);
@@ -270,11 +335,44 @@ async function processStory(
 				externalId,
 				EXTERNAL_SOURCE,
 			);
-			if (existing) {
-				ref = await updateWorkItem(client, project.id, existing.id, input);
+			let adopt: { id: string; sequenceId: number } | undefined = existing ?? undefined;
+
+			// 3. Duplicate guard (P0-3): before creating, check whether an item with the
+			//    exact same title already exists in the project (any creator), via the
+			//    one-list index. Default is skip-with-warning; --adopt-duplicates links to
+			//    a SINGLE exact match (multiple = hard error); --force-create bypasses.
+			if (!adopt && !options.forceCreate) {
+				const index = await getIndex(project.id, project.identifier);
+				const matches = (index.byNormalizedTitle.get(normalizeTitle(story.title)) ?? []).filter(
+					(m) => !isCriterionExternalId(m.externalId),
+				);
+				if (matches.length > 0) {
+					if (!options.adoptDuplicates) {
+						const m = matches[0] as (typeof matches)[number];
+						return {
+							story,
+							action: "skipped",
+							note: `duplicate of ${project.identifier}-${m.sequenceId} (${
+								m.stateName ?? "no state"
+							}) — skipped. Set plane_id to link it, or pass --adopt-duplicates / --force-create.`,
+						};
+					}
+					if (matches.length > 1) {
+						const ids = matches.map((m) => `${project.identifier}-${m.sequenceId}`).join(", ");
+						throw new Error(
+							`--adopt-duplicates: ${matches.length} items share the title "${story.title}" in ${project.identifier} (${ids}). Refusing to auto-pick — set plane_id manually on the story.`,
+						);
+					}
+					const m = matches[0] as (typeof matches)[number];
+					adopt = { id: m.id, sequenceId: m.sequenceId };
+				}
+			}
+
+			if (adopt) {
+				ref = await updateWorkItem(client, project.id, adopt.id, input);
 				action = "updated";
 			} else {
-				// 3. Create path.
+				// 4. Create path.
 				input.externalId = externalId;
 				input.externalSource = EXTERNAL_SOURCE;
 				ref = await createWorkItem(client, project.id, input);
@@ -363,6 +461,11 @@ async function syncCriteriaChildren(
 			await createWorkItem(client, projectId, create);
 		}
 	}
+}
+
+/** True for a criterion sub-item external id of the form `<parent>::ac<n>`. */
+function isCriterionExternalId(externalId: string | undefined): boolean {
+	return Boolean(externalId && /::ac\d+$/.test(externalId));
 }
 
 /**
