@@ -177,6 +177,34 @@ export function normalizeTitle(title: string): string {
 	return title.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+interface RawComment {
+	comment_html?: string;
+	comment_stripped?: string;
+}
+
+/**
+ * Post a comment on a work item only if one bearing `marker` isn't already there,
+ * so repeated runs (e.g. groom) don't spam duplicate notes. `body` should embed
+ * `marker` so the next run can find it. Returns whether it actually posted.
+ */
+export async function ensureComment(
+	client: PlaneClient,
+	projectId: string,
+	workItemId: string,
+	marker: string,
+	body: string,
+): Promise<"posted" | "exists"> {
+	const existing = await client.listWorkItemComments<RawComment>(projectId, workItemId);
+	const already = existing.some(
+		(c) => (c.comment_html ?? "").includes(marker) || (c.comment_stripped ?? "").includes(marker),
+	);
+	if (already) {
+		return "exists";
+	}
+	await client.createWorkItemComment(projectId, workItemId, { comment_html: body });
+	return "posted";
+}
+
 /**
  * A one-shot, in-memory index of every work item in a project, with the lookup
  * maps the importer needs (duplicate guard, hashless-linked adopt) and export

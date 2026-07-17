@@ -221,6 +221,22 @@ export class PlaneClient {
 		return this.listAll<T>("/members/");
 	}
 
+	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]> {
+		return this.listAll<T>(`/projects/${projectId}/issues/${workItemId}/comments/`);
+	}
+
+	createWorkItemComment<T>(
+		projectId: string,
+		workItemId: string,
+		body: Record<string, unknown>,
+	): Promise<T> {
+		return this.request<T>(
+			"POST",
+			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/comments/`),
+			{ body },
+		);
+	}
+
 	createWorkItem<T>(projectId: string, body: Record<string, unknown>): Promise<T> {
 		return this.request<T>("POST", this.workspacePath(`/projects/${projectId}/issues/`), {
 			body,

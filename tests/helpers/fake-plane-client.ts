@@ -25,6 +25,8 @@ export interface FakeData {
 	members?: Record<string, Array<Record<string, unknown>>>;
 	/** Work items keyed by project id, returned by listWorkItems. */
 	workItems?: Record<string, Array<Record<string, unknown>>>;
+	/** Existing comments keyed by work item id, returned by listWorkItemComments. */
+	comments?: Record<string, Array<Record<string, unknown>>>;
 }
 
 export interface FakeClient {
@@ -34,6 +36,7 @@ export interface FakeClient {
 	createdItems: Array<{ projectId: string; body: Record<string, unknown> }>;
 	updatedItems: Array<{ projectId: string; workItemId: string; body: Record<string, unknown> }>;
 	deletedItems: Array<{ projectId: string; workItemId: string }>;
+	createdComments: Array<{ workItemId: string; body: Record<string, unknown> }>;
 }
 
 /**
@@ -46,6 +49,7 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 	const createdItems: FakeClient["createdItems"] = [];
 	const updatedItems: FakeClient["updatedItems"] = [];
 	const deletedItems: FakeClient["deletedItems"] = [];
+	const createdComments: FakeClient["createdComments"] = [];
 	let sequence = 100;
 
 	const record = (method: string, args: unknown[]) => calls.push({ method, args });
@@ -137,6 +141,24 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			deletedItems.push({ projectId, workItemId });
 		},
 
+		async listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]> {
+			record("listWorkItemComments", [projectId, workItemId]);
+			return (data.comments?.[workItemId] ?? []) as unknown as T[];
+		},
+
+		async createWorkItemComment<T>(
+			projectId: string,
+			workItemId: string,
+			body: Record<string, unknown>,
+		): Promise<T> {
+			record("createWorkItemComment", [projectId, workItemId, body]);
+			createdComments.push({ workItemId, body });
+			const list = data.comments?.[workItemId] ?? [];
+			list.push(body);
+			if (data.comments) data.comments[workItemId] = list;
+			return { id: `comment-${list.length}` } as unknown as T;
+		},
+
 		async getWorkItem<T>(projectId: string, workItemId: string): Promise<T> {
 			record("getWorkItem", [projectId, workItemId]);
 			const items = data.workItems?.[projectId] ?? [];
@@ -152,5 +174,6 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 		createdItems,
 		updatedItems,
 		deletedItems,
+		createdComments,
 	};
 }
