@@ -149,6 +149,7 @@ function workItemToUserStory(
 		planeId: item.id,
 		planeIdentifier: `${projectIdentifier}-${item.sequenceId}`,
 		planeUrl: client.workItemWebUrl(projectId, item.id),
+		planeHash: null,
 		priority: item.priority ?? null,
 		labels: item.labels,
 		estimate: item.estimate ?? null,

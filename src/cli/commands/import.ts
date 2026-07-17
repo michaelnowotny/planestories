@@ -44,6 +44,7 @@ function printDryRun(summary: ImportSummary, checked: boolean): void {
 	console.log(`  Stories:      ${summary.total}`);
 	console.log(`  Would create: ${chalk.green(String(wouldCreate))}`);
 	console.log(`  Would update: ${chalk.blue(String(wouldUpdate))}`);
+	console.log(`  Unchanged:    ${chalk.gray(String(summary.unchanged))}`);
 	if (checked) {
 		console.log(`  Invalid:      ${chalk.red(String(summary.failed))}`);
 	}
@@ -51,6 +52,10 @@ function printDryRun(summary: ImportSummary, checked: boolean): void {
 	for (const result of summary.results) {
 		if (result.action === "failed") {
 			console.log(chalk.red(`  x ${result.story.title}: ${result.error}`));
+			continue;
+		}
+		if (result.action === "unchanged") {
+			console.log(chalk.gray(`  = unchanged: ${result.story.title}`));
 			continue;
 		}
 		const mark = result.wouldAction === "update" ? chalk.blue("~") : chalk.green("+");
@@ -66,11 +71,12 @@ function printDryRun(summary: ImportSummary, checked: boolean): void {
 function printSummary(summary: ImportSummary): void {
 	console.log("");
 	console.log(chalk.bold("Import Summary"));
-	console.log(`  Total:   ${summary.total}`);
-	console.log(`  Created: ${chalk.green(String(summary.created))}`);
-	console.log(`  Updated: ${chalk.blue(String(summary.updated))}`);
-	console.log(`  Skipped: ${chalk.yellow(String(summary.skipped))}`);
-	console.log(`  Failed:  ${chalk.red(String(summary.failed))}`);
+	console.log(`  Total:     ${summary.total}`);
+	console.log(`  Created:   ${chalk.green(String(summary.created))}`);
+	console.log(`  Updated:   ${chalk.blue(String(summary.updated))}`);
+	console.log(`  Unchanged: ${chalk.gray(String(summary.unchanged))}`);
+	console.log(`  Skipped:   ${chalk.yellow(String(summary.skipped))}`);
+	console.log(`  Failed:    ${chalk.red(String(summary.failed))}`);
 
 	for (const result of summary.results) {
 		const id = result.planeIdentifier ?? "";
@@ -130,6 +136,7 @@ export function registerImportCommand(program: Command) {
 		.option("--create-labels", "Create labels that don't exist instead of skipping them", false)
 		.option("--source-label <name>", "Tag every created item with this label (auto-created)")
 		.option("--sync-criteria", "Sync each acceptance criterion to a Plane sub-item", false)
+		.option("--force", "Re-import even when content is unchanged (bypass skip-unchanged)", false)
 		.option("--dry-run", "Preview without writing to Plane", false)
 		.option(
 			"--check",
@@ -167,6 +174,7 @@ export function registerImportCommand(program: Command) {
 					createLabels: options.createLabels,
 					sourceLabel: options.sourceLabel,
 					syncCriteria: options.syncCriteria,
+					force: options.force,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});
 

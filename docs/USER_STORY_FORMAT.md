@@ -54,6 +54,7 @@ Fenced YAML block (` ```yaml ` ... ` ``` `) immediately after the H2 heading. Al
 | `plane_id`         | string   | Work item UUID. Auto-filled on import; used to update. Leave empty for new stories. |
 | `plane_identifier` | string   | Human-readable id (e.g. `ENG-42`). Auto-filled on import.             |
 | `plane_url`        | string   | Work item URL. Auto-filled on import.                                 |
+| `plane_hash`       | string   | Content hash of the last sync. Auto-managed — do not hand-edit. Lets a re-import skip a story whose content is unchanged (use `--force` to override). |
 | `priority`         | string   | `urgent`, `high`, `medium`, `low`, `none` (legacy Linear integers `0–4` are also accepted) |
 | `labels`           | string[] | Label names (resolved within the project). Merged with `defaultLabels` from config. Missing labels are skipped unless `--create-labels`. |
 | `estimate`         | number   | Story points.                                                         |

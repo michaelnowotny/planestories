@@ -18,6 +18,12 @@ export interface UserStory {
 	planeIdentifier: string | null;
 	/** Plane work item URL, null if not yet imported */
 	planeUrl: string | null;
+	/**
+	 * Content hash of the last-synced payload, null if never synced. Used to skip
+	 * re-importing a linked story whose content hasn't changed (P0-1). Written back
+	 * as `plane_hash`.
+	 */
+	planeHash: string | null;
 	/** Priority: urgent | high | medium | low | none (null = unset) */
 	priority: PlanePriority | null;
 	/** Label names to apply */
@@ -109,10 +115,12 @@ export interface PlaneWorkItemData {
 
 export interface ImportResult {
 	story: UserStory;
-	action: "created" | "updated" | "failed" | "skipped";
+	action: "created" | "updated" | "failed" | "skipped" | "unchanged";
 	planeId?: string;
 	planeIdentifier?: string;
 	planeUrl?: string;
+	/** Content hash of the synced payload, written back as `plane_hash`. */
+	planeHash?: string;
 	/** Board URL of the project this story landed in (for a "view in Plane" hint). */
 	projectUrl?: string;
 	error?: string;
@@ -128,6 +136,8 @@ export interface ImportSummary {
 	updated: number;
 	failed: number;
 	skipped: number;
+	/** Linked stories whose content hash matched — zero API writes made (P0-1). */
+	unchanged: number;
 	results: ImportResult[];
 	/** Distinct label names created via --create-labels this run. */
 	labelsCreated: string[];

@@ -1,4 +1,5 @@
 import { type AcceptanceCriterion, splitBody } from "../markdown/criteria.ts";
+import { markdownToHtml } from "../markdown/html.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
 import { type WriteBackUpdate, writeBackIds } from "../markdown/writer.ts";
 import type { PlaneClient } from "../plane/client.ts";
@@ -12,6 +13,7 @@ import {
 } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ImportResult, ImportSummary, ResolvedConfig, UserStory } from "../types.ts";
+import { payloadHash } from "./content-hash.ts";
 
 /** Identifies work items this tool created, used for idempotent re-imports. */
 export const EXTERNAL_SOURCE = "planestories";
@@ -30,6 +32,8 @@ export interface ImportOptions {
 	syncCriteria?: boolean;
 	/** Tag every created item with this label (auto-created); overrides config.sourceLabel. */
 	sourceLabel?: string;
+	/** Re-import even when the content hash matches (bypass skip-unchanged). */
+	force?: boolean;
 }
 
 /**
@@ -61,20 +65,23 @@ export async function importStories(
 			const result = await processStory(client, resolver, story, options);
 			results.push(result);
 
-			// Write back identifiers for any story whose markdown didn't already
-			// carry a plane_id (covers both fresh creates and external_id matches).
+			// Write back identifiers + content hash for any created/updated story.
+			// Covers fresh creates, external_id matches, and in-place updates whose
+			// hash changed (the plane_id/identifier/url re-emit is idempotent; the
+			// point is to refresh plane_hash). Unchanged/failed/skipped write nothing.
 			if (
-				story.planeId === null &&
+				(result.action === "created" || result.action === "updated") &&
 				result.planeId &&
 				result.planeIdentifier &&
 				result.planeUrl &&
-				(result.action === "created" || result.action === "updated")
+				result.planeHash
 			) {
 				writeBackUpdates.push({
 					title: story.title,
 					planeId: result.planeId,
 					planeIdentifier: result.planeIdentifier,
 					planeUrl: result.planeUrl,
+					planeHash: result.planeHash,
 				});
 			}
 		}
@@ -100,6 +107,34 @@ async function processStory(
 	story: UserStory,
 	options: ImportOptions,
 ): Promise<ImportResult> {
+	// Content hash of the intended payload (no network). A linked story whose hash
+	// matches its stored plane_hash would be a no-op, so it is skipped with zero API
+	// writes. Computed here so dry-run and real imports agree on "unchanged".
+	const { narrative, criteria } = splitBody(story.body);
+	const bodyForParent = options.syncCriteria ? narrative : story.body;
+	const contentHash = payloadHash({
+		name: story.title,
+		descriptionHtml: bodyForParent ? markdownToHtml(bodyForParent) : "",
+		priority: story.priority,
+		status: story.status,
+		estimate: story.estimate,
+		labels: effectiveLabelNames(story, options),
+		assignee: story.assignee,
+		syncCriteria: Boolean(options.syncCriteria),
+		criteria: criteria.map((c) => ({ text: c.text, checked: c.checked })),
+	});
+
+	if (story.planeId && story.planeHash && !options.force && contentHash === story.planeHash) {
+		return {
+			story,
+			action: "unchanged",
+			planeId: story.planeId,
+			planeIdentifier: story.planeIdentifier ?? undefined,
+			planeUrl: story.planeUrl ?? undefined,
+			planeHash: contentHash,
+		};
+	}
+
 	// Plain dry-run (no --check) validates parsing only and makes no network calls.
 	if (options.dryRun && !options.check) {
 		return { story, action: "skipped", wouldAction: story.planeId ? "update" : "create" };
@@ -161,11 +196,9 @@ async function processStory(
 			}
 		}
 
-		// When syncing criteria to sub-items, the parent description holds the
-		// narrative only; the checklist lives as child work items.
-		const { narrative, criteria } = splitBody(story.body);
-		const bodyForParent = options.syncCriteria ? narrative : story.body;
-
+		// narrative / criteria / bodyForParent were computed above (for the hash).
+		// When syncing criteria to sub-items the parent holds the narrative only;
+		// the checklist lives as child work items.
 		const input: CreateWorkItemInput = { name: story.title };
 		if (bodyForParent) input.body = bodyForParent;
 		if (labelIds.length > 0) input.labelIds = labelIds;
@@ -206,7 +239,7 @@ async function processStory(
 			await syncCriteriaChildren(client, resolver, project.id, ref.id, externalId, criteria);
 		}
 
-		return makeResult(client, story, project.id, project.identifier, ref, action);
+		return makeResult(client, story, project.id, project.identifier, ref, action, contentHash);
 	} catch (error) {
 		return {
 			story,
@@ -223,6 +256,7 @@ function makeResult(
 	projectIdentifier: string,
 	ref: { id: string; sequenceId: number },
 	action: "created" | "updated",
+	contentHash: string,
 ): ImportResult {
 	return {
 		story,
@@ -230,6 +264,7 @@ function makeResult(
 		planeId: ref.id,
 		planeIdentifier: `${projectIdentifier}-${ref.sequenceId}`,
 		planeUrl: client.workItemWebUrl(projectId, ref.id),
+		planeHash: contentHash,
 		projectUrl: client.projectBoardUrl(projectId),
 	};
 }
@@ -297,6 +332,21 @@ export function makeExternalId(title: string): string {
 }
 
 /**
+ * The effective label NAMES an import would apply: story labels + config default
+ * labels, plus the source label when one is configured/flagged. Used for the
+ * content hash so a change to any of these (or toggling --source-label) is
+ * detected. Mirrors the name set the write path resolves to IDs.
+ */
+function effectiveLabelNames(story: UserStory, options: ImportOptions): string[] {
+	const labels = deduplicateLabels(story.labels, options.config.defaultLabels);
+	const sourceLabel = options.sourceLabel ?? options.config.sourceLabel;
+	if (sourceLabel && !labels.includes(sourceLabel)) {
+		labels.push(sourceLabel);
+	}
+	return labels;
+}
+
+/**
  * Deduplicate labels from story and default labels.
  */
 function deduplicateLabels(storyLabels: string[], defaultLabels: string[]): string[] {
@@ -321,6 +371,7 @@ function buildSummary(results: ImportResult[]): ImportSummary {
 	let updated = 0;
 	let failed = 0;
 	let skipped = 0;
+	let unchanged = 0;
 
 	for (const result of results) {
 		switch (result.action) {
@@ -336,6 +387,9 @@ function buildSummary(results: ImportResult[]): ImportSummary {
 			case "skipped":
 				skipped++;
 				break;
+			case "unchanged":
+				unchanged++;
+				break;
 		}
 	}
 
@@ -345,6 +399,7 @@ function buildSummary(results: ImportResult[]): ImportSummary {
 		updated,
 		failed,
 		skipped,
+		unchanged,
 		results,
 		labelsCreated: [],
 		labelsSkipped: [],

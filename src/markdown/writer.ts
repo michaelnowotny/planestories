@@ -3,12 +3,15 @@ export interface WriteBackUpdate {
 	planeId: string;
 	planeIdentifier: string;
 	planeUrl: string;
+	/** Content hash of the synced payload, stored as `plane_hash` (P0-1 skip-unchanged). */
+	planeHash: string;
 }
 
 /**
- * Clear the plane_id / plane_identifier / plane_url VALUES (keeping the keys) for
- * the given story titles. This is the inverse of write-back, used by `delete` so
- * a deleted-then-re-imported story is treated as new.
+ * Clear the plane_id / plane_identifier / plane_url / plane_hash VALUES (keeping
+ * the keys) for the given story titles. This is the inverse of write-back, used
+ * by `delete` so a deleted-then-re-imported story is treated as new (a lingering
+ * plane_hash must not cause a re-created story to be skipped as "unchanged").
  */
 export function clearWriteBack(content: string, titles: string[]): string {
 	if (titles.length === 0) {
@@ -25,7 +28,7 @@ export function clearWriteBack(content: string, titles: string[]): string {
 				return line;
 			}
 			if (currentTitle && wanted.has(currentTitle)) {
-				const match = line.match(/^(\s*)(plane_id|plane_identifier|plane_url):/);
+				const match = line.match(/^(\s*)(plane_id|plane_identifier|plane_url|plane_hash):/);
 				if (match) {
 					return `${match[1]}${match[2]}:`;
 				}
@@ -40,12 +43,14 @@ const FIELD_ORDER: ReadonlyArray<keyof Omit<WriteBackUpdate, "title">> = [
 	"planeId",
 	"planeIdentifier",
 	"planeUrl",
+	"planeHash",
 ];
 
 const FIELD_TO_YAML: Record<keyof Omit<WriteBackUpdate, "title">, string> = {
 	planeId: "plane_id",
 	planeIdentifier: "plane_identifier",
 	planeUrl: "plane_url",
+	planeHash: "plane_hash",
 };
 
 /**

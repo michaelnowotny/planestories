@@ -83,6 +83,7 @@ bun run src/cli/index.ts import /path/to/stories.md
 #   --sync-criteria   sync each acceptance criterion to a Plane sub-item (state from its checkbox)
 #   --source-label N  tag every created item with label N (auto-created; opt-in, also via config)
 #   --project "Name"  override the project for all stories
+#   --force           re-import even when content is unchanged (bypass skip-unchanged)
 #   --no-write-back   don't modify the markdown file
 
 # Export back to markdown (HTML description -> markdown; checklists survive):
@@ -120,11 +121,19 @@ project.
 
 ## Idempotency & write-back
 
-- After a successful create, `plane_id` (UUID), `plane_identifier` (e.g. `PROJ-12`), and
-  `plane_url` are written back into each story's YAML block.
+- After a successful create, `plane_id` (UUID), `plane_identifier` (e.g. `PROJ-12`),
+  `plane_url`, and `plane_hash` are written back into each story's YAML block.
 - Re-running an import is **idempotent**: a story with a `plane_id` updates by UUID; a
   story without one is matched by `external_id` (derived from the title) and updated —
   never duplicated.
+- **Skip-unchanged:** a linked story whose content matches its stored `plane_hash` is
+  reported as `unchanged` and makes **zero** API writes — so re-importing a large,
+  mostly-static board is cheap and safe. `plane_hash` is a hash of the rendered payload
+  (description as HTML, priority, state, estimate, labels, assignee, and — with
+  `--sync-criteria` — the checklist), so cosmetic markdown reflow won't trigger a write.
+  Pass `--force` to re-import regardless. (An out-of-band edit made in the Plane UI while
+  the file is untouched is intentionally NOT detected here — that half of the reconcile
+  loop belongs to the forthcoming `groom` reverse-sync.)
 
 ## Caveats
 

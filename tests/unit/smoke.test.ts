@@ -13,6 +13,7 @@ describe("smoke test", () => {
 			planeId: null,
 			planeIdentifier: null,
 			planeUrl: null,
+			planeHash: null,
 			priority: null,
 			labels: [],
 			estimate: null,

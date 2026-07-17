@@ -75,26 +75,71 @@ describe("import flow (end to end)", () => {
 		const updated = readFileSync(filePath, "utf-8");
 		expect(updated).toContain("plane_id: wi-101");
 		expect(updated).toContain("plane_identifier: ENG-101");
+		// Content hash is written back for skip-unchanged (P0-1).
+		expect(updated).toContain("plane_hash: ");
 		// Body / acceptance criteria preserved
 		expect(updated).toContain("### Acceptance Criteria");
 		expect(updated).toContain("- [ ] User can log in");
 	});
 
-	test("re-importing after write-back updates instead of duplicating", async () => {
+	test("re-importing unchanged content is skipped as unchanged (zero writes)", async () => {
 		const filePath = join(tmpDir, "stories.md");
 		writeFileSync(filePath, markdown);
 
-		// First import creates + writes back.
+		// First import creates + writes back plane_id and plane_hash.
 		const first = makeFakeClient(baseData());
 		await importStories(first.client, { files: [filePath], config });
 
-		// Second import: the file now carries plane_id, so it takes the update path.
+		// Second import: content unchanged, so the stored hash matches -> no API writes.
+		const second = makeFakeClient(baseData());
+		const summary = await importStories(second.client, { files: [filePath], config });
+
+		expect(summary.created).toBe(0);
+		expect(summary.updated).toBe(0);
+		expect(summary.unchanged).toBe(1);
+		expect(second.createdItems).toHaveLength(0);
+		expect(second.updatedItems).toHaveLength(0);
+	});
+
+	test("changing content re-triggers an update (hash differs)", async () => {
+		const filePath = join(tmpDir, "stories.md");
+		writeFileSync(filePath, markdown);
+
+		const first = makeFakeClient(baseData());
+		await importStories(first.client, { files: [filePath], config });
+
+		// Edit the narrative; the plane_* metadata block is preserved.
+		const edited = readFileSync(filePath, "utf-8").replace(
+			"Login description.",
+			"Login description, now with SSO.",
+		);
+		writeFileSync(filePath, edited);
+
 		const second = makeFakeClient(baseData());
 		const summary = await importStories(second.client, { files: [filePath], config });
 
 		expect(summary.created).toBe(0);
 		expect(summary.updated).toBe(1);
-		expect(second.createdItems).toHaveLength(0);
+		expect(summary.unchanged).toBe(0);
+		expect(second.updatedItems).toHaveLength(1);
+	});
+
+	test("--force re-imports even when content is unchanged", async () => {
+		const filePath = join(tmpDir, "stories.md");
+		writeFileSync(filePath, markdown);
+
+		const first = makeFakeClient(baseData());
+		await importStories(first.client, { files: [filePath], config });
+
+		const second = makeFakeClient(baseData());
+		const summary = await importStories(second.client, {
+			files: [filePath],
+			config,
+			force: true,
+		});
+
+		expect(summary.unchanged).toBe(0);
+		expect(summary.updated).toBe(1);
 		expect(second.updatedItems).toHaveLength(1);
 	});
 });

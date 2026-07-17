@@ -88,6 +88,7 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 	const planeId = extractStringOrNull(metadata.plane_id);
 	const planeIdentifier = extractStringOrNull(metadata.plane_identifier);
 	const planeUrl = extractStringOrNull(metadata.plane_url);
+	const planeHash = extractStringOrNull(metadata.plane_hash);
 	const priority = normalizePriority(metadata.priority);
 	const labels = extractLabels(metadata.labels);
 	const estimate = extractNumberOrNull(metadata.estimate);
@@ -102,6 +103,7 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 		planeId,
 		planeIdentifier,
 		planeUrl,
+		planeHash,
 		priority,
 		labels,
 		estimate,

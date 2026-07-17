@@ -8,6 +8,7 @@ function makeStory(overrides: Partial<UserStory> = {}): UserStory {
 		planeId: null,
 		planeIdentifier: null,
 		planeUrl: null,
+		planeHash: null,
 		priority: null,
 		labels: [],
 		estimate: null,

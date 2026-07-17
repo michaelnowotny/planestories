@@ -13,12 +13,14 @@ const ENG42 = {
 	planeId: "aaaa1111-1111-4111-8111-111111111111",
 	planeIdentifier: "ENG-42",
 	planeUrl: "https://app.plane.so/ws/projects/p/issues/aaaa1111-1111-4111-8111-111111111111",
+	planeHash: "0123456789abcdef",
 };
 
 const ENG43 = {
 	planeId: "bbbb3333-3333-4333-8333-333333333333",
 	planeIdentifier: "ENG-43",
 	planeUrl: "https://app.plane.so/ws/projects/p/issues/bbbb3333-3333-4333-8333-333333333333",
+	planeHash: "fedcba9876543210",
 };
 
 describe("writeBackIds", () => {
@@ -33,6 +35,7 @@ describe("writeBackIds", () => {
 		expect(result).toContain(`plane_id: ${ENG42.planeId}`);
 		expect(result).toContain(`plane_identifier: ${ENG42.planeIdentifier}`);
 		expect(result).toContain(`plane_url: ${ENG42.planeUrl}`);
+		expect(result).toContain(`plane_hash: ${ENG42.planeHash}`);
 	});
 
 	test("preserves all other content exactly (frontmatter, body, acceptance criteria)", () => {
@@ -71,6 +74,7 @@ describe("writeBackIds", () => {
 				planeId: "cccc9999-9999-4999-8999-999999999999",
 				planeIdentifier: "ENG-99",
 				planeUrl: "https://app.plane.so/ws/projects/p/issues/cccc9999-9999-4999-8999-999999999999",
+				planeHash: "abcabcabcabcabca",
 			},
 		];
 
