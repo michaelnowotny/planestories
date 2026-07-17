@@ -18,9 +18,11 @@ Each issue is:
 - A `## <title>` H2 heading (user stories are typically "As a ..., I want ... so that ...").
 - An optional fenced `yaml` block immediately after it with Plane metadata (`plane_id`, `plane_identifier`, `plane_url`, `plane_hash`, `priority`, `labels`, `status`, `assignee`, `estimate`, `parent`, `kind`).
 - A description body.
-- For user stories, a `### Acceptance Criteria` checkbox list (`- [ ] ...`).
+- For user stories, acceptance criteria as either an inline `### Acceptance Criteria` checkbox list (`- [ ] ...`) OR separate `kind: criterion` child issues that reference the story via `parent:` (how a `--sync-criteria` export represents them).
 
 File-level YAML frontmatter carries the default `project`. The `plane_*` fields and `plane_hash` are tool-managed — preserve them verbatim.
+
+**A note on exported files.** In a file produced by `export` (now the best-annotated input, since it stamps `kind`/`parent`), a story's acceptance criteria and an epic's inline ACs are both rendered as separate `kind: criterion` child issues, not inline sections. So exported epics are AC-less by construction (satisfying the epic-with-AC rule automatically), and exported stories carry their ACs as criterion children — evaluate those as the story's acceptance criteria per the Structural Rules below.
 
 ## Classification
 
@@ -47,16 +49,16 @@ An epic:
 
 A user story:
 - Is not an epic.
-- Has a `### Acceptance Criteria` section with checkbox items.
+- Has acceptance criteria in EITHER form: (a) an inline `### Acceptance Criteria` checkbox list, OR (b) one or more `kind: criterion` sub-items that reference it via `parent:`. Form (b) is how a file exported with `--sync-criteria` represents them — the ACs live as child items, not an inline section. Gather any such criterion children under their parent story and evaluate their text AS that story's acceptance criteria (verify on the board too, if you have access).
 - May carry an optional `parent: <EPIC-IDENTIFIER>`.
 
-Treat these as structural failures: an epic with acceptance criteria; a nested epic (an epic with its own `parent`); malformed or unparseable `yaml`; a user story with no acceptance criteria; a `parent` that resolves to a **non-epic issue in this file**.
+Treat these as structural failures: an epic with acceptance criteria; a nested epic (an epic with its own `parent`); malformed or unparseable `yaml`; a user story with **NEITHER an inline `### Acceptance Criteria` section NOR any `kind: criterion` children referencing it**; a `parent` that resolves to a **non-epic issue in this file**.
 
 planestories supports **cross-file nesting**, so a `parent:` identifier that is **not present in this file** is most likely a valid reference to an epic in another file — note it under Hierarchy Review, do NOT treat it as a structural failure. Only a same-file `parent` pointing at a non-epic is a failure. If you have Plane/board access in this session (e.g. the Plane MCP), verify the identifier resolves to an epic and report the result — "noted, verified epic DATA-793 (In Progress)" is strictly better than "noted, unverified".
 
 A missing or empty `### Why is this needed?` section is not a structural hard fail. Score it zero for Epic Rationale, which caps the epic at 70% and therefore fails it at the 80% threshold.
 
-**House-convention override (optional).** If the invoker states that this project's convention is that epics carry acceptance criteria as their close/exit conditions, treat "an epic with acceptance criteria" as a WARNING for this run rather than a structural failure. The `### Why is this needed?` → zero-Rationale → 70% cap still applies, so a rationale-less epic still fails on score — this override only relaxes the epic-with-AC structural gate so an existing board can be rated without drowning real findings in structural fails.
+**House-convention override (optional).** Files produced by `export` are already AC-less for epics by construction (inline ACs become `kind: criterion` children), so this override is mainly for HAND-AUTHORED pre-import files where an epic keeps inline acceptance criteria. In that case, if the invoker states that the project's convention is that epics carry acceptance criteria as their close/exit conditions, treat "an epic with acceptance criteria" as a WARNING for this run rather than a structural failure. The `### Why is this needed?` → zero-Rationale → 70% cap still applies, so a rationale-less epic still fails on score — this override only relaxes the epic-with-AC structural gate so an existing board can be rated without drowning real findings in structural fails.
 
 ## User Story Rubric
 
@@ -216,6 +218,6 @@ List passing epics and stories briefly:
 - Preserve `plane_id`, `plane_identifier`, `plane_url`, `plane_hash`, `labels`, `parent`, and `kind` unless changing them is necessary to fix a hierarchy error. `plane_hash` is tool-managed — never hand-edit it.
 - Never add acceptance criteria to an epic.
 - Never penalize an epic merely for lacking acceptance criteria.
-- Never allow a user story without acceptance criteria to pass.
+- Never allow a user story with NO acceptance criteria in either form (inline `### Acceptance Criteria` section OR `kind: criterion` children) to pass — but do NOT fail an exported story merely because its ACs live as criterion children rather than an inline section.
 - Be strict but fair — the goal is actionable improvement, not nitpicking.
 - Treat replacement markdown as a proposal for human review; do NOT modify the source file.

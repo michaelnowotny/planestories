@@ -52,9 +52,11 @@ Before grading quality, the skill verifies each issue is structurally valid for 
 
 - **Every issue** — `##` H2 title, optional fenced `yaml` block immediately after it, meaningful body.
 - **Epic** — `kind: epic` (or `Epic` label / referenced as a `parent`); no `parent` of its own; **no** `### Acceptance Criteria`; a substantive `### Why is this needed?` section.
-- **User story** — a `### Acceptance Criteria` checkbox list (`- [ ] ...`); optional `parent`.
+- **User story** — acceptance criteria in either form: an inline `### Acceptance Criteria` checkbox list, OR one or more `kind: criterion` sub-items that reference it via `parent:` (how a `--sync-criteria` export represents them); optional `parent`.
 
-Structural failures include: an epic with acceptance criteria, a nested epic (an epic with its own `parent`), malformed `yaml`, a user story without acceptance criteria, and a `parent` that resolves to a non-epic **in the same file**.
+Structural failures include: an epic with acceptance criteria, a nested epic (an epic with its own `parent`), malformed `yaml`, a user story with **neither** an inline `### Acceptance Criteria` section **nor** any `kind: criterion` children referencing it, and a `parent` that resolves to a non-epic **in the same file**.
+
+**Exported files self-annotate.** A file produced by `export` (now the best-annotated input) stamps `kind`/`parent` and renders both a story's acceptance criteria and an epic's inline ACs as separate `kind: criterion` child issues — so exported **epics are AC-less by construction** (the epic-with-AC rule is satisfied automatically, and the house-convention override below is only needed for hand-authored pre-import files), and exported **stories carry their ACs as criterion children**, which the skill evaluates as that story's acceptance criteria.
 
 Because planestories supports **cross-file nesting**, a `parent:` identifier that is not present in the file is treated as a likely valid reference to an epic in another file — noted in the Hierarchy Review, not failed. When the session has Plane board access (the Plane MCP), the skill can verify that identifier resolves to a real epic and label it "verified"/"unverified".
 
