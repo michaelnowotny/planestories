@@ -142,6 +142,10 @@ project.
   hard-deleting, and archived items are hidden from `export` by default.
 - Targets Plane Cloud by default; `PLANE_BASE_URL` / `baseUrl` can point at a self-hosted
   instance.
+- Transient Plane API failures (HTTP 429 rate limits, 5xx, network blips) are retried
+  automatically — honoring `Retry-After` when present, else exponential backoff with jitter.
+  Tune with `PLANE_MAX_RETRIES` (default 5; 0 disables). Bulk imports/grooms of large boards
+  no longer fall over on a rate limit.
 
 ## Optional: you're doing a shakedown / test run
 

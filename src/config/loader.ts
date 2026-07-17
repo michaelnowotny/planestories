@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ConfigError } from "../errors.ts";
-import { DEFAULT_PLANE_BASE_URL } from "../plane/client.ts";
+import { DEFAULT_MAX_RETRIES, DEFAULT_PLANE_BASE_URL } from "../plane/client.ts";
 import type { CliConfig, MultiContextConfig, ResolvedConfig } from "../types.ts";
 import { assertConfigFile, isMultiContextConfig } from "./schema.ts";
 
@@ -170,5 +170,22 @@ function resolveConfig(config: CliConfig): ResolvedConfig {
 		defaultProject: config.defaultProject ?? null,
 		defaultLabels: config.defaultLabels ?? [],
 		sourceLabel: config.sourceLabel ?? null,
+		maxRetries: parseMaxRetries(process.env.PLANE_MAX_RETRIES),
 	};
+}
+
+/**
+ * Parse PLANE_MAX_RETRIES from the environment, falling back to the client default.
+ * Non-numeric, negative, or empty values fall back rather than error — this is an
+ * operational knob, not a hard requirement.
+ */
+function parseMaxRetries(raw: string | undefined): number {
+	if (raw === undefined || raw.trim() === "") {
+		return DEFAULT_MAX_RETRIES;
+	}
+	const n = Number(raw);
+	if (!Number.isFinite(n) || n < 0) {
+		return DEFAULT_MAX_RETRIES;
+	}
+	return Math.floor(n);
 }

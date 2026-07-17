@@ -77,6 +77,8 @@ export interface ResolvedConfig {
 	defaultLabels: string[];
 	/** Source label to tag created items with, or null when disabled. */
 	sourceLabel: string | null;
+	/** Retry budget for transient Plane API failures (429/5xx/network). From PLANE_MAX_RETRIES. */
+	maxRetries: number;
 }
 
 export interface ExportFilters {

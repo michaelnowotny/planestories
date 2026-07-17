@@ -2,11 +2,29 @@ import { PlaneApiError } from "../errors.ts";
 
 export const DEFAULT_PLANE_BASE_URL = "https://api.plane.so";
 
+/** Default number of retry attempts for transient failures (on top of the initial try). */
+export const DEFAULT_MAX_RETRIES = 5;
+/** Default base backoff delay in ms; doubles per attempt and gains jitter. */
+export const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+/** Upper bound on any single backoff delay, so a large Retry-After or high attempt can't stall forever. */
+export const DEFAULT_MAX_RETRY_DELAY_MS = 30_000;
+
 export interface PlaneClientOptions {
 	apiKey: string;
 	workspaceSlug: string;
 	/** API base URL. Defaults to Plane Cloud (https://api.plane.so). */
 	baseUrl?: string;
+	/**
+	 * Number of retries for transient failures (HTTP 429, 5xx, network errors)
+	 * on top of the initial attempt. Default 5. Set 0 to disable retries.
+	 */
+	maxRetries?: number;
+	/** Base backoff delay in ms (default 500). */
+	retryBaseDelayMs?: number;
+	/** Cap on any single backoff delay in ms (default 30000). */
+	maxRetryDelayMs?: number;
+	/** Injectable sleep, so tests can run without real delays. */
+	sleep?: (ms: number) => Promise<void>;
 }
 
 interface RequestOptions {
@@ -30,18 +48,31 @@ interface PlanePage<T> {
  * The Plane web app lives on a different host than the API on Cloud
  * (api.plane.so vs app.plane.so); `webBaseUrl` derives the browser URL used
  * for write-back links.
+ *
+ * Every request is wrapped in transient-failure retry: HTTP 429 (honoring
+ * `Retry-After`), 5xx, and network errors are retried with exponential backoff
+ * plus jitter up to `maxRetries` times before the error surfaces. This protects
+ * bulk imports/grooms from the rate limits that motivated this behavior.
  */
 export class PlaneClient {
 	readonly apiKey: string;
 	readonly workspaceSlug: string;
 	readonly baseUrl: string;
 	readonly webBaseUrl: string;
+	readonly maxRetries: number;
+	readonly retryBaseDelayMs: number;
+	readonly maxRetryDelayMs: number;
+	private readonly sleep: (ms: number) => Promise<void>;
 
 	constructor(options: PlaneClientOptions) {
 		this.apiKey = options.apiKey;
 		this.workspaceSlug = options.workspaceSlug;
 		this.baseUrl = (options.baseUrl ?? DEFAULT_PLANE_BASE_URL).replace(/\/+$/, "");
 		this.webBaseUrl = deriveWebBaseUrl(this.baseUrl);
+		this.maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES);
+		this.retryBaseDelayMs = options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+		this.maxRetryDelayMs = options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
+		this.sleep = options.sleep ?? defaultSleep;
 	}
 
 	/** Absolute browser URL for a work item, used in markdown write-back. */
@@ -58,6 +89,13 @@ export class PlaneClient {
 		return `/api/v1/workspaces/${this.workspaceSlug}${suffix}`;
 	}
 
+	/** Exponential backoff with jitter for a given (1-based) attempt number. */
+	private backoffDelay(attempt: number): number {
+		const exp = this.retryBaseDelayMs * 2 ** (attempt - 1);
+		const jitter = Math.random() * this.retryBaseDelayMs;
+		return Math.min(exp + jitter, this.maxRetryDelayMs);
+	}
+
 	async request<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
 		const url = new URL(`${this.baseUrl}${path}`);
 		if (options.query) {
@@ -68,46 +106,68 @@ export class PlaneClient {
 			}
 		}
 
-		let response: Response;
-		try {
-			response = await fetch(url.toString(), {
-				method,
-				headers: {
-					"X-API-Key": this.apiKey,
-					"Content-Type": "application/json",
-					Accept: "application/json",
-				},
-				body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-			});
-		} catch (error) {
-			throw new PlaneApiError(
-				`Network error calling Plane API (${method} ${path}): ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			);
-		}
+		const init: RequestInit = {
+			method,
+			headers: {
+				"X-API-Key": this.apiKey,
+				"Content-Type": "application/json",
+				Accept: "application/json",
+			},
+			body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+		};
 
-		if (response.status === 404 && options.allowNotFound) {
-			return null as T;
-		}
+		// attempt is 1-based; we allow up to maxRetries retries after the first try.
+		let attempt = 0;
+		while (true) {
+			attempt++;
 
-		if (!response.ok) {
-			const detail = await safeErrorDetail(response);
-			throw new PlaneApiError(
-				`Plane API ${method} ${path} failed (${response.status} ${response.statusText})${
-					detail ? `: ${detail}` : ""
-				}`,
-			);
-		}
+			let response: Response;
+			try {
+				response = await fetch(url.toString(), init);
+			} catch (error) {
+				// Network-level failure: retry (transient) until the budget is spent.
+				if (attempt <= this.maxRetries) {
+					await this.sleep(this.backoffDelay(attempt));
+					continue;
+				}
+				throw new PlaneApiError(
+					`Network error calling Plane API (${method} ${path}): ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+			}
 
-		if (response.status === 204) {
-			return undefined as T;
-		}
+			if (response.status === 404 && options.allowNotFound) {
+				return null as T;
+			}
 
-		try {
-			return (await response.json()) as T;
-		} catch {
-			return undefined as T;
+			// Transient HTTP failures (rate limit / server errors): honor Retry-After
+			// when present, else exponential backoff, until the retry budget is spent.
+			if (isRetryableStatus(response.status) && attempt <= this.maxRetries) {
+				const delay =
+					parseRetryAfterMs(response, this.maxRetryDelayMs) ?? this.backoffDelay(attempt);
+				await this.sleep(delay);
+				continue;
+			}
+
+			if (!response.ok) {
+				const detail = await safeErrorDetail(response);
+				throw new PlaneApiError(
+					`Plane API ${method} ${path} failed (${response.status} ${response.statusText})${
+						detail ? `: ${detail}` : ""
+					}`,
+				);
+			}
+
+			if (response.status === 204) {
+				return undefined as T;
+			}
+
+			try {
+				return (await response.json()) as T;
+			} catch {
+				return undefined as T;
+			}
 		}
 	}
 
@@ -236,6 +296,40 @@ export function deriveWebBaseUrl(apiBaseUrl: string): string {
 	} catch {
 		return apiBaseUrl;
 	}
+}
+
+/** HTTP statuses worth retrying: rate limiting (429) and transient server errors (5xx). */
+function isRetryableStatus(status: number): boolean {
+	return status === 429 || (status >= 500 && status < 600);
+}
+
+/**
+ * Parse a `Retry-After` header into milliseconds. Supports both the delta-seconds
+ * form ("120") and the HTTP-date form. Returns undefined when absent/unparseable,
+ * and clamps the result to [0, maxDelayMs].
+ */
+function parseRetryAfterMs(response: Response, maxDelayMs: number): number | undefined {
+	const header = response.headers.get("retry-after");
+	if (!header) {
+		return undefined;
+	}
+	const seconds = Number(header);
+	if (Number.isFinite(seconds)) {
+		return clampDelay(seconds * 1000, maxDelayMs);
+	}
+	const dateMs = Date.parse(header);
+	if (!Number.isNaN(dateMs)) {
+		return clampDelay(dateMs - Date.now(), maxDelayMs);
+	}
+	return undefined;
+}
+
+function clampDelay(ms: number, maxDelayMs: number): number {
+	return Math.min(Math.max(0, ms), maxDelayMs);
+}
+
+function defaultSleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function safeErrorDetail(response: Response): Promise<string | undefined> {

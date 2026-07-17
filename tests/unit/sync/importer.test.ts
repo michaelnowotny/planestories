@@ -16,6 +16,7 @@ const defaultConfig: ResolvedConfig = {
 	defaultProject: "Q1 Release",
 	defaultLabels: [],
 	sourceLabel: null,
+	maxRetries: 5,
 };
 
 /** Fake-client data with a project, label, state and member that all resolve. */

@@ -89,6 +89,7 @@ describe("loadConfig", () => {
 			defaultProject: "Q1 2026 Release",
 			defaultLabels: ["User Story"],
 			sourceLabel: null,
+			maxRetries: 5,
 		} satisfies ResolvedConfig);
 	});
 

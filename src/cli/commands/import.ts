@@ -154,6 +154,7 @@ export function registerImportCommand(program: Command) {
 					apiKey: config.apiKey,
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
+					maxRetries: config.maxRetries,
 				});
 
 				// Import

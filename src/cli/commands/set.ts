@@ -54,6 +54,7 @@ export function registerSetCommand(program: Command) {
 					apiKey: config.apiKey,
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
+					maxRetries: config.maxRetries,
 				});
 
 				const summary = await setWorkItems(client, {

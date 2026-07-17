@@ -16,6 +16,7 @@ const config: ResolvedConfig = {
 	defaultProject: "Q1 Release",
 	defaultLabels: [],
 	sourceLabel: null,
+	maxRetries: 5,
 };
 
 function baseData(extra: Partial<FakeData> = {}): FakeData {
