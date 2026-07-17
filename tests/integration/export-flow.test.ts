@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseMarkdownFile } from "../../src/markdown/parser.ts";
 import { exportStories } from "../../src/sync/exporter.ts";
+import { importStories } from "../../src/sync/importer.ts";
 import type { ResolvedConfig } from "../../src/types.ts";
 import { type FakeData, makeFakeClient } from "../helpers/fake-plane-client.ts";
 
@@ -81,5 +82,25 @@ describe("export flow (end to end)", () => {
 		// The acceptance-criteria checklist survives the HTML round-trip.
 		expect(story.body).toContain("### Acceptance Criteria");
 		expect(story.body).toContain("- [ ] enters email");
+	});
+
+	test("exported files carry plane_hash so a re-import starts warm (unchanged, zero writes)", async () => {
+		const outputPath = join(tmpDir, "export.md");
+
+		const exportClient = makeFakeClient(data());
+		await exportStories(exportClient.client, { config, filters: {}, outputPath });
+
+		const content = readFileSync(outputPath, "utf-8");
+		expect(content).toContain("plane_hash: ");
+
+		// Re-importing the just-exported file must not blind-rewrite anything.
+		const importClient = makeFakeClient(data());
+		const summary = await importStories(importClient.client, { files: [outputPath], config });
+
+		expect(summary.created).toBe(0);
+		expect(summary.updated).toBe(0);
+		expect(summary.unchanged).toBe(1);
+		expect(importClient.createdItems).toHaveLength(0);
+		expect(importClient.updatedItems).toHaveLength(0);
 	});
 });

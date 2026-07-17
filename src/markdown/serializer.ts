@@ -65,6 +65,9 @@ function buildYamlLines(story: UserStory): string[] {
 	if (story.planeUrl !== null) {
 		lines.push(`plane_url: ${story.planeUrl}`);
 	}
+	if (story.planeHash !== null) {
+		lines.push(`plane_hash: ${story.planeHash}`);
+	}
 
 	if (story.priority !== null) {
 		lines.push(`priority: ${story.priority}`);

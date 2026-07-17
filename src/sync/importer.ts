@@ -1,5 +1,4 @@
 import { type AcceptanceCriterion, splitBody } from "../markdown/criteria.ts";
-import { markdownToHtml } from "../markdown/html.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
 import { type WriteBackUpdate, writeBackIds } from "../markdown/writer.ts";
 import type { PlaneClient } from "../plane/client.ts";
@@ -13,7 +12,7 @@ import {
 } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ImportResult, ImportSummary, ResolvedConfig, UserStory } from "../types.ts";
-import { payloadHash } from "./content-hash.ts";
+import { hashStoryPayload } from "./story-hash.ts";
 
 /** Identifies work items this tool created, used for idempotent re-imports. */
 export const EXTERNAL_SOURCE = "planestories";
@@ -118,16 +117,9 @@ async function processStory(
 	// writes. Computed here so dry-run and real imports agree on "unchanged".
 	const { narrative, criteria } = splitBody(story.body);
 	const bodyForParent = options.syncCriteria ? narrative : story.body;
-	const contentHash = payloadHash({
-		name: story.title,
-		descriptionHtml: bodyForParent ? markdownToHtml(bodyForParent) : "",
-		priority: story.priority,
-		status: story.status,
-		estimate: story.estimate,
-		labels: effectiveLabelNames(story, options),
-		assignee: story.assignee,
+	const contentHash = hashStoryPayload(story, {
 		syncCriteria: Boolean(options.syncCriteria),
-		criteria: criteria.map((c) => ({ text: c.text, checked: c.checked })),
+		labels: effectiveLabelNames(story, options),
 	});
 
 	if (story.planeId && story.planeHash && !options.force && contentHash === story.planeHash) {

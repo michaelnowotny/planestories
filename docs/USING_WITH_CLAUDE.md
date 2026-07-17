@@ -152,6 +152,11 @@ project.
 - `assignee` resolves by email (or display name) to a **project member**.
 - Export converts Plane's HTML description back to markdown — headings and
   `- [ ]`/`- [x]` checklists survive an export → re-import round-trip.
+- **Export writes `plane_hash` too, so an export → import round-trip starts warm:**
+  re-importing an unedited exported file reports every story as `unchanged` and makes
+  zero writes (rather than blind-rewriting every description). This holds when the import
+  uses the same `--sync-criteria` flag as the export and no extra default/source labels
+  are configured — the normal round-trip. Edit a story and only that story re-syncs.
 - Use `delete` to clean up after a sandbox run (scoped to your files or to
   `--external-source`, behind `--yes`). `delete --archive` is the recoverable
   alternative: it applies an `archived` label (works on any state) instead of
