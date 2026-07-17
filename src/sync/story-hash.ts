@@ -35,5 +35,6 @@ export function hashStoryPayload(story: UserStory, options: StoryHashOptions): s
 		assignee: story.assignee,
 		syncCriteria: options.syncCriteria,
 		criteria: criteria.map((c) => ({ text: c.text, checked: c.checked })),
+		parent: story.parent,
 	});
 }

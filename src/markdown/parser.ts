@@ -64,6 +64,28 @@ export function parseMarkdownFile(content: string, filePath: string): ParsedFile
 }
 
 /**
+ * Find H2 headings that look like design-doc sections rather than user stories:
+ * no fenced `yaml` block AND no acceptance-criteria checklist. `import --strict`
+ * refuses these; the default warns. Guards against importing an ADR/design doc as
+ * work items (the 308->309 lesson).
+ */
+export function findNonStoryHeadings(content: string): string[] {
+	const { content: body } = matter(content);
+	const sections = body.split(/^(?=## )/m).filter((s) => s.trim().startsWith("## "));
+	const suspicious: string[] = [];
+	for (const section of sections) {
+		const title = (section.split("\n")[0] ?? "").replace(/^## /, "").trim();
+		const hasYaml = /```yaml/.test(section);
+		const hasCriteria =
+			/^#{2,}\s*acceptance criteria/im.test(section) || /-\s*\[[ xX]\]/.test(section);
+		if (!hasYaml && !hasCriteria) {
+			suspicious.push(title);
+		}
+	}
+	return suspicious;
+}
+
+/**
  * Parse a single story section (starting with ## ) into a UserStory.
  */
 function parseStorySection(section: string, frontmatter: FileFrontmatter): UserStory {
@@ -110,6 +132,7 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 	const project = extractStringOrNull(metadata.project) ?? frontmatter.project ?? null;
 	const parent = extractStringOrNull(metadata.parent);
 	const kind = normalizeKind(metadata.kind);
+	const comment = extractStringOrNull(metadata.comment);
 
 	return {
 		title,
@@ -126,6 +149,7 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 		project,
 		parent,
 		kind,
+		comment,
 	};
 }
 

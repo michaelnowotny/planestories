@@ -45,6 +45,8 @@ export interface UserStory {
 	parent: string | null;
 	/** story | criterion | epic — informational on export; read on import. */
 	kind: StoryKind | null;
+	/** Optional evidence note posted once (idempotently) on create/update. */
+	comment: string | null;
 }
 
 export interface FileFrontmatter {
@@ -154,4 +156,6 @@ export interface ImportSummary {
 	labelsCreated: string[];
 	/** Distinct label names skipped (not found, not created) this run. */
 	labelsSkipped: string[];
+	/** Headings that look like design-doc sections, not stories (import --strict). */
+	structureWarnings: string[];
 }

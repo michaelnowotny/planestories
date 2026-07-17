@@ -23,6 +23,7 @@ describe("smoke test", () => {
 			project: null,
 			parent: null,
 			kind: null,
+			comment: null,
 		};
 		expect(story.title).toBe("Test story");
 	});

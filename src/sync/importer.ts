@@ -1,10 +1,12 @@
+import { createHash } from "node:crypto";
 import { type AcceptanceCriterion, splitBody } from "../markdown/criteria.ts";
-import { parseMarkdownFile } from "../markdown/parser.ts";
+import { findNonStoryHeadings, parseMarkdownFile } from "../markdown/parser.ts";
 import { type WriteBackUpdate, writeBackIds } from "../markdown/writer.ts";
 import type { PlaneClient } from "../plane/client.ts";
 import {
 	type CreateWorkItemInput,
 	createWorkItem,
+	ensureComment,
 	fetchProjectIndex,
 	findWorkItemByExternalId,
 	normalizeTitle,
@@ -54,6 +56,8 @@ export interface ImportOptions {
 	adoptDuplicates?: boolean;
 	/** Create even when a same-title item already exists (bypass the duplicate guard). */
 	forceCreate?: boolean;
+	/** Refuse headings that look like design-doc sections (no yaml + no criteria). */
+	strict?: boolean;
 }
 
 /**
@@ -74,6 +78,7 @@ export async function importStories(
 ): Promise<ImportSummary> {
 	const resolver = new Resolver(client);
 	const results: ImportResult[] = [];
+	const structureWarnings: string[] = [];
 
 	// One work-item index per project, fetched lazily (only creates, adopts, and
 	// hashless-linked stories need it) and reused across every story in the run.
@@ -92,8 +97,26 @@ export async function importStories(
 		const parsed = parseMarkdownFile(fileContent, filePath);
 
 		const writeBackUpdates: WriteBackUpdate[] = [];
+		const suspicious = new Set(findNonStoryHeadings(fileContent));
 
 		for (const story of parsed.stories) {
+			// Structural guard: a heading with no yaml block and no acceptance criteria
+			// is probably a design-doc section, not a story. --strict refuses it.
+			if (suspicious.has(story.title)) {
+				if (options.strict) {
+					results.push({
+						story,
+						action: "failed",
+						error:
+							"looks like a design-doc heading (no YAML block, no acceptance criteria) — refused by --strict",
+					});
+					continue;
+				}
+				structureWarnings.push(
+					`"${story.title}" has no YAML block and no acceptance criteria — imported anyway (use --strict to refuse)`,
+				);
+			}
+
 			const result = await processStory(client, resolver, story, options, getIndex);
 			results.push(result);
 
@@ -130,6 +153,7 @@ export async function importStories(
 	const summary = buildSummary(results);
 	summary.labelsCreated = [...resolver.createdLabelNames];
 	summary.labelsSkipped = [...resolver.skippedLabelNames];
+	summary.structureWarnings = structureWarnings;
 	return summary;
 }
 
@@ -221,6 +245,7 @@ async function processStory(
 			}
 
 			const ref = await updateWorkItem(client, project.id, story.planeId, { stateId });
+			await postEvidenceComment(client, project.id, story.planeId, story.comment);
 			return {
 				story,
 				action: "updated",
@@ -319,6 +344,22 @@ async function processStory(
 		if (story.estimate !== null) input.estimate = story.estimate;
 		if (stateId) input.stateId = stateId;
 
+		// Cross-file nesting: a story-level `parent: DATA-N` nests this item under an
+		// existing work item (e.g. an epic in another file) — resolve the identifier
+		// to its UUID via the project index.
+		if (story.parent) {
+			const index = await getIndex(project.id, project.identifier);
+			const parentItem = index.byIdentifier.get(story.parent);
+			if (!parentItem) {
+				return {
+					story,
+					action: "failed",
+					error: `parent "${story.parent}" not found in project ${project.identifier}`,
+				};
+			}
+			input.parent = parentItem.id;
+		}
+
 		const externalId = makeExternalId(story.title);
 
 		let ref: WorkItemRef;
@@ -383,6 +424,8 @@ async function processStory(
 		if (options.syncCriteria && criteria.length > 0) {
 			await syncCriteriaChildren(client, resolver, project.id, ref.id, externalId, criteria);
 		}
+
+		await postEvidenceComment(client, project.id, ref.id, story.comment);
 
 		return makeResult(client, story, project.id, project.identifier, ref, action, contentHash);
 	} catch (error) {
@@ -466,6 +509,33 @@ async function syncCriteriaChildren(
 /** True for a criterion sub-item external id of the form `<parent>::ac<n>`. */
 function isCriterionExternalId(externalId: string | undefined): boolean {
 	return Boolean(externalId && /::ac\d+$/.test(externalId));
+}
+
+function escapeHtml(text: string): string {
+	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Post a story's `comment:` evidence note once, keyed by a hash of the text so a
+ * re-import doesn't duplicate it (and a changed note posts anew). No-op if unset.
+ */
+async function postEvidenceComment(
+	client: PlaneClient,
+	projectId: string,
+	workItemId: string,
+	comment: string | null,
+): Promise<void> {
+	if (!comment) {
+		return;
+	}
+	const marker = `[planestories:comment:${createHash("sha256").update(comment).digest("hex").slice(0, 8)}]`;
+	await ensureComment(
+		client,
+		projectId,
+		workItemId,
+		marker,
+		`<p>${escapeHtml(comment)}</p><p><sub>${marker}</sub></p>`,
+	);
 }
 
 /**
@@ -553,5 +623,6 @@ function buildSummary(results: ImportResult[]): ImportSummary {
 		results,
 		labelsCreated: [],
 		labelsSkipped: [],
+		structureWarnings: [],
 	};
 }

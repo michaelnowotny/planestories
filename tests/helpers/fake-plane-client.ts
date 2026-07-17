@@ -153,9 +153,11 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 		): Promise<T> {
 			record("createWorkItemComment", [projectId, workItemId, body]);
 			createdComments.push({ workItemId, body });
-			const list = data.comments?.[workItemId] ?? [];
+			// Persist so a subsequent listWorkItemComments sees it (idempotency).
+			if (!data.comments) data.comments = {};
+			const list = data.comments[workItemId] ?? [];
 			list.push(body);
-			if (data.comments) data.comments[workItemId] = list;
+			data.comments[workItemId] = list;
 			return { id: `comment-${list.length}` } as unknown as T;
 		},
 

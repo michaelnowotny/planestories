@@ -18,6 +18,7 @@ function makeStory(overrides: Partial<UserStory> = {}): UserStory {
 		project: null,
 		parent: null,
 		kind: null,
+		comment: null,
 		...overrides,
 	};
 }

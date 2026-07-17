@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ParseError } from "../../../src/errors.ts";
-import { normalizePriority, parseMarkdownFile } from "../../../src/markdown/parser.ts";
+import {
+	findNonStoryHeadings,
+	normalizePriority,
+	parseMarkdownFile,
+} from "../../../src/markdown/parser.ts";
 
 const FIXTURES_DIR = join(import.meta.dir, "../../fixtures");
 
@@ -55,6 +59,26 @@ describe("parseMarkdownFile", () => {
 		const story = parseMarkdownFile(content, "x.md").stories[0]!;
 		expect(story.parent).toBeNull();
 		expect(story.kind).toBeNull();
+	});
+
+	test("findNonStoryHeadings flags headings with no yaml and no acceptance criteria", () => {
+		const content = [
+			"## Real story",
+			"```yaml",
+			"status: Backlog",
+			"```",
+			"body",
+			"",
+			"## Design note",
+			"just prose — no yaml, no criteria",
+			"",
+			"## Story with criteria",
+			"narrative",
+			"### Acceptance Criteria",
+			"- [ ] does a thing",
+			"",
+		].join("\n");
+		expect(findNonStoryHeadings(content)).toEqual(["Design note"]);
 	});
 
 	test("parses multi-story file with 2 stories and different metadata", () => {

@@ -34,6 +34,13 @@ function printLabelSummary(summary: ImportSummary): void {
 	}
 }
 
+/** Warn about headings that look like design-doc sections rather than stories. */
+function printStructureWarnings(summary: ImportSummary): void {
+	for (const warning of summary.structureWarnings) {
+		console.log(chalk.yellow(`  ⚠ ${warning}`));
+	}
+}
+
 /** Print a dry-run preview: what WOULD happen, plus any validation findings. */
 function printDryRun(summary: ImportSummary, checked: boolean): void {
 	const wouldCreate = summary.results.filter((r) => r.wouldAction === "create").length;
@@ -65,6 +72,7 @@ function printDryRun(summary: ImportSummary, checked: boolean): void {
 	}
 
 	printLabelSummary(summary);
+	printStructureWarnings(summary);
 }
 
 /** Print the summary after a real import. */
@@ -93,6 +101,7 @@ function printSummary(summary: ImportSummary): void {
 	}
 
 	printLabelSummary(summary);
+	printStructureWarnings(summary);
 	printBoardLinks(summary);
 }
 
@@ -155,6 +164,11 @@ export function registerImportCommand(program: Command) {
 			"Create even when a same-title item already exists (bypass the duplicate guard)",
 			false,
 		)
+		.option(
+			"--strict",
+			"Refuse headings that look like design-doc sections (no YAML block, no acceptance criteria)",
+			false,
+		)
 		.option("--dry-run", "Preview without writing to Plane", false)
 		.option(
 			"--check",
@@ -196,6 +210,7 @@ export function registerImportCommand(program: Command) {
 					statusOnly: options.statusOnly,
 					adoptDuplicates: options.adoptDuplicates,
 					forceCreate: options.forceCreate,
+					strict: options.strict,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});
 

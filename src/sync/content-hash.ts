@@ -21,6 +21,12 @@ export interface PayloadHashInput {
 	syncCriteria: boolean;
 	/** Acceptance criteria, only meaningful when syncCriteria is true. */
 	criteria: Array<{ text: string; checked: boolean }>;
+	/**
+	 * Parent identifier (e.g. "DATA-12") when the story nests under one. Included in
+	 * the hash ONLY when present, so parentless stories keep a stable hash (existing
+	 * synced files stay warm) while a parent edit still triggers a re-sync.
+	 */
+	parent?: string | null;
 }
 
 /**
@@ -48,6 +54,8 @@ export function payloadHash(input: PayloadHashInput): string {
 		criteria: input.syncCriteria
 			? input.criteria.map((c) => ({ text: c.text, checked: c.checked }))
 			: [],
+		// Only present when set, so parentless stories keep their pre-parent hash.
+		...(input.parent ? { parent: input.parent } : {}),
 	};
 	return createHash("sha256").update(JSON.stringify(canonical)).digest("hex").slice(0, 16);
 }
