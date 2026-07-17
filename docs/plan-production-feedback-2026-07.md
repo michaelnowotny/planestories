@@ -185,10 +185,13 @@ report real-board regression numbers (unchanged-skip rate, 429 counts, groom clo
    ➕ export `plane_hash` warm-start (`fb51cee`, the P1-3 hash piece, pulled forward).
 4. ✅ **DONE** (`3c62571`) Shared `fetchProjectIndex` + P0-3 duplicate guard + hashless-linked adopt
    (finance ask (b), via the index — not per-item GETs).
-5. ⏭ **NEXT** P1-3 export completeness (`parent`/`kind` emit + read; `--open-only`/`--status`).
-   Reuses the index + `boardItemToStory`.
-6. P1-1 groom (reuses the index; the reconcile loop's board→file half).
-7. P2 batch (cross-file parent, strict guard, evidence comments, doctor).
+5. ✅ **DONE** (`034e71c`) P1-3 export completeness (`parent`/`kind` emit + read;
+   `--open-only`/repeatable `--status`). Reuses the index + `boardItemToStory`.
+6. ✅ **DONE** (`e5144b1`) P1-1 groom (close orphaned criterion sub-items + report dup/parentless;
+   criterion-only cascade). Reverse-sync (`--write-back`) deferred per decision #4.
+7. ✅ **DONE** (`4d14baf`) P2 batch (cross-file parent, `--strict` guard, `comment:` evidence, doctor).
+
+**v2 program COMPLETE.** Only groom's reverse-sync (board→file checkbox ticking) remains deferred.
 
 ## Verification (per slice)
 

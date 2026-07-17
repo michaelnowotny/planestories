@@ -52,13 +52,18 @@ sub-items use `external_id = "<parent>::ac<n>"`. `plane_id`/`plane_identifier`/`
 `plane_hash` are written back into each story's YAML. `plane_hash` powers skip-unchanged. **Never
 add a `plane_status` key** — `status:` already is the state key.
 
-## Current state (v2)
+## Current state (v2 — all slices shipped)
 
-Slices shipped on `main`: **1** rate-limit backoff · **2** skip-unchanged (`plane_hash`) · **3**
+On `main`: **1** rate-limit backoff · **2** skip-unchanged (`plane_hash`) · **3**
 `import --status-only` · **4** shared `fetchProjectIndex` + duplicate guard + hashless-linked
-adopt · plus export writes `plane_hash` (warm round-trips). Next: **5** export completeness
-(`parent`/`kind`) · **6** `groom` (close orphaned criterion sub-items + reverse-sync; the cascade
-closes ONLY criterion children, never story children of a Done epic). Design + locked decisions:
+adopt · export writes `plane_hash` (warm round-trips) · **5** export completeness (`parent`/`kind`,
+`--open-only`/repeatable `--status`) · **6** `groom` (close orphaned criterion sub-items; report
+duplicates/parentless — the cascade closes ONLY criterion children, NEVER story children of a Done
+epic) · **7** cross-file `parent`, `import --strict` guard, `comment:` evidence notes, `doctor`
+(CI wrapper, non-zero on findings). Groom/doctor live in `src/sync/groomer.ts` +
+`src/cli/commands/{groom,doctor}.ts`; comments go through `ensureComment` (marker-idempotent) on
+the client's `listWorkItemComments`/`createWorkItemComment`. Reverse-sync (board→file checkbox
+ticking) is the one deferred piece (decision #4). Design + locked decisions:
 `docs/plan-production-feedback-2026-07.md`; state/how-to: `docs/handoff-2026-07-17.md`; full CLI
 reference: `docs/USING_WITH_CLAUDE.md`.
 

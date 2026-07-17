@@ -87,12 +87,21 @@ bun run src/cli/index.ts import /path/to/stories.md
 #   --status-only     update ONLY the state of already-linked items (skip unlinked)
 #   --adopt-duplicates link a single exact-title match instead of skipping it
 #   --force-create    create even when a same-title item exists (bypass the guard)
+#   --strict          refuse headings with no yaml block AND no acceptance criteria
 #   --no-write-back   don't modify the markdown file
 
 # Export back to markdown (HTML description -> markdown; checklists survive):
 bun run src/cli/index.ts export --project "My Project" -o exported.md
 #   --external-source         export only items planestories created (no demo/other noise)
-#   --label NAME / --status S filters; --sync-criteria rebuilds checklists from sub-items
+#   --label NAME / --status S filters (--status is repeatable); --open-only keeps open items
+#   --sync-criteria rebuilds checklists from sub-items; parent/kind are emitted too
+
+# Groom a project: close orphaned criterion sub-items (parent Done), report rot.
+bun run src/cli/index.ts groom --project "My Project"          # dry-run report
+bun run src/cli/index.ts groom --project "My Project" --yes    # apply (close sub-items)
+
+# Doctor: read-only CI check; exits non-zero on findings (board rot).
+bun run src/cli/index.ts doctor --project "My Project"
 
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects
@@ -177,6 +186,11 @@ project.
   automatically — honoring `Retry-After` when present, else exponential backoff with jitter.
   Tune with `PLANE_MAX_RETRIES` (default 5; 0 disables). Bulk imports/grooms of large boards
   no longer fall over on a rate limit.
+- Extra yaml keys: `parent: DATA-N` nests a story under an existing item (epic in another file);
+  `kind` (story/criterion/epic) is informational; `comment: "..."` posts a one-time evidence note
+  on create/update/status-change (idempotent — a re-run won't duplicate it). Use `groom` after a
+  batch of work completes to close the now-orphaned acceptance-criteria sub-items, and `doctor`
+  in CI to fail a build when board rot exists.
 
 ## Optional: you're doing a shakedown / test run
 

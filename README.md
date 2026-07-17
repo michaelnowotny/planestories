@@ -110,6 +110,9 @@ After a successful import, `plane_id` (the work item UUID), `plane_identifier` (
 | `estimate` | story `point` |
 | `plane_id` | work item UUID (used to update) |
 | `plane_hash` | content hash of the last sync (auto-managed) — powers skip-unchanged |
+| `parent` | nests this item under an existing one (`parent: DATA-12`; resolved by identifier) |
+| `kind` | `story` / `criterion` / `epic` — informational; emitted by export, read on import |
+| `comment` | optional evidence note posted once (idempotently) on create/update/status change |
 
 ### Choosing the project
 
@@ -187,6 +190,7 @@ planestories import <files...> [options]
   --force                 Re-import even when content is unchanged (bypass skip-unchanged)
   --adopt-duplicates      Link a single exact-title match instead of skipping it
   --force-create          Create even when a same-title item exists (bypass the duplicate guard)
+  --strict                Refuse headings with no YAML block and no acceptance criteria
   --dry-run               Preview without writing to Plane
   --check                 With --dry-run, validate read-only (project/state/assignee/labels)
   --no-write-back         Skip writing Plane ids back into the markdown
@@ -201,7 +205,8 @@ planestories export [options]
   -o, --output <file>       Output file (default ./exported-stories.md)
   -p, --project <name>      Project to export from (required if no defaultProject)
   -i, --issues <ids>        Comma-separated work item identifiers (e.g. ENG-8)
-  -s, --status <state>      Filter by status
+  -s, --status <state>      Filter by status (repeatable — keeps items matching any)
+  --open-only               Only export open items (backlog/unstarted/started)
   -a, --assignee <email>    Filter by assignee email
   -l, --label <name>        Filter by label name
   --external-source [src]   Only export items planestories created (default: planestories)
@@ -209,7 +214,7 @@ planestories export [options]
   --include-archived        Include items carrying the 'archived' label (excluded by default)
 ```
 
-Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order. It also writes `plane_hash`, so re-importing an unedited exported file is all-`unchanged` (see [Idempotency, skip-unchanged & duplicates](#idempotency-skip-unchanged--duplicates)).
+Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order. It also emits `parent`/`kind` structure and writes `plane_hash`, so re-importing an unedited exported file is all-`unchanged` (see [Idempotency, skip-unchanged & duplicates](#idempotency-skip-unchanged--duplicates)).
 
 ### `projects`
 
@@ -250,6 +255,30 @@ planestories delete --external-source [src] --project <name> [options]
 completed/cancelled items). `delete --archive` applies the `archived` label (recoverable —
 just remove the label; works on any state) and leaves the work item in place. Archived
 items are excluded from `export` by default (pass `--include-archived` to see them).
+
+### `groom`
+
+Reconcile a project (dry-run by default; `--yes` to apply). Keeps a board tidy as work
+completes on it:
+
+```
+planestories groom --project <name> [--yes]
+```
+
+- **Closes orphaned criterion sub-items** — an open `--sync-criteria` sub-item whose parent
+  is Done/Cancelled is moved to a completed state, with an idempotent "auto-closed with parent"
+  comment. **Only planestories criterion sub-items are ever closed** — a real child *story* of
+  a done epic is never touched.
+- **Reports** duplicate-title work items and criterion sub-items whose parent no longer exists.
+
+### `doctor`
+
+A read-only CI health check over the same analysis — prints board rot and **exits non-zero on
+findings** (pass `--no-fail-on-findings` to just report):
+
+```
+planestories doctor --project <name>
+```
 
 ## Reliability
 

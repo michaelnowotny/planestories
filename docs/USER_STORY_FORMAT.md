@@ -60,6 +60,9 @@ Fenced YAML block (` ```yaml ` ... ` ``` `) immediately after the H2 heading. Al
 | `estimate`         | number   | Story points.                                                         |
 | `assignee`         | string   | Email or display name (resolved to a project member).                 |
 | `status`           | string   | State name: `Backlog`, `Todo`, `In Progress`, `Done`, etc. (resolved within the project) |
+| `parent`           | string   | Nest under an existing work item by identifier (e.g. `DATA-12`) — e.g. an epic in another file. |
+| `kind`             | string   | `story` / `criterion` / `epic`. Informational; emitted by `export`, read on import. |
+| `comment`          | string   | Optional evidence note posted once (idempotently) on create/update or a status change. |
 
 ## Body
 
