@@ -174,24 +174,68 @@ describe("importStories", () => {
 		expect(createdItems[0]!.body.external_id).toBe(makeExternalId("As a user, I want to log in"));
 	});
 
-	test("updates (not creates) when a work item already matches the external_id", async () => {
+	test("skips (as duplicate) a no-plane_id story matching an existing item — no silent hijack", async () => {
+		// A no-plane_id story whose title matches an existing item (our external_id) is a
+		// duplicate, NOT a silent update — so a second file can't overwrite the first's item.
 		const filePath = writeTmpFile("idem.md", markdownNewStories);
 		const externalId = makeExternalId("As a user, I want to log in");
 		const { client, createdItems, updatedItems } = makeFakeClient(
 			baseData({
 				workItems: {
-					[PROJECT_UUID]: [{ id: "wi-existing", sequence_id: 5, external_id: externalId }],
+					[PROJECT_UUID]: [
+						{
+							id: "wi-existing",
+							sequence_id: 5,
+							name: "As a user, I want to log in",
+							external_id: externalId,
+							external_source: "planestories",
+							state: { name: "Backlog" },
+						},
+					],
 				},
 			}),
 		);
 
 		const summary = await importStories(client, { files: [filePath], config: defaultConfig });
 
-		// First story matched by external_id -> update; second story -> create
-		expect(updatedItems.some((u) => u.workItemId === "wi-existing")).toBe(true);
-		expect(createdItems).toHaveLength(1);
-		expect(summary.updated).toBe(1);
+		// Matching story -> skipped (duplicate); the other -> created. Nothing updated.
+		expect(updatedItems).toHaveLength(0);
+		expect(summary.updated).toBe(0);
 		expect(summary.created).toBe(1);
+		expect(summary.skipped).toBe(1);
+		expect(createdItems).toHaveLength(1);
+		const skipped = summary.results.find((r) => r.action === "skipped");
+		expect(skipped?.note).toContain("duplicate of ENG-5");
+	});
+
+	test("--adopt-duplicates links a no-plane_id story to its existing external_id match", async () => {
+		const filePath = writeTmpFile("adopt-ext.md", markdownNewStories);
+		const externalId = makeExternalId("As a user, I want to log in");
+		const { client, updatedItems } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: "wi-existing",
+							sequence_id: 5,
+							name: "As a user, I want to log in",
+							external_id: externalId,
+							external_source: "planestories",
+							state: { name: "Backlog" },
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			adoptDuplicates: true,
+		});
+
+		expect(updatedItems.some((u) => u.workItemId === "wi-existing")).toBe(true);
+		expect(summary.updated).toBe(1);
 	});
 
 	test("updates existing work items for stories with plane_id", async () => {
@@ -220,10 +264,10 @@ describe("importStories", () => {
 		);
 	});
 
-	test("--dry-run returns results but makes no API calls and no file writes", async () => {
+	test("--dry-run consults the board read-only (faithful preview) but makes no writes", async () => {
 		const filePath = writeTmpFile("dryrun.md", markdownNewStories);
 		const originalContent = readTmpFile("dryrun.md");
-		const { client, createdItems, calls } = makeFakeClient(baseData());
+		const { client, createdItems, updatedItems, calls } = makeFakeClient(baseData());
 
 		const summary = await importStories(client, {
 			files: [filePath],
@@ -231,10 +275,17 @@ describe("importStories", () => {
 			dryRun: true,
 		});
 
+		// New stories with no board match -> predicted create.
 		expect(summary.results[0]?.action).toBe("skipped");
+		expect(summary.results[0]?.wouldAction).toBe("create");
 		expect(summary.skipped).toBe(2);
+		// Reads are allowed (that's what makes the preview faithful), but NO writes.
 		expect(createdItems).toHaveLength(0);
-		expect(calls).toHaveLength(0);
+		expect(updatedItems).toHaveLength(0);
+		expect(calls.some((c) => c.method === "createWorkItem" || c.method === "updateWorkItem")).toBe(
+			false,
+		);
+		// The file is never modified in a dry run.
 		expect(readTmpFile("dryrun.md")).toBe(originalContent);
 	});
 

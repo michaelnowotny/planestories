@@ -7,6 +7,7 @@ import {
 	type CreateWorkItemInput,
 	createWorkItem,
 	ensureComment,
+	type FetchedWorkItem,
 	fetchProjectIndex,
 	findWorkItemByExternalId,
 	normalizeTitle,
@@ -188,11 +189,6 @@ async function processStory(
 		};
 	}
 
-	// Plain dry-run (no --check) validates parsing only and makes no network calls.
-	if (options.dryRun && !options.check) {
-		return { story, action: "skipped", wouldAction: story.planeId ? "update" : "create" };
-	}
-
 	try {
 		// Precedence: --project (force all) > per-story/frontmatter > defaultProject.
 		const projectName = options.project ?? story.project ?? options.config.defaultProject;
@@ -290,16 +286,59 @@ async function processStory(
 			// Not found or differs -> fall through to the normal update (writes the hash).
 		}
 
+		// Decide the write target using the project index — the SAME decision the
+		// dry-run preview reports, so preview and apply can never diverge. A no-plane_id
+		// story that matches an existing item (by our external_id OR by exact title) is a
+		// duplicate, NOT a silent update — closing the cross-file hijack hole.
+		const target = await resolveTarget(story, project, options, getIndex);
+
+		// Dry-run: report exactly what apply would do (+ --check validation notes), no writes.
+		if (options.dryRun) {
+			let note: string | undefined;
+			if (options.check) {
+				const notes: string[] = [];
+				if (story.assignee && !(await resolver.resolveAssigneeId(project.id, story.assignee))) {
+					notes.push(`assignee "${story.assignee}" not found`);
+				}
+				if (story.status && !(await resolver.resolveStateId(project.id, story.status))) {
+					notes.push(`status "${story.status}" not found`);
+				}
+				if (story.parent) {
+					const idx = await getIndex(project.id, project.identifier);
+					if (!idx.byIdentifier.has(story.parent)) {
+						notes.push(`parent "${story.parent}" not found`);
+					}
+				}
+				note = notes.join("; ") || undefined;
+			}
+			return previewFromTarget(story, target, project.identifier, note);
+		}
+
+		// Apply — non-write outcomes first.
+		if (target.kind === "duplicate-multi") {
+			const ids = target.items.map((m) => `${project.identifier}-${m.sequenceId}`).join(", ");
+			return {
+				story,
+				action: "failed",
+				error: `--adopt-duplicates: ${target.items.length} items share the title "${story.title}" in ${project.identifier} (${ids}). Refusing to auto-pick — set plane_id manually on the story.`,
+			};
+		}
+		if (target.kind === "skip-duplicate") {
+			const m = target.item;
+			return {
+				story,
+				action: "skipped",
+				note: `duplicate of ${project.identifier}-${m.sequenceId} (${
+					m.stateName ?? "no state"
+				}) — skipped. Set plane_id to link it, or pass --adopt-duplicates / --force-create.`,
+			};
+		}
+
 		// Merge labels: story.labels + config.defaultLabels (deduplicated).
-		// Never create labels during a dry-run, even with --create-labels.
 		const allLabels = deduplicateLabels(story.labels, options.config.defaultLabels);
 		const labelIds: string[] =
 			allLabels.length > 0
-				? await resolver.resolveLabelIds(
-						project.id,
-						allLabels,
-						options.dryRun ? false : options.createLabels,
-					)
+				? await resolver.resolveLabelIds(project.id, allLabels, options.createLabels)
 				: [];
 
 		const assigneeId = story.assignee
@@ -309,19 +348,6 @@ async function processStory(
 		const stateId = story.status
 			? await resolver.resolveStateId(project.id, story.status)
 			: undefined;
-
-		// Dry-run --check: everything above is read-only; report findings, no writes.
-		if (options.dryRun) {
-			const notes: string[] = [];
-			if (story.assignee && !assigneeId) notes.push(`assignee "${story.assignee}" not found`);
-			if (story.status && !stateId) notes.push(`status "${story.status}" not found`);
-			return {
-				story,
-				action: "skipped",
-				wouldAction: story.planeId ? "update" : "create",
-				note: notes.join("; ") || undefined,
-			};
-		}
 
 		// Opt-in source label: tag every created item, auto-creating the label
 		// regardless of --create-labels. Off unless configured / flagged.
@@ -334,8 +360,7 @@ async function processStory(
 		}
 
 		// narrative / criteria / bodyForParent were computed above (for the hash).
-		// When syncing criteria to sub-items the parent holds the narrative only;
-		// the checklist lives as child work items.
+		// When syncing criteria to sub-items the parent holds the narrative only.
 		const input: CreateWorkItemInput = { name: story.title };
 		if (bodyForParent) input.body = bodyForParent;
 		if (labelIds.length > 0) input.labelIds = labelIds;
@@ -344,9 +369,7 @@ async function processStory(
 		if (story.estimate !== null) input.estimate = story.estimate;
 		if (stateId) input.stateId = stateId;
 
-		// Cross-file nesting: a story-level `parent: DATA-N` nests this item under an
-		// existing work item (e.g. an epic in another file) — resolve the identifier
-		// to its UUID via the project index.
+		// Cross-file nesting: `parent: DATA-N` -> the parent's UUID via the index.
 		if (story.parent) {
 			const index = await getIndex(project.id, project.identifier);
 			const parentItem = index.byIdentifier.get(story.parent);
@@ -364,61 +387,15 @@ async function processStory(
 
 		let ref: WorkItemRef;
 		let action: "created" | "updated";
-		if (story.planeId) {
-			// 1. Update path: markdown already carries the work item UUID.
-			ref = await updateWorkItem(client, project.id, story.planeId, input);
+		if (target.kind === "update") {
+			ref = await updateWorkItem(client, project.id, target.id, input);
 			action = "updated";
 		} else {
-			// 2. Idempotency: look up an item we previously created for this story.
-			const existing = await findWorkItemByExternalId(
-				client,
-				project.id,
-				externalId,
-				EXTERNAL_SOURCE,
-			);
-			let adopt: { id: string; sequenceId: number } | undefined = existing ?? undefined;
-
-			// 3. Duplicate guard (P0-3): before creating, check whether an item with the
-			//    exact same title already exists in the project (any creator), via the
-			//    one-list index. Default is skip-with-warning; --adopt-duplicates links to
-			//    a SINGLE exact match (multiple = hard error); --force-create bypasses.
-			if (!adopt && !options.forceCreate) {
-				const index = await getIndex(project.id, project.identifier);
-				const matches = (index.byNormalizedTitle.get(normalizeTitle(story.title)) ?? []).filter(
-					(m) => !isCriterionExternalId(m.externalId),
-				);
-				if (matches.length > 0) {
-					if (!options.adoptDuplicates) {
-						const m = matches[0] as (typeof matches)[number];
-						return {
-							story,
-							action: "skipped",
-							note: `duplicate of ${project.identifier}-${m.sequenceId} (${
-								m.stateName ?? "no state"
-							}) — skipped. Set plane_id to link it, or pass --adopt-duplicates / --force-create.`,
-						};
-					}
-					if (matches.length > 1) {
-						const ids = matches.map((m) => `${project.identifier}-${m.sequenceId}`).join(", ");
-						throw new Error(
-							`--adopt-duplicates: ${matches.length} items share the title "${story.title}" in ${project.identifier} (${ids}). Refusing to auto-pick — set plane_id manually on the story.`,
-						);
-					}
-					const m = matches[0] as (typeof matches)[number];
-					adopt = { id: m.id, sequenceId: m.sequenceId };
-				}
-			}
-
-			if (adopt) {
-				ref = await updateWorkItem(client, project.id, adopt.id, input);
-				action = "updated";
-			} else {
-				// 4. Create path.
-				input.externalId = externalId;
-				input.externalSource = EXTERNAL_SOURCE;
-				ref = await createWorkItem(client, project.id, input);
-				action = "created";
-			}
+			// create
+			input.externalId = externalId;
+			input.externalSource = EXTERNAL_SOURCE;
+			ref = await createWorkItem(client, project.id, input);
+			action = "created";
 		}
 
 		if (options.syncCriteria && criteria.length > 0) {
@@ -455,6 +432,100 @@ function makeResult(
 		planeHash: contentHash,
 		projectUrl: client.projectBoardUrl(projectId),
 	};
+}
+
+/** What an import would do with a story — resolved once, used by preview AND apply. */
+type Target =
+	| { kind: "update"; id: string }
+	| { kind: "create" }
+	| { kind: "skip-duplicate"; item: FetchedWorkItem }
+	| { kind: "duplicate-multi"; items: FetchedWorkItem[] };
+
+/**
+ * Decide what an import would do for a story, using the project index (one memoized
+ * list, no per-item GETs). Shared by the dry-run preview and the apply so they never
+ * diverge.
+ *
+ * A story with a `plane_id` is always an update. A story WITHOUT one is a create
+ * UNLESS an item with the same identity already exists — matched by our `external_id`
+ * OR by exact normalized title. Then it is a duplicate, handled by the guard (skip by
+ * default; `--adopt-duplicates` links a single match; `--force-create` ignores the
+ * collision). Routing external_id matches through the guard (not a silent update) is
+ * what stops a second file from hijacking the first file's work item.
+ */
+async function resolveTarget(
+	story: UserStory,
+	project: { id: string; identifier: string },
+	options: ImportOptions,
+	getIndex: IndexProvider,
+): Promise<Target> {
+	if (story.planeId) {
+		return { kind: "update", id: story.planeId };
+	}
+
+	const index = await getIndex(project.id, project.identifier);
+	const externalId = makeExternalId(story.title);
+	const candidates = new Map<string, FetchedWorkItem>();
+
+	const externalMatch = index.items.find(
+		(i) => i.externalId === externalId && i.externalSource === EXTERNAL_SOURCE,
+	);
+	if (externalMatch) {
+		candidates.set(externalMatch.id, externalMatch);
+	}
+	for (const m of index.byNormalizedTitle.get(normalizeTitle(story.title)) ?? []) {
+		if (!isCriterionExternalId(m.externalId)) {
+			candidates.set(m.id, m);
+		}
+	}
+
+	const list = [...candidates.values()];
+	if (list.length === 0 || options.forceCreate) {
+		return { kind: "create" };
+	}
+	if (options.adoptDuplicates) {
+		return list.length > 1
+			? { kind: "duplicate-multi", items: list }
+			: { kind: "update", id: (list[0] as FetchedWorkItem).id };
+	}
+	return { kind: "skip-duplicate", item: list[0] as FetchedWorkItem };
+}
+
+/** Map a resolved target to a dry-run preview result (no writes), faithful to apply. */
+function previewFromTarget(
+	story: UserStory,
+	target: Target,
+	projectIdentifier: string,
+	extraNote?: string,
+): ImportResult {
+	const ident = (item: FetchedWorkItem): string => `${projectIdentifier}-${item.sequenceId}`;
+	const withNote = (base: string): string => [base, extraNote].filter(Boolean).join("; ");
+	switch (target.kind) {
+		case "create":
+			return { story, action: "skipped", wouldAction: "create", note: extraNote };
+		case "update":
+			return { story, action: "skipped", wouldAction: "update", note: extraNote };
+		case "skip-duplicate":
+			return {
+				story,
+				action: "skipped",
+				note: withNote(
+					`duplicate of ${ident(target.item)}${
+						target.item.stateName ? ` (${target.item.stateName})` : ""
+					} — would skip; --adopt-duplicates to link`,
+				),
+			};
+		case "duplicate-multi":
+			return {
+				story,
+				action: "skipped",
+				note: withNote(
+					`${target.items.length} exact-title matches (${target.items
+						.map(ident)
+						.join(", ")}) — --adopt-duplicates ambiguous; set plane_id`,
+				),
+			};
+	}
 }
 
 /**

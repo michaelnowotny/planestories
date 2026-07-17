@@ -126,6 +126,45 @@ describe("duplicate guard (P0-3)", () => {
 		expect(summary.created).toBe(1);
 		expect(createdItems).toHaveLength(1);
 	});
+
+	test("foreign item with external_source: null is handled cleanly (no crash)", async () => {
+		// Regression for the reported foreign-match crash: an item created outside
+		// planestories (external_source null) must route through the guard, not throw.
+		const filePath = join(tmpDir, "s.md");
+		writeFileSync(filePath, newStory);
+		const { client, createdItems } = makeFakeClient(
+			baseData([
+				{
+					id: "wi-foreign",
+					sequence_id: 9,
+					name: TITLE,
+					external_source: null,
+					state: { name: "Backlog" },
+				},
+			]),
+		);
+
+		const summary = await importStories(client, { files: [filePath], config });
+
+		expect(summary.skipped).toBe(1);
+		expect(createdItems).toHaveLength(0);
+		expect(summary.results[0]?.note).toContain("duplicate of ENG-9");
+	});
+
+	test("dry-run previews the duplicate as would-skip (faithful to apply)", async () => {
+		const filePath = join(tmpDir, "s.md");
+		writeFileSync(filePath, newStory);
+		const { client, createdItems, updatedItems } = makeFakeClient(foreignDup());
+
+		const summary = await importStories(client, { files: [filePath], config, dryRun: true });
+
+		const r = summary.results[0];
+		expect(r?.action).toBe("skipped");
+		expect(r?.wouldAction).toBeUndefined(); // NOT "would create"
+		expect(r?.note).toContain("would skip");
+		expect(createdItems).toHaveLength(0);
+		expect(updatedItems).toHaveLength(0);
+	});
 });
 
 describe("hashless-but-linked adopt (P0-1 warm start for legacy files)", () => {
@@ -189,5 +228,17 @@ describe("hashless-but-linked adopt (P0-1 warm start for legacy files)", () => {
 		expect(summary.unchanged).toBe(0);
 		expect(summary.updated).toBe(1);
 		expect(updatedItems.some((u) => u.workItemId === "wi-1")).toBe(true);
+	});
+
+	test("dry-run previews the hashless match as unchanged (faithful to apply)", async () => {
+		const filePath = join(tmpDir, "legacy-dry.md");
+		await legacyLinkedFile(filePath);
+
+		const { client, updatedItems } = makeFakeClient(boardData());
+		const summary = await importStories(client, { files: [filePath], config, dryRun: true });
+
+		// Apply would report "unchanged" (adopt) — so must the dry-run.
+		expect(summary.unchanged).toBe(1);
+		expect(updatedItems).toHaveLength(0);
 	});
 });

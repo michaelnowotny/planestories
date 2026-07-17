@@ -91,8 +91,10 @@ User should be able to log in with their email and password.
 
 ```bash
 planestories import stories/*.md            # create/update work items, write ids back
-planestories import stories/*.md --dry-run  # parse + validate only, no API calls
+planestories import stories/*.md --dry-run  # preview: reports exactly what apply would do, no writes
 ```
+
+`--dry-run` is **faithful** — it consults the board read-only (one memoized listing) and reports the same per-story outcome apply would produce (`would create` / `would update` / `unchanged` / `would skip` a duplicate) — it just never writes. Add `--check` to also validate that each `status` / `assignee` / `label` / `parent` resolves.
 
 After a successful import, `plane_id` (the work item UUID), `plane_identifier` (e.g. `ENG-42`), and `plane_url` are written back into each story's YAML block.
 
@@ -150,7 +152,7 @@ Use `--dry-run --check` to validate routing before importing.
 
 ### Idempotency, skip-unchanged & duplicates
 
-On create, planestories stamps each work item with `external_id` (derived from the story title) and `external_source: "planestories"`. Re-running an import — even before write-back — matches the existing work item by `external_id` and **updates instead of duplicating**.
+On create, planestories stamps each work item with `external_id` (derived from the story title) and `external_source: "planestories"`, then writes `plane_id` back into the file. Re-running the import updates that item **by its `plane_id`** — never duplicating. A story that has **no** `plane_id` but whose title matches an existing item is treated as a duplicate (see below), so a second file can't silently overwrite the first file's work item — link it explicitly with `--adopt-duplicates` (or add the `plane_id`) when that's what you intend.
 
 - **Skip-unchanged.** Each synced story stores a `plane_hash` (a hash of the rendered payload). On re-import, a linked story whose content is unchanged is reported `unchanged` and makes **zero API writes** — so re-importing a large, mostly-static board is cheap. Cosmetic markdown reflow that renders to the same HTML doesn't count as a change. `--force` re-imports regardless. (An edit made in the Plane UI while the file is untouched is intentionally not pulled back by import — that's a future `groom` reverse-sync's job.)
 - **Warm export → import.** `export` writes `plane_hash` too, so re-importing an unedited exported file is all-`unchanged` (no blind description rewrites). For files that carry a `plane_id` but no `plane_hash` (legacy or hand-authored), import reconstructs the board item from a single project listing and adopts the hash if the content already matches — one list call, never a per-item fetch.

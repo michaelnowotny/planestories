@@ -45,6 +45,8 @@ function printStructureWarnings(summary: ImportSummary): void {
 function printDryRun(summary: ImportSummary, checked: boolean): void {
 	const wouldCreate = summary.results.filter((r) => r.wouldAction === "create").length;
 	const wouldUpdate = summary.results.filter((r) => r.wouldAction === "update").length;
+	// Skipped-with-no-wouldAction = a duplicate that would be skipped (not created/updated).
+	const wouldSkip = summary.results.filter((r) => r.action === "skipped" && !r.wouldAction).length;
 
 	console.log("");
 	console.log(chalk.bold(`Dry run${checked ? " (validated)" : ""} — no changes made`));
@@ -52,6 +54,7 @@ function printDryRun(summary: ImportSummary, checked: boolean): void {
 	console.log(`  Would create: ${chalk.green(String(wouldCreate))}`);
 	console.log(`  Would update: ${chalk.blue(String(wouldUpdate))}`);
 	console.log(`  Unchanged:    ${chalk.gray(String(summary.unchanged))}`);
+	console.log(`  Would skip:   ${chalk.yellow(String(wouldSkip))}`);
 	if (checked) {
 		console.log(`  Invalid:      ${chalk.red(String(summary.failed))}`);
 	}
@@ -63,6 +66,13 @@ function printDryRun(summary: ImportSummary, checked: boolean): void {
 		}
 		if (result.action === "unchanged") {
 			console.log(chalk.gray(`  = unchanged: ${result.story.title}`));
+			continue;
+		}
+		if (result.action === "skipped" && !result.wouldAction) {
+			// A would-skip duplicate (or other actionable skip): show the reason.
+			console.log(
+				chalk.yellow(`  - would skip: ${result.story.title} (${result.note ?? "skipped"})`),
+			);
 			continue;
 		}
 		const mark = result.wouldAction === "update" ? chalk.blue("~") : chalk.green("+");

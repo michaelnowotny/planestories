@@ -70,10 +70,11 @@ Run all of these from inside the planestories repo:
 ```bash
 export PATH="$HOME/.bun/bin:$PATH"
 
-# Validate parsing only — no API calls:
+# Faithful preview — reads the board read-only, reports exactly what apply would do
+# (would create / would update / unchanged / would skip a duplicate), makes NO writes:
 bun run src/cli/index.ts import /path/to/stories.md --dry-run
 
-# Validate read-only against Plane (catches bad project/state/assignee/labels):
+# Also validate that status/assignee/label/parent resolve (adds read-only checks):
 bun run src/cli/index.ts import /path/to/stories.md --dry-run --check
 
 # Create/update work items and write plane_id/plane_identifier/plane_url back into the file:
@@ -135,9 +136,11 @@ project.
 
 - After a successful create, `plane_id` (UUID), `plane_identifier` (e.g. `PROJ-12`),
   `plane_url`, and `plane_hash` are written back into each story's YAML block.
-- Re-running an import is **idempotent**: a story with a `plane_id` updates by UUID; a
-  story without one is matched by `external_id` (derived from the title) and updated —
-  never duplicated.
+- Re-running an import is **idempotent** via write-back: a story with a `plane_id` updates
+  by UUID. A story WITHOUT a `plane_id` whose title matches an existing item is treated as a
+  **duplicate** (skip-with-warning; `--adopt-duplicates` to link) — NOT a silent update — so a
+  second file can never hijack the first file's work item. `--dry-run` reports these outcomes
+  faithfully (it reads the board but writes nothing).
 - **Duplicate guard:** before creating a brand-new story, planestories checks for an item
   with the exact same title already in the project (any creator). Default is skip-with-warning
   (`duplicate of ENG-42 (Backlog)`); `--adopt-duplicates` links a single exact match (multiple
