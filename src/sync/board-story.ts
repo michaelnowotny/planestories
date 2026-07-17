@@ -34,6 +34,7 @@ export function boardItemToStory(
 	projectName: string,
 	syncCriteria: boolean,
 	children?: FetchedWorkItem[],
+	parentIdentifier?: string | null,
 ): UserStory {
 	let body = item.description ?? "";
 
@@ -60,6 +61,8 @@ export function boardItemToStory(
 		status: item.stateName ?? null,
 		body,
 		project: projectName,
+		parent: parentIdentifier ?? null,
+		kind: isCriterionChild(item) ? "criterion" : "story",
 	};
 
 	// Same effective-label set the common re-import sees (the item's own labels;

@@ -69,6 +69,15 @@ function buildYamlLines(story: UserStory): string[] {
 		lines.push(`plane_hash: ${story.planeHash}`);
 	}
 
+	// Structure: emit `kind` only when it's noteworthy (criterion/epic, not a plain
+	// story) and `parent` only when present, to keep ordinary story blocks clean.
+	if (story.kind !== null && story.kind !== "story") {
+		lines.push(`kind: ${story.kind}`);
+	}
+	if (story.parent !== null) {
+		lines.push(`parent: ${story.parent}`);
+	}
+
 	if (story.priority !== null) {
 		lines.push(`priority: ${story.priority}`);
 	}

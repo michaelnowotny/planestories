@@ -45,8 +45,24 @@ describe("filterWorkItems", () => {
 	});
 
 	test("filters by status name (case-insensitive)", () => {
-		const result = filterWorkItems(items, { statusName: "done" }, IDENT);
+		const result = filterWorkItems(items, { statusNames: ["done"] }, IDENT);
 		expect(result.map((i) => i.id)).toEqual(["b"]);
+	});
+
+	test("statusNames keeps items matching ANY of several states", () => {
+		const result = filterWorkItems(items, { statusNames: ["backlog", "done"] }, IDENT);
+		expect(result.map((i) => i.id).sort()).toEqual(["a", "b"]);
+	});
+
+	test("openOnly keeps only backlog/unstarted/started state groups", () => {
+		const grouped = [
+			item({ id: "open", stateGroup: "started" }),
+			item({ id: "backlog", stateGroup: "backlog" }),
+			item({ id: "done", stateGroup: "completed" }),
+			item({ id: "cancelled", stateGroup: "cancelled" }),
+		];
+		const result = filterWorkItems(grouped, { openOnly: true }, IDENT);
+		expect(result.map((i) => i.id).sort()).toEqual(["backlog", "open"]);
 	});
 
 	test("filters by assignee email", () => {
@@ -57,7 +73,7 @@ describe("filterWorkItems", () => {
 	test("combines filters (AND)", () => {
 		const result = filterWorkItems(
 			items,
-			{ statusName: "Backlog", assigneeEmail: "jane@co.com" },
+			{ statusNames: ["Backlog"], assigneeEmail: "jane@co.com" },
 			IDENT,
 		);
 		expect(result.map((i) => i.id)).toEqual(["a"]);

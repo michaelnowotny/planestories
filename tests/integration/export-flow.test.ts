@@ -84,6 +84,40 @@ describe("export flow (end to end)", () => {
 		expect(story.body).toContain("- [ ] enters email");
 	});
 
+	test("emits kind + parent for a criterion child; omits kind for a plain story", async () => {
+		const { client } = makeFakeClient({
+			projects: [{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{ id: "p", sequence_id: 10, name: "Parent story", state: { name: "Backlog" } },
+					{
+						id: "c",
+						sequence_id: 11,
+						name: "a criterion",
+						parent: "p",
+						external_id: "parent-story::ac0",
+						state: { name: "Backlog", group: "backlog" },
+					},
+				],
+			},
+		});
+		const outputPath = join(tmpDir, "kind.md");
+
+		// Without --sync-criteria the child is a standalone story in the export.
+		await exportStories(client, { config, filters: {}, outputPath });
+		const content = readFileSync(outputPath, "utf-8");
+
+		expect(content).toContain("kind: criterion");
+		expect(content).toContain("parent: ENG-10");
+		// The plain parent story does NOT get a noisy `kind: story` line.
+		const parentBlock = content.slice(
+			content.indexOf("## Parent story"),
+			content.indexOf("## a criterion"),
+		);
+		expect(parentBlock).not.toContain("kind:");
+		expect(parentBlock).not.toContain("parent:");
+	});
+
 	test("exported files carry plane_hash so a re-import starts warm (unchanged, zero writes)", async () => {
 		const outputPath = join(tmpDir, "export.md");
 

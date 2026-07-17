@@ -1,6 +1,17 @@
 import matter from "gray-matter";
 import { ParseError } from "../errors.ts";
-import type { FileFrontmatter, ParsedFile, PlanePriority, UserStory } from "../types.ts";
+import type { FileFrontmatter, ParsedFile, PlanePriority, StoryKind, UserStory } from "../types.ts";
+
+const VALID_KINDS: ReadonlySet<string> = new Set(["story", "criterion", "epic"]);
+
+/** Normalize a `kind` yaml value to a known StoryKind, or null when absent/unknown. */
+function normalizeKind(value: unknown): StoryKind | null {
+	if (value === undefined || value === null || value === "") {
+		return null;
+	}
+	const str = String(value).trim().toLowerCase();
+	return VALID_KINDS.has(str) ? (str as StoryKind) : null;
+}
 
 /**
  * Parse a markdown file containing user stories into a structured ParsedFile.
@@ -97,6 +108,8 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 
 	// Per-story `project:` overrides the file frontmatter; falls back to it.
 	const project = extractStringOrNull(metadata.project) ?? frontmatter.project ?? null;
+	const parent = extractStringOrNull(metadata.parent);
+	const kind = normalizeKind(metadata.kind);
 
 	return {
 		title,
@@ -111,6 +124,8 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 		status,
 		body,
 		project,
+		parent,
+		kind,
 	};
 }
 

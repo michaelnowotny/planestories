@@ -3,7 +3,7 @@ import { ConfigError } from "../errors.ts";
 import { serializeStories } from "../markdown/serializer.ts";
 import type { PlaneClient } from "../plane/client.ts";
 import { filterWorkItems, type WorkItemFilterInput } from "../plane/filters.ts";
-import { type FetchedWorkItem, fetchWorkItems } from "../plane/issues.ts";
+import { type FetchedWorkItem, fetchProjectIndex } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ExportFilters, FileFrontmatter, ResolvedConfig } from "../types.ts";
 import { boardItemToStory, isCriterionChild } from "./board-story.ts";
@@ -45,14 +45,23 @@ export async function exportStories(
 
 	const project = await resolver.resolveProject(projectName);
 
-	const items = await fetchWorkItems(client, project.id);
+	// One list of the whole project; byId resolves parent UUIDs to identifiers.
+	const index = await fetchProjectIndex(client, project.id, project.identifier);
+	const items = index.items;
 
+	const statusNames = [
+		...(options.filters.status ? [options.filters.status] : []),
+		...(options.filters.statuses ?? []),
+	];
 	const filterInput: WorkItemFilterInput = {};
 	if (options.filters.issues && options.filters.issues.length > 0) {
 		filterInput.identifiers = options.filters.issues;
 	}
-	if (options.filters.status) {
-		filterInput.statusName = options.filters.status;
+	if (statusNames.length > 0) {
+		filterInput.statusNames = statusNames;
+	}
+	if (options.filters.openOnly) {
+		filterInput.openOnly = true;
 	}
 	if (options.filters.assignee) {
 		filterInput.assigneeEmail = options.filters.assignee;
@@ -64,14 +73,14 @@ export async function exportStories(
 		filterInput.label = options.filters.label;
 	}
 
-	// Group criterion sub-items by parent (from the full, unfiltered set).
-	const childrenByParent = new Map<string, FetchedWorkItem[]>();
+	// Criterion sub-items grouped by parent (from the full, unfiltered set).
+	const criterionChildren = new Map<string, FetchedWorkItem[]>();
 	if (options.syncCriteria) {
 		for (const item of items) {
 			if (isCriterionChild(item) && item.parent) {
-				const list = childrenByParent.get(item.parent) ?? [];
+				const list = criterionChildren.get(item.parent) ?? [];
 				list.push(item);
-				childrenByParent.set(item.parent, list);
+				criterionChildren.set(item.parent, list);
 			}
 		}
 	}
@@ -90,6 +99,12 @@ export async function exportStories(
 		);
 	}
 
+	const parentIdentifier = (item: FetchedWorkItem): string | null => {
+		if (!item.parent) return null;
+		const p = index.byId.get(item.parent);
+		return p ? `${project.identifier}-${p.sequenceId}` : null;
+	};
+
 	const stories = filtered.map((item) =>
 		boardItemToStory(
 			client,
@@ -98,7 +113,8 @@ export async function exportStories(
 			project.identifier,
 			projectName,
 			Boolean(options.syncCriteria),
-			options.syncCriteria ? childrenByParent.get(item.id) : undefined,
+			options.syncCriteria ? criterionChildren.get(item.id) : undefined,
+			parentIdentifier(item),
 		),
 	);
 

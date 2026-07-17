@@ -16,11 +16,23 @@ function makeStory(overrides: Partial<UserStory> = {}): UserStory {
 		status: null,
 		body: "User should be able to log in.\n\n### Acceptance Criteria\n\n- [ ] Login works",
 		project: null,
+		parent: null,
+		kind: null,
 		...overrides,
 	};
 }
 
 describe("serializeStories", () => {
+	test("emits kind (criterion) and parent, but omits kind for a plain story", () => {
+		const withKind = serializeStories([makeStory({ kind: "criterion", parent: "ENG-3" })]);
+		expect(withKind).toContain("kind: criterion");
+		expect(withKind).toContain("parent: ENG-3");
+
+		const plain = serializeStories([makeStory({ kind: "story" })]);
+		expect(plain).not.toContain("kind:");
+		expect(plain).not.toContain("parent:");
+	});
+
 	test("serializes single UserStory to markdown", () => {
 		const story = makeStory({
 			priority: "high",

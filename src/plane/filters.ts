@@ -1,10 +1,15 @@
 import type { FetchedWorkItem } from "./issues.ts";
 
+/** State groups considered "open" (not yet done/cancelled). */
+const OPEN_STATE_GROUPS = new Set(["backlog", "unstarted", "started"]);
+
 export interface WorkItemFilterInput {
 	/** Human-readable identifiers to keep, e.g. ["BLOOM-8", "BLOOM-12"]. */
 	identifiers?: string[];
-	/** State name to keep (case-insensitive). */
-	statusName?: string;
+	/** State names to keep (case-insensitive); an item matching ANY is kept. */
+	statusNames?: string[];
+	/** Keep only items whose state group is open (backlog/unstarted/started). */
+	openOnly?: boolean;
 	/** Assignee email to keep (case-insensitive). */
 	assigneeEmail?: string;
 	/** external_source to keep (exact). */
@@ -35,9 +40,13 @@ export function filterWorkItems(
 		);
 	}
 
-	if (input.statusName) {
-		const needle = input.statusName.toLowerCase();
-		result = result.filter((item) => item.stateName?.toLowerCase() === needle);
+	if (input.statusNames && input.statusNames.length > 0) {
+		const wanted = new Set(input.statusNames.map((s) => s.toLowerCase()));
+		result = result.filter((item) => !!item.stateName && wanted.has(item.stateName.toLowerCase()));
+	}
+
+	if (input.openOnly) {
+		result = result.filter((item) => !!item.stateGroup && OPEN_STATE_GROUPS.has(item.stateGroup));
 	}
 
 	if (input.assigneeEmail) {

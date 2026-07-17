@@ -32,6 +32,31 @@ describe("parseMarkdownFile", () => {
 		expect(story.project).toBe("Q1 2026 Release");
 	});
 
+	test("reads parent and kind from the yaml block", () => {
+		const content = [
+			"## A criterion story",
+			"",
+			"```yaml",
+			"plane_id: wi-9",
+			"kind: criterion",
+			"parent: DATA-5",
+			"```",
+			"",
+			"Body.",
+			"",
+		].join("\n");
+		const story = parseMarkdownFile(content, "x.md").stories[0]!;
+		expect(story.parent).toBe("DATA-5");
+		expect(story.kind).toBe("criterion");
+	});
+
+	test("defaults parent/kind to null and ignores an unknown kind", () => {
+		const content = ["## Plain", "", "```yaml", "kind: bogus", "```", "", "Body."].join("\n");
+		const story = parseMarkdownFile(content, "x.md").stories[0]!;
+		expect(story.parent).toBeNull();
+		expect(story.kind).toBeNull();
+	});
+
 	test("parses multi-story file with 2 stories and different metadata", () => {
 		const content = readFixture("multi-story.md");
 		const result = parseMarkdownFile(content, "multi-story.md");

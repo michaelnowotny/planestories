@@ -21,6 +21,8 @@ describe("smoke test", () => {
 			status: null,
 			body: "Test body",
 			project: null,
+			parent: null,
+			kind: null,
 		};
 		expect(story.title).toBe("Test story");
 	});

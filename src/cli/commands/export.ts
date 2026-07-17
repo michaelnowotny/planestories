@@ -6,6 +6,11 @@ import { createPlaneClient } from "../../plane/client.ts";
 import { exportStories } from "../../sync/exporter.ts";
 import type { ExportFilters } from "../../types.ts";
 
+/** Commander collector for repeatable options (e.g. multiple --status). */
+function collect(value: string, previous: string[]): string[] {
+	return previous.concat([value]);
+}
+
 /**
  * Print a user-friendly error message and exit.
  */
@@ -34,7 +39,8 @@ export function registerExportCommand(program: Command) {
 		.option("-o, --output <file>", "Output file path", "./exported-stories.md")
 		.option("-p, --project <name>", "Project to export from (required if no defaultProject)")
 		.option("-i, --issues <ids>", "Comma-separated work item identifiers (e.g. BLOOM-8)")
-		.option("-s, --status <state>", "Filter by status")
+		.option("-s, --status <state>", "Filter by status (repeatable)", collect, [])
+		.option("--open-only", "Only export open items (backlog/unstarted/started)", false)
 		.option("-a, --assignee <email>", "Filter by assignee email")
 		.option(
 			"--external-source [source]",
@@ -56,7 +62,8 @@ export function registerExportCommand(program: Command) {
 				const filters: ExportFilters = {};
 				if (options.project) filters.project = options.project;
 				if (options.issues) filters.issues = options.issues.split(",").map((s: string) => s.trim());
-				if (options.status) filters.status = options.status;
+				if (options.status && options.status.length > 0) filters.statuses = options.status;
+				if (options.openOnly) filters.openOnly = true;
 				if (options.assignee) filters.assignee = options.assignee;
 				if (options.externalSource) {
 					filters.externalSource =

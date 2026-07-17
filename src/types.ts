@@ -9,6 +9,9 @@ export const PLANE_PRIORITIES: readonly PlanePriority[] = [
 	"none",
 ] as const;
 
+/** What a work item represents. `epic` detection is deferred (see plan decision #3). */
+export type StoryKind = "story" | "criterion" | "epic";
+
 export interface UserStory {
 	/** Story title extracted from H2 heading */
 	title: string;
@@ -38,6 +41,10 @@ export interface UserStory {
 	body: string;
 	/** Project name (from file frontmatter or per-story override) */
 	project: string | null;
+	/** Human identifier of the parent work item (e.g. "DATA-12"), or null. */
+	parent: string | null;
+	/** story | criterion | epic — informational on export; read on import. */
+	kind: StoryKind | null;
 }
 
 export interface FileFrontmatter {
@@ -91,6 +98,10 @@ export interface ExportFilters {
 	project?: string;
 	issues?: string[];
 	status?: string;
+	/** State names to keep (repeatable --status); OR-combined with `status`. */
+	statuses?: string[];
+	/** Keep only open items (state group backlog/unstarted/started). */
+	openOnly?: boolean;
 	assignee?: string;
 	/** Only export items stamped with this external_source (e.g. "planestories"). */
 	externalSource?: string;
