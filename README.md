@@ -1,5 +1,8 @@
 # planestories
 
+[![npm version](https://img.shields.io/npm/v/planestories)](https://www.npmjs.com/package/planestories)
+[![license](https://img.shields.io/npm/l/planestories)](./LICENSE)
+
 A CLI tool that bridges markdown-based user stories and [Plane](https://plane.so) work items, enforcing user story and acceptance-criteria discipline for AI agent-driven development.
 
 > **Attribution.** planestories is a fork of [**linearstories**](https://github.com/stackingturtles/linearstories) by **Ijonas Kisselbach / Stacking Turtles Ltd.**, adapted to target Plane instead of Linear. The original is MIT-licensed; that license is preserved in full (see [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE)). Huge thanks to the original author.
