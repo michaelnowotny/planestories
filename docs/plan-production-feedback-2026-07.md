@@ -163,6 +163,9 @@ several open questions below.
    divergence (live description hash != plane_hash) as an FYI line, report-only, never auto-resolve.
 3. **`kind`: ship `story|criterion` now; add `epic` later.** Do not block P1-3. Meanwhile epics are
    inferable as parent-absent + has-children. Adding `kind: epic` later is additive.
+   ✅ **DONE (2026-07-17, finance ask 1a):** `export` now emits `kind: epic` for any item that
+   parents at least one non-criterion child, so tool-produced files self-annotate the hierarchy for
+   the `/rate-userstories` review. Inference stays only for hand-authored files.
 4. **groom v1 = close/report only. Reverse-sync (d) = v2.** Reverse-sync needs a file-registry
    (which .stories.md owns DATA-N) because stories are spread across many per-epic files; design it
    properly, don't rush. See the CRITICAL cascade constraint in the P1-1 section.

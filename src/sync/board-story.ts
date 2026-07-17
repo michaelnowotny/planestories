@@ -35,6 +35,8 @@ export function boardItemToStory(
 	syncCriteria: boolean,
 	children?: FetchedWorkItem[],
 	parentIdentifier?: string | null,
+	/** True when this item parents at least one non-criterion child (i.e. an epic). */
+	isEpic?: boolean,
 ): UserStory {
 	let body = item.description ?? "";
 
@@ -62,7 +64,7 @@ export function boardItemToStory(
 		body,
 		project: projectName,
 		parent: parentIdentifier ?? null,
-		kind: isCriterionChild(item) ? "criterion" : "story",
+		kind: isCriterionChild(item) ? "criterion" : isEpic ? "epic" : "story",
 		comment: null,
 	};
 

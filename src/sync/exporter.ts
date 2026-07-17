@@ -105,6 +105,12 @@ export async function exportStories(
 		return p ? `${project.identifier}-${p.sequenceId}` : null;
 	};
 
+	// An item that parents at least one NON-criterion child is an epic (planestories
+	// models an epic as a parent work item). Criterion sub-items don't make a parent
+	// an epic — those are a story's acceptance criteria.
+	const isEpic = (item: FetchedWorkItem): boolean =>
+		(index.childrenByParent.get(item.id) ?? []).some((c) => !isCriterionChild(c));
+
 	const stories = filtered.map((item) =>
 		boardItemToStory(
 			client,
@@ -115,6 +121,7 @@ export async function exportStories(
 			Boolean(options.syncCriteria),
 			options.syncCriteria ? criterionChildren.get(item.id) : undefined,
 			parentIdentifier(item),
+			isEpic(item),
 		),
 	);
 

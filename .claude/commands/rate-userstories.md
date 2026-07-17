@@ -32,6 +32,8 @@ Classify each issue from its own metadata, never from its title:
 
 Do not treat the file-level default `project` or a shared/default label as an epic discriminator.
 
+**Un-marked epic hint.** planestories files frequently lead with the epic, and its export/import stamp `kind: epic` and `parent:` automatically — but hand-authored files may omit them. If a multi-issue file contains NO epic by the signals above and the first issue's description scopes the others, do NOT silently reclassify it. Flag it in the Hierarchy Review as a **probable un-marked epic** and recommend adding `kind: epic` to it and `parent: <its-identifier>` to the issues it scopes. planestories nests only via an explicit `parent:` field, so that metadata must be present for the hierarchy to be tool-maintained.
+
 ## Structural Rules
 
 Every issue must have an H2 title, an optional fenced `yaml` block immediately after it, and a meaningful body.
@@ -50,9 +52,11 @@ A user story:
 
 Treat these as structural failures: an epic with acceptance criteria; a nested epic (an epic with its own `parent`); malformed or unparseable `yaml`; a user story with no acceptance criteria; a `parent` that resolves to a **non-epic issue in this file**.
 
-planestories supports **cross-file nesting**, so a `parent:` identifier that is **not present in this file** is most likely a valid reference to an epic in another file — note it under Hierarchy Review, do NOT treat it as a structural failure. Only a same-file `parent` pointing at a non-epic is a failure.
+planestories supports **cross-file nesting**, so a `parent:` identifier that is **not present in this file** is most likely a valid reference to an epic in another file — note it under Hierarchy Review, do NOT treat it as a structural failure. Only a same-file `parent` pointing at a non-epic is a failure. If you have Plane/board access in this session (e.g. the Plane MCP), verify the identifier resolves to an epic and report the result — "noted, verified epic DATA-793 (In Progress)" is strictly better than "noted, unverified".
 
 A missing or empty `### Why is this needed?` section is not a structural hard fail. Score it zero for Epic Rationale, which caps the epic at 70% and therefore fails it at the 80% threshold.
+
+**House-convention override (optional).** If the invoker states that this project's convention is that epics carry acceptance criteria as their close/exit conditions, treat "an epic with acceptance criteria" as a WARNING for this run rather than a structural failure. The `### Why is this needed?` → zero-Rationale → 70% cap still applies, so a rationale-less epic still fails on score — this override only relaxes the epic-with-AC structural gate so an existing board can be rated without drowning real findings in structural fails.
 
 ## User Story Rubric
 
@@ -159,8 +163,9 @@ Include every epic and user story (criterion sub-items are covered under their p
 
 List:
 - Each epic and the user stories that nest under it (via `parent`).
+- Any **probable un-marked epic** (no epic detected, but the first issue scopes the others) with the recommended `kind: epic` + `parent:` fix.
 - `parent` references that resolve to a non-epic in this file (structural failures).
-- `parent` references not present in this file (likely valid cross-file epics — note, do not fail).
+- `parent` references not present in this file (likely valid cross-file epics — note, do not fail; mark "verified"/"unverified" if you have board access).
 - Standalone user stories (no `parent`).
 - Scope-fit concerns between an epic and its children that are not outright contradictions.
 

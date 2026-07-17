@@ -118,6 +118,39 @@ describe("export flow (end to end)", () => {
 		expect(parentBlock).not.toContain("parent:");
 	});
 
+	test("emits kind: epic for an item that parents a non-criterion child story", async () => {
+		const { client } = makeFakeClient({
+			projects: [{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{ id: "ep", sequence_id: 20, name: "The Epic", state: { name: "Backlog" } },
+					{
+						id: "st",
+						sequence_id: 21,
+						name: "A child story",
+						parent: "ep",
+						state: { name: "Backlog" },
+					},
+				],
+			},
+		});
+		const outputPath = join(tmpDir, "epic.md");
+
+		await exportStories(client, { config, filters: {}, outputPath });
+		const content = readFileSync(outputPath, "utf-8");
+
+		// The parent (parents a real story) is emitted as an epic.
+		const epicBlock = content.slice(
+			content.indexOf("## The Epic"),
+			content.indexOf("## A child story"),
+		);
+		expect(epicBlock).toContain("kind: epic");
+		// The child links to the epic and stays a plain story (no noisy kind line).
+		const childBlock = content.slice(content.indexOf("## A child story"));
+		expect(childBlock).toContain("parent: ENG-20");
+		expect(childBlock).not.toContain("kind:");
+	});
+
 	test("exported files carry plane_hash so a re-import starts warm (unchanged, zero writes)", async () => {
 		const outputPath = join(tmpDir, "export.md");
 

@@ -44,6 +44,8 @@ The skill classifies each issue from its own metadata, never from its title:
 - **User story** — has a `### Acceptance Criteria` section and is not an epic; may carry `parent: <EPIC-IDENTIFIER>` (e.g. `parent: DATA-12`) nesting it under an epic.
 - **Criterion sub-item** — `kind: criterion`; not rated as a standalone story — it is a story's acceptance criterion.
 
+`export` stamps `kind: epic` and `parent:` automatically (an item that parents a real story is emitted as an epic), so tool-produced files self-annotate. Hand-authored files may omit these — when a multi-issue file has no epic and its first issue scopes the others, the skill flags it as a **probable un-marked epic** and recommends adding `kind: epic` + `parent:` rather than silently reclassifying.
+
 ## Structural validation
 
 Before grading quality, the skill verifies each issue is structurally valid for its type:
@@ -54,9 +56,11 @@ Before grading quality, the skill verifies each issue is structurally valid for 
 
 Structural failures include: an epic with acceptance criteria, a nested epic (an epic with its own `parent`), malformed `yaml`, a user story without acceptance criteria, and a `parent` that resolves to a non-epic **in the same file**.
 
-Because planestories supports **cross-file nesting**, a `parent:` identifier that is not present in the file is treated as a likely valid reference to an epic in another file — noted in the Hierarchy Review, not failed.
+Because planestories supports **cross-file nesting**, a `parent:` identifier that is not present in the file is treated as a likely valid reference to an epic in another file — noted in the Hierarchy Review, not failed. When the session has Plane board access (the Plane MCP), the skill can verify that identifier resolves to a real epic and label it "verified"/"unverified".
 
 If a story is malformed or missing acceptance criteria, the skill fails it explicitly rather than pretending it is merely low quality.
+
+**House-convention override.** For greenfield authoring, an epic should have no acceptance criteria (its value goes in a `### Why is this needed?` section). If your project's convention is instead that epics carry acceptance criteria as their close/exit conditions, tell the skill at invocation and it treats epic-with-AC as a **warning** rather than a structural failure — useful for rating an existing board of legacy epics without drowning real findings in structural fails. The `### Why is this needed?` → zero-Rationale → 70% cap still applies, so a rationale-less epic still fails on score.
 
 ## Rubrics (type-specific)
 
@@ -154,7 +158,7 @@ When UI or visual acceptance criteria are unverifiable (e.g., "the button looks 
 The report is structured as:
 
 1. **Summary table** — Every epic and user story with its **type**, score, pass/fail status, and the primary reason (hard contradiction, structural issue, below-threshold score, or pass)
-2. **Hierarchy review** — Each epic and the stories that nest under it; same-file `parent` references that resolve to a non-epic (failures); `parent` references not present in the file (likely valid cross-file epics — noted, not failed); standalone user stories; and scope-fit concerns that are not outright contradictions
+2. **Hierarchy review** — Each epic and the stories that nest under it; any probable un-marked epic (with the recommended `kind: epic` + `parent:` fix); same-file `parent` references that resolve to a non-epic (failures); `parent` references not present in the file (likely valid cross-file epics — noted, not failed, and "verified"/"unverified" when board access is available); standalone user stories; and scope-fit concerns that are not outright contradictions
 3. **Contradictions and tensions** — Every hard contradiction and tension, with severity, affected issues, quoted conflicting statements, and the reasoning. For hard contradictions, the chosen normalization and the discarded interpretation. For tensions, the risk if both ship as-is.
 4. **Detailed breakdown with inline replacement markdown** — Every failed issue gets per-dimension scores for its type, flagged content with rewrites, suggested additions, and immediately after, a full replacement markdown block in the canonical `planestories` format — so the reader sees the diagnosis and fix together
 5. **Style guide recommendation** — Included only when UI/visual anti-patterns are detected
