@@ -72,16 +72,12 @@ several open questions below.
   `src/sync/story-hash.ts` (single source of truth so import/export can't drift). An unedited
   export→import is now `unchanged`/zero-writes. This is the P1-3 "export completeness" hash piece,
   pulled forward.
-- **Still open — the hashless-but-LINKED case (was finance ask (b)):** files with a `plane_id` but
-  no `plane_hash` (pre-slice-2 write-backs, or hand-authored) still blind-write on first touch.
-  Resolve this in **slice 4/5 via `fetchProjectIndex`, NOT a per-item GET** (which would reinstate
-  the rate cost decision #2 rejected): for a hashless linked story, reconstruct the board item from
-  the ONE index list (same conversion the exporter uses), compute `hashStoryPayload` on it, and if
-  it equals the file's hash → skip + adopt (write `plane_hash`). One list call amortized across all
-  stories, so it honors decision #2's spirit while killing the one-time blind-write. Dry-run stays
-  hash-only (no live compare) unless `--check` is passed. Until built, treat full re-imports of
-  PRE-fix exports as unsafe (new exports are already warm); `--status-only`/targeted files remain
-  the safe path.
+- **Hashless-but-LINKED case (finance ask (b)) — SHIPPED in slice 4 (`3c62571`):** files with a
+  `plane_id` but no `plane_hash` (pre-slice-2 write-backs, or hand-authored) no longer blind-write.
+  The importer reconstructs the board item from the ONE `fetchProjectIndex` list (via the shared
+  `boardItemToStory`, NOT a per-item GET — honoring decision #2), compares hashes, and skips +
+  adopts the hash when the content already matches (else updates normally). One list amortized
+  across the run; runs where every story is already hashed pay nothing (lazy + memoized).
 
 ### P1-2 — `import --status-only` (unblocks the imminent ~80-ticket close)
 - New import mode: for items with a plane_id, PATCH only `state` (resolved from yaml `status`),
@@ -183,11 +179,14 @@ report real-board regression numbers (unchanged-skip rate, 429 counts, groom clo
 
 ## Suggested sequencing (each a shippable slice)
 
-1. P0-2 backoff (protects everything).
-2. P0-1 skip-unchanged + write-back plumbing (foundational).
-3. P1-2 `--status-only` (rides on the write-back field; unblocks the 80-ticket close now).
-4. Shared `fetchProjectIndex` + P0-3 duplicate guard.
-5. P1-3 export completeness (reuses the index).
+1. ✅ **DONE** (`25a0132`) P0-2 backoff (protects everything).
+2. ✅ **DONE** (`417c64f`) P0-1 skip-unchanged + write-back plumbing (foundational).
+3. ✅ **DONE** (`ec62e39`) P1-2 `--status-only` — validated live (80/80 close, no 429 stalls).
+   ➕ export `plane_hash` warm-start (`fb51cee`, the P1-3 hash piece, pulled forward).
+4. ✅ **DONE** (`3c62571`) Shared `fetchProjectIndex` + P0-3 duplicate guard + hashless-linked adopt
+   (finance ask (b), via the index — not per-item GETs).
+5. ⏭ **NEXT** P1-3 export completeness (`parent`/`kind` emit + read; `--open-only`/`--status`).
+   Reuses the index + `boardItemToStory`.
 6. P1-1 groom (reuses the index; the reconcile loop's board→file half).
 7. P2 batch (cross-file parent, strict guard, evidence comments, doctor).
 

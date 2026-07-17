@@ -109,6 +109,7 @@ After a successful import, `plane_id` (the work item UUID), `plane_identifier` (
 | `assignee` | member UUID (resolved by email or display name) |
 | `estimate` | story `point` |
 | `plane_id` | work item UUID (used to update) |
+| `plane_hash` | content hash of the last sync (auto-managed) — powers skip-unchanged |
 
 ### Choosing the project
 
@@ -144,9 +145,13 @@ workspace. An unknown name fails loudly and suggests the closest match plus the 
 (`Project not found: "Infrastructure". Did you mean "Infrastructure Setup"? Available projects: ...`).
 Use `--dry-run --check` to validate routing before importing.
 
-### Idempotency
+### Idempotency, skip-unchanged & duplicates
 
 On create, planestories stamps each work item with `external_id` (derived from the story title) and `external_source: "planestories"`. Re-running an import — even before write-back — matches the existing work item by `external_id` and **updates instead of duplicating**.
+
+- **Skip-unchanged.** Each synced story stores a `plane_hash` (a hash of the rendered payload). On re-import, a linked story whose content is unchanged is reported `unchanged` and makes **zero API writes** — so re-importing a large, mostly-static board is cheap. Cosmetic markdown reflow that renders to the same HTML doesn't count as a change. `--force` re-imports regardless. (An edit made in the Plane UI while the file is untouched is intentionally not pulled back by import — that's a future `groom` reverse-sync's job.)
+- **Warm export → import.** `export` writes `plane_hash` too, so re-importing an unedited exported file is all-`unchanged` (no blind description rewrites). For files that carry a `plane_id` but no `plane_hash` (legacy or hand-authored), import reconstructs the board item from a single project listing and adopts the hash if the content already matches — one list call, never a per-item fetch.
+- **Duplicate guard.** Before creating a brand-new story, planestories checks whether an item with the **exact same title** already exists in the project (created by anyone). By default it **skips with a warning** (`duplicate of ENG-42 (Backlog)`), so you never get accidental twins. Pass `--adopt-duplicates` to link a single exact match instead (multiple matches are a hard error — set `plane_id` manually), or `--force-create` to create anyway.
 
 ### Identifying planestories items
 
@@ -178,10 +183,16 @@ planestories import <files...> [options]
   --create-labels         Create labels that don't exist instead of skipping
   --source-label <name>   Tag every created item with this label (auto-created)
   --sync-criteria         Sync each acceptance criterion to a Plane sub-item
+  --status-only           Update ONLY the state of already-linked items (skip unlinked)
+  --force                 Re-import even when content is unchanged (bypass skip-unchanged)
+  --adopt-duplicates      Link a single exact-title match instead of skipping it
+  --force-create          Create even when a same-title item exists (bypass the duplicate guard)
   --dry-run               Preview without writing to Plane
   --check                 With --dry-run, validate read-only (project/state/assignee/labels)
   --no-write-back         Skip writing Plane ids back into the markdown
 ```
+
+`--status-only` is the mode for bulk state transitions (e.g. closing a batch of tickets): for every story that already has a `plane_id` it PATCHes only the `state` (from `status:`) and touches nothing else — no description re-render, no title/label clobber. Unlinked stories are skipped with a warning.
 
 ### `export`
 
@@ -198,7 +209,7 @@ planestories export [options]
   --include-archived        Include items carrying the 'archived' label (excluded by default)
 ```
 
-Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order.
+Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order. It also writes `plane_hash`, so re-importing an unedited exported file is all-`unchanged` (see [Idempotency, skip-unchanged & duplicates](#idempotency-skip-unchanged--duplicates)).
 
 ### `projects`
 
@@ -239,6 +250,10 @@ planestories delete --external-source [src] --project <name> [options]
 completed/cancelled items). `delete --archive` applies the `archived` label (recoverable —
 just remove the label; works on any state) and leaves the work item in place. Archived
 items are excluded from `export` by default (pass `--include-archived` to see them).
+
+## Reliability
+
+Every Plane API call retries transient failures automatically — HTTP 429 (honoring `Retry-After`), 5xx, and network blips — with exponential backoff plus jitter (capped at 30s). So a large bulk import or close won't fall over on a rate limit. Tune the retry budget with `PLANE_MAX_RETRIES` (default `5`; `0` disables). After the retries are exhausted the error surfaces, and per-story failures never abort the run — the summary lists the failed items.
 
 ## Self-hosting
 

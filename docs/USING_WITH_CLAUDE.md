@@ -85,6 +85,8 @@ bun run src/cli/index.ts import /path/to/stories.md
 #   --project "Name"  override the project for all stories
 #   --force           re-import even when content is unchanged (bypass skip-unchanged)
 #   --status-only     update ONLY the state of already-linked items (skip unlinked)
+#   --adopt-duplicates link a single exact-title match instead of skipping it
+#   --force-create    create even when a same-title item exists (bypass the guard)
 #   --no-write-back   don't modify the markdown file
 
 # Export back to markdown (HTML description -> markdown; checklists survive):
@@ -127,6 +129,11 @@ project.
 - Re-running an import is **idempotent**: a story with a `plane_id` updates by UUID; a
   story without one is matched by `external_id` (derived from the title) and updated —
   never duplicated.
+- **Duplicate guard:** before creating a brand-new story, planestories checks for an item
+  with the exact same title already in the project (any creator). Default is skip-with-warning
+  (`duplicate of ENG-42 (Backlog)`); `--adopt-duplicates` links a single exact match (multiple
+  matches = hard error — set `plane_id` manually); `--force-create` creates anyway. The check
+  uses one project listing per run (shared with the hashless-linked adopt), never per-item GETs.
 - **`--status-only`** is a targeted mode for bulk state transitions (e.g. closing a batch
   of tickets): for each story that already has a `plane_id`, it PATCHes only the `state`
   (from the yaml `status`) and touches nothing else — no description re-render, no title or
@@ -157,6 +164,9 @@ project.
   zero writes (rather than blind-rewriting every description). This holds when the import
   uses the same `--sync-criteria` flag as the export and no extra default/source labels
   are configured — the normal round-trip. Edit a story and only that story re-syncs.
+- **Legacy `plane_id`-without-`plane_hash` files** (linked before skip-unchanged existed, or
+  hand-authored) don't blind-write: import reconstructs the board item from one project
+  listing and adopts the hash when the content already matches — else it updates normally.
 - Use `delete` to clean up after a sandbox run (scoped to your files or to
   `--external-source`, behind `--yes`). `delete --archive` is the recoverable
   alternative: it applies an `archived` label (works on any state) instead of
