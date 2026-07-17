@@ -285,6 +285,18 @@ findings** (pass `--no-fail-on-findings` to just report):
 planestories doctor --project <name>
 ```
 
+## Rating story quality — `/rate-userstories`
+
+planestories ships a Claude Code skill that reviews a story file *before* you import it. Run it in any Claude Code session:
+
+```
+/rate-userstories stories/q1-2026.md
+```
+
+It classifies each issue (epic / user story), validates structure and epic→child hierarchy, scores each with a type-specific rubric (epics get their own goal-clarity / scope / rationale rubric), and — critically for agentic coding — detects contradictions within and across issues, emitting corrected replacement markdown you can review. Vague, unfalsifiable, or self-contradicting acceptance criteria fail with concrete rewrites. It reads both inline `### Acceptance Criteria` and exported `kind: criterion` sub-items. Full reference: [docs/RATE_USERSTORIES.md](./docs/RATE_USERSTORIES.md).
+
+> Adapted from linearstories' `/rate-userstories` skill; the epic-aware upgrade follows an enhancement by Ijonas Kisselbach.
+
 ## Reliability
 
 Every Plane API call retries transient failures automatically — HTTP 429 (honoring `Retry-After`), 5xx, and network blips — with exponential backoff plus jitter (capped at 30s). So a large bulk import or close won't fall over on a rate limit. Tune the retry budget with `PLANE_MAX_RETRIES` (default `5`; `0` disables). After the retries are exhausted the error surfaces, and per-story failures never abort the run — the summary lists the failed items.

@@ -63,9 +63,17 @@ epic) · **7** cross-file `parent`, `import --strict` guard, `comment:` evidence
 (CI wrapper, non-zero on findings). Groom/doctor live in `src/sync/groomer.ts` +
 `src/cli/commands/{groom,doctor}.ts`; comments go through `ensureComment` (marker-idempotent) on
 the client's `listWorkItemComments`/`createWorkItemComment`. Reverse-sync (board→file checkbox
-ticking) is the one deferred piece (decision #4). Design + locked decisions:
-`docs/plan-production-feedback-2026-07.md`; state/how-to: `docs/handoff-2026-07-17.md`; full CLI
-reference: `docs/USING_WITH_CLAUDE.md`.
+ticking) is the one deferred piece (decision #4).
+
+Also since v0.2.0: **`export` emits `kind: epic`** for any item that parents a non-criterion child
+(so exported files self-annotate the hierarchy), and the **`/rate-userstories` skill is epic-aware**
+— it classifies epic/story, validates structure + epic→child hierarchy, uses type-specific rubrics,
+and reads ACs as either inline `### Acceptance Criteria` or `kind: criterion` children (adapted from
+an upstream linearstories enhancement; see `.claude/commands/rate-userstories.md` +
+`docs/RATE_USERSTORIES.md`). Both are production-validated on the finance session's 800+-item board.
+
+Design + locked decisions: `docs/plan-production-feedback-2026-07.md`; state/how-to:
+`docs/handoff-2026-07-17.md`; full CLI reference: `docs/USING_WITH_CLAUDE.md`.
 
 ---
 
