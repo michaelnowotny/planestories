@@ -63,6 +63,26 @@ several open questions below.
 - Effort: M. Risk: medium (hash must be computed identically at write and read time; flags that
   change payload, e.g. `--sync-criteria`/`--source-label`, must be part of or invalidate the hash).
 
+**Update 2026-07-17 (production feedback from the DATA-board close):**
+- Slices 1–3 validated live: status-only closed 80/80 with no 429 stalls, replacing ~160
+  rate-limited MCP calls (board 454→375).
+- **Finding + fix (shipped, `fb51cee`):** a full-board re-import showed *815 would-update / 0
+  unchanged* because **exported files carried no `plane_hash`** — skip-unchanged started cold on
+  every export→import cycle. Fixed: export now writes `plane_hash` via the shared
+  `src/sync/story-hash.ts` (single source of truth so import/export can't drift). An unedited
+  export→import is now `unchanged`/zero-writes. This is the P1-3 "export completeness" hash piece,
+  pulled forward.
+- **Still open — the hashless-but-LINKED case (was finance ask (b)):** files with a `plane_id` but
+  no `plane_hash` (pre-slice-2 write-backs, or hand-authored) still blind-write on first touch.
+  Resolve this in **slice 4/5 via `fetchProjectIndex`, NOT a per-item GET** (which would reinstate
+  the rate cost decision #2 rejected): for a hashless linked story, reconstruct the board item from
+  the ONE index list (same conversion the exporter uses), compute `hashStoryPayload` on it, and if
+  it equals the file's hash → skip + adopt (write `plane_hash`). One list call amortized across all
+  stories, so it honors decision #2's spirit while killing the one-time blind-write. Dry-run stays
+  hash-only (no live compare) unless `--check` is passed. Until built, treat full re-imports of
+  PRE-fix exports as unsafe (new exports are already warm); `--status-only`/targeted files remain
+  the safe path.
+
 ### P1-2 — `import --status-only` (unblocks the imminent ~80-ticket close)
 - New import mode: for items with a plane_id, PATCH only `state` (resolved from yaml `status`),
   ignore every other field (no description re-render, no clobber). Items without a plane_id are
