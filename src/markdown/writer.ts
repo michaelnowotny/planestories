@@ -3,8 +3,12 @@ export interface WriteBackUpdate {
 	planeId: string;
 	planeIdentifier: string;
 	planeUrl: string;
-	/** Content hash of the synced payload, stored as `plane_hash` (P0-1 skip-unchanged). */
-	planeHash: string;
+	/**
+	 * Content hash of the synced payload, stored as `plane_hash` (P0-1 skip-unchanged).
+	 * Undefined when a follow-up step (criteria/comment) did not finish — the item is
+	 * linked, but the hash is withheld so a re-run retries instead of skipping as unchanged.
+	 */
+	planeHash?: string;
 }
 
 /**
@@ -125,7 +129,9 @@ export function writeBackIds(
 						const matchedField = FIELD_ORDER.find((field) =>
 							yamlLine.match(new RegExp(`^${FIELD_TO_YAML[field]}:`)),
 						);
-						if (matchedField) {
+						// Only rewrite a plane_* line when we have a value for it; an
+						// undefined value (e.g. a withheld plane_hash) leaves the line as-is.
+						if (matchedField && update[matchedField] !== undefined) {
 							result.push(`${FIELD_TO_YAML[matchedField]}: ${update[matchedField]}`);
 							found.add(matchedField);
 						} else {
@@ -134,9 +140,9 @@ export function writeBackIds(
 						i++;
 					}
 
-					// Append any plane_* fields that weren't already present
+					// Append any plane_* fields that weren't already present (skip undefined).
 					for (const field of FIELD_ORDER) {
-						if (!found.has(field)) {
+						if (!found.has(field) && update[field] !== undefined) {
 							result.push(`${FIELD_TO_YAML[field]}: ${update[field]}`);
 						}
 					}
@@ -147,11 +153,13 @@ export function writeBackIds(
 						i++;
 					}
 				} else {
-					// No YAML block - insert one after the H2 heading
+					// No YAML block - insert one after the H2 heading (skip undefined fields).
 					result.push("");
 					result.push("```yaml");
 					for (const field of FIELD_ORDER) {
-						result.push(`${FIELD_TO_YAML[field]}: ${update[field]}`);
+						if (update[field] !== undefined) {
+							result.push(`${FIELD_TO_YAML[field]}: ${update[field]}`);
+						}
 					}
 					result.push("```");
 				}

@@ -126,20 +126,18 @@ export async function importStories(
 			// had no plane_hash yet — store it so it is warm next time). In-place hash
 			// refreshes are idempotent on plane_id/identifier/url. Fast-path unchanged
 			// (file already had a matching hash) and failed/skipped write nothing.
-			if (
-				result.planeId &&
-				result.planeIdentifier &&
-				result.planeUrl &&
-				result.planeHash &&
-				(result.action === "created" ||
-					result.action === "updated" ||
-					(result.action === "unchanged" && story.planeHash === null))
-			) {
+			const linkable =
+				result.action === "created" ||
+				result.action === "updated" ||
+				(result.action === "unchanged" && story.planeHash === null);
+			if (linkable && result.planeId && result.planeIdentifier && result.planeUrl) {
 				writeBackUpdates.push({
 					title: story.title,
 					planeId: result.planeId,
 					planeIdentifier: result.planeIdentifier,
 					planeUrl: result.planeUrl,
+					// Undefined on a partial follow-up -> plane_hash is not written, so a
+					// re-run recomputes and completes the interrupted work.
 					planeHash: result.planeHash,
 				});
 			}
@@ -398,13 +396,48 @@ async function processStory(
 			action = "created";
 		}
 
+		// The parent is created/updated at this point. A failure in the FOLLOW-UP
+		// work (criteria sub-items, evidence comment) must NOT discard it — otherwise
+		// the plane_id is orphaned and every re-run re-creates + fails again. Roll such
+		// failures up into a warning on an otherwise-successful result, so the plane_id
+		// is written back and a re-run retries only the follow-up.
+		let followUpNote: string | undefined;
+
 		if (options.syncCriteria && criteria.length > 0) {
-			await syncCriteriaChildren(client, resolver, project.id, ref.id, externalId, criteria);
+			try {
+				await syncCriteriaChildren(client, resolver, project.id, ref.id, externalId, criteria);
+			} catch (error) {
+				followUpNote = `parent ${action}, but criteria sync did not finish (${
+					error instanceof Error ? error.message : String(error)
+				}) — re-run to complete it`;
+			}
 		}
 
-		await postEvidenceComment(client, project.id, ref.id, story.comment);
+		try {
+			await postEvidenceComment(client, project.id, ref.id, story.comment);
+		} catch (error) {
+			const commentNote = `evidence comment failed (${
+				error instanceof Error ? error.message : String(error)
+			})`;
+			followUpNote = followUpNote ? `${followUpNote}; ${commentNote}` : commentNote;
+		}
 
-		return makeResult(client, story, project.id, project.identifier, ref, action, contentHash);
+		const result = makeResult(
+			client,
+			story,
+			project.id,
+			project.identifier,
+			ref,
+			action,
+			contentHash,
+		);
+		if (followUpNote) {
+			result.note = followUpNote;
+			// Withhold the content hash: the item is linked, but a re-run must not be
+			// skipped-as-unchanged so it can finish the interrupted follow-up work.
+			result.planeHash = undefined;
+		}
+		return result;
 	} catch (error) {
 		return {
 			story,
@@ -553,6 +586,10 @@ async function syncCriteriaChildren(
 		const criterion = criteria[i] as AcceptanceCriterion;
 		const childExternalId = `${parentExternalId}::ac${i}`;
 		const stateId = criterion.checked ? completedStateId : openStateId;
+		// Plane caps a work-item name at 255 chars; a long "close-condition"
+		// criterion would otherwise 400. Keep the checkbox label short and preserve
+		// the full text in the sub-item's description.
+		const { name, body } = criterionNameAndBody(criterion.text);
 
 		const existing = await findWorkItemByExternalId(
 			client,
@@ -561,20 +598,37 @@ async function syncCriteriaChildren(
 			EXTERNAL_SOURCE,
 		);
 		if (existing) {
-			const update: UpdateWorkItemInput = { name: criterion.text, parent: parentId };
+			const update: UpdateWorkItemInput = { name, parent: parentId };
+			if (body !== undefined) update.body = body;
 			if (stateId) update.stateId = stateId;
 			await updateWorkItem(client, projectId, existing.id, update);
 		} else {
 			const create: CreateWorkItemInput = {
-				name: criterion.text,
+				name,
 				parent: parentId,
 				externalId: childExternalId,
 				externalSource: EXTERNAL_SOURCE,
 			};
+			if (body !== undefined) create.body = body;
 			if (stateId) create.stateId = stateId;
 			await createWorkItem(client, projectId, create);
 		}
 	}
+}
+
+/** Plane's maximum work-item name (title) length. */
+const WORK_ITEM_NAME_MAX = 255;
+
+/**
+ * A criterion sub-item's name must fit Plane's 255-char title limit. If the
+ * criterion text is longer, truncate the name and carry the full text in the
+ * sub-item's description so nothing is lost.
+ */
+function criterionNameAndBody(text: string): { name: string; body?: string } {
+	if (text.length <= WORK_ITEM_NAME_MAX) {
+		return { name: text };
+	}
+	return { name: `${text.slice(0, WORK_ITEM_NAME_MAX - 5).trimEnd()}…`, body: text };
 }
 
 /** True for a criterion sub-item external id of the form `<parent>::ac<n>`. */

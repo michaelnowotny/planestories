@@ -27,6 +27,8 @@ export interface FakeData {
 	workItems?: Record<string, Array<Record<string, unknown>>>;
 	/** Existing comments keyed by work item id, returned by listWorkItemComments. */
 	comments?: Record<string, Array<Record<string, unknown>>>;
+	/** When true, creating a child work item (body has `parent`) throws — for testing follow-up-failure recovery. */
+	failChildCreates?: boolean;
 }
 
 export interface FakeClient {
@@ -97,6 +99,13 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 
 		async createWorkItem<T>(projectId: string, body: Record<string, unknown>): Promise<T> {
 			record("createWorkItem", [projectId, body]);
+			// Mirror Plane's real 255-char title cap so tests catch over-long names.
+			if (typeof body.name === "string" && body.name.length > 255) {
+				throw new Error("400 Bad Request: Work item title cannot exceed 255 characters");
+			}
+			if (data.failChildCreates && body.parent !== undefined) {
+				throw new Error("400 Bad Request: simulated child-create failure");
+			}
 			createdItems.push({ projectId, body });
 			sequence += 1;
 			return { id: `wi-${sequence}`, sequence_id: sequence } as unknown as T;
@@ -108,6 +117,9 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			body: Record<string, unknown>,
 		): Promise<T> {
 			record("updateWorkItem", [projectId, workItemId, body]);
+			if (typeof body.name === "string" && body.name.length > 255) {
+				throw new Error("400 Bad Request: Work item title cannot exceed 255 characters");
+			}
 			updatedItems.push({ projectId, workItemId, body });
 			return { id: workItemId, sequence_id: 7 } as unknown as T;
 		},
