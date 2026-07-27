@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
+import { registerAtlasCommand } from "./commands/atlas.ts";
 import { registerDeleteCommand } from "./commands/delete.ts";
 import { registerDoctorCommand } from "./commands/doctor.ts";
 import { registerExportCommand } from "./commands/export.ts";
@@ -22,5 +23,6 @@ registerSetCommand(program);
 registerProjectsCommand(program);
 registerGroomCommand(program);
 registerDoctorCommand(program);
+registerAtlasCommand(program);
 
 program.parse();

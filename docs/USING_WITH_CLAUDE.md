@@ -104,6 +104,11 @@ bun run src/cli/index.ts groom --project "My Project" --yes    # apply (close su
 # Doctor: read-only CI check; exits non-zero on findings (board rot).
 bun run src/cli/index.ts doctor --project "My Project"
 
+# Atlas: render an interactive, self-contained offline HTML map of the story tree
+# (epics -> stories -> acceptance criteria) with pan/zoom, filters, search + a quality overlay.
+bun run src/cli/index.ts atlas /path/to/stories.md -o atlas.html --open   # from a file (no creds)
+bun run src/cli/index.ts atlas --project "My Project" -o atlas.html        # from the live board
+
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects
 

@@ -285,6 +285,26 @@ findings** (pass `--no-fail-on-findings` to just report):
 planestories doctor --project <name>
 ```
 
+### `atlas`
+
+Render an interactive **Project Atlas** — a single self-contained HTML file (no server, no CDN, works
+offline) that lays your epics, stories, and acceptance criteria out as a tidy tree you can pan, zoom,
+filter, and search. Point it at a stories file *or* a live Plane project:
+
+```
+planestories atlas stories/q1-2026.md -o atlas.html --open   # from a file (offline)
+planestories atlas --project "Data Platform" -o atlas.html   # from the live board
+```
+
+Every node shows its status colour, an acceptance-criteria completion ring, and a spec-quality flag;
+click one for a details panel with its criteria, labels, and a deep link back to Plane. Filter chips
+narrow by status group, label, or "flagged only" (which prunes to the flagged stories while keeping
+their parent epics as context). Light/dark theme follows your OS and has a manual toggle. Open the
+file in any browser — nothing is uploaded anywhere. See [docs/ATLAS.md](./docs/ATLAS.md).
+
+> Inspired by Ijonas Kisselbach's Project Atlas in linearstories, rethought for Plane and shipped as a
+> zero-dependency offline artifact.
+
 ## Rating story quality — `/rate-userstories`
 
 planestories ships a Claude Code skill that reviews a story file *before* you import it. Run it in any Claude Code session:

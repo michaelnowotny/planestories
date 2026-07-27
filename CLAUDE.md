@@ -43,7 +43,15 @@ owns **state/completion**. Import pushes content file→board and only when it a
 - `src/markdown/` — `parser.ts`/`serializer.ts` (YAML keys incl. `plane_hash`), `writer.ts`
   (`writeBackIds`/`clearWriteBack`), `criteria.ts` (`splitBody`/checklist), `html.ts`
   (`markdownToHtml`/`htmlToMarkdown`).
-- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`. `src/types.ts` is the type home.
+- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`groom`/`doctor`/`atlas`.
+  `src/types.ts` is the type home.
+- `src/atlas/` — the **Project Atlas** visualizer. `model.ts` builds an `AtlasGraph` from either a
+  parsed file (`buildAtlasFromFile`) or the shared `fetchProjectIndex` (`buildAtlasFromBoard` — folds
+  `kind: criterion` children into their parent story's AC ring, treats any item that parents a
+  non-criterion child as an epic). `quality.ts` = the light heuristic spec-quality overlay
+  (`assessQuality`, stories only). `render.ts` = `renderAtlasHtml(graph)` → one self-contained HTML
+  string (inlined CSS/JS + embedded JSON with `</script>` unicode-escaped; hand-rolled tidy-tree
+  layout, no D3/CDN). Node ids are reset per build so output is diff-stable.
 
 ## Identity / idempotency (load-bearing)
 
@@ -71,6 +79,12 @@ Also since v0.2.0: **`export` emits `kind: epic`** for any item that parents a n
 and reads ACs as either inline `### Acceptance Criteria` or `kind: criterion` children (adapted from
 an upstream linearstories enhancement; see `.claude/commands/rate-userstories.md` +
 `docs/RATE_USERSTORIES.md`). Both are production-validated on the finance session's 800+-item board.
+
+New since v0.3.1: **`atlas`** — an interactive, self-contained offline HTML visualizer of the story
+tree (epics → stories → acceptance criteria) with pan/zoom, status/label/flagged filters, search, a
+details panel, and a light spec-quality overlay. Renders from a file (offline, no creds) or the live
+board. Inspired by Ijonas Kisselbach's Project Atlas in linearstories, rethought for Plane as a
+zero-dependency artifact. Ref: `docs/ATLAS.md`; code in `src/atlas/` + `src/cli/commands/atlas.ts`.
 
 Design + locked decisions: `docs/plan-production-feedback-2026-07.md`; state/how-to:
 `docs/handoff-2026-07-17.md`; full CLI reference: `docs/USING_WITH_CLAUDE.md`.
