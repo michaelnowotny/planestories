@@ -6,38 +6,45 @@ import { applyCheckboxStates, reverseSyncCriteria } from "../../../src/sync/writ
 import type { ResolvedConfig } from "../../../src/types.ts";
 import { type FakeData, makeFakeClient } from "../../helpers/fake-plane-client.ts";
 
-/** Build a desired-state map: H2 ordinal -> (criterion position -> checked). */
+/** Build a desired-state map: plane_id -> (criterion position -> checked). */
 function states(
-	entries: Record<number, Record<number, boolean>>,
-): Map<number, Map<number, boolean>> {
-	const out = new Map<number, Map<number, boolean>>();
-	for (const [ordinal, byPos] of Object.entries(entries)) {
+	entries: Record<string, Record<number, boolean>>,
+): Map<string, Map<number, boolean>> {
+	const out = new Map<string, Map<number, boolean>>();
+	for (const [planeId, byPos] of Object.entries(entries)) {
 		const inner = new Map<number, boolean>();
 		for (const [pos, checked] of Object.entries(byPos)) {
 			inner.set(Number(pos), checked);
 		}
-		out.set(Number(ordinal), inner);
+		out.set(planeId, inner);
 	}
 	return out;
 }
 
-describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
+/** An H2 story section carrying a yaml `plane_id` block, ready to join with "\n". */
+function linked(planeId: string, title: string, ...body: string[]): string[] {
+	return ["## " + title, "", "```yaml", "plane_id: " + planeId, "```", "", ...body];
+}
+
+describe("applyCheckboxStates (pure, plane_id-keyed reverse-sync)", () => {
 	test("ticks a box the board reports completed, preserving text and indentation", () => {
 		const content = [
-			"## Log in",
-			"",
-			"Narrative here.",
-			"",
-			"### Acceptance Criteria",
-			"",
-			"- [ ] enters email",
-			"- [ ] enters password",
+			...linked(
+				"p1",
+				"Log in",
+				"Narrative here.",
+				"",
+				"### Acceptance Criteria",
+				"",
+				"- [ ] enters email",
+				"- [ ] enters password",
+			),
 			"",
 		].join("\n");
 
 		const { content: out, changes } = applyCheckboxStates(
 			content,
-			states({ 0: { 0: true, 1: false } }),
+			states({ p1: { 0: true, 1: false } }),
 		);
 
 		expect(out).toContain("- [x] enters email");
@@ -48,64 +55,66 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 	});
 
 	test("unticks a box the board reports not-completed", () => {
-		const content = ["## S", "", "### Acceptance Criteria", "- [x] done thing", ""].join("\n");
-		const { content: out, changes } = applyCheckboxStates(content, states({ 0: { 0: false } }));
+		const content = linked("p1", "S", "### Acceptance Criteria", "- [x] done thing", "").join("\n");
+		const { content: out, changes } = applyCheckboxStates(content, states({ p1: { 0: false } }));
 		expect(out).toContain("- [ ] done thing");
 		expect(changes).toHaveLength(1);
 		expect(changes[0]).toMatchObject({ position: 0, from: true, to: false });
 	});
 
 	test("is idempotent — no change when file already matches the board", () => {
-		const content = ["## S", "", "### Acceptance Criteria", "- [x] a", "- [ ] b", ""].join("\n");
+		const content = linked("p1", "S", "### Acceptance Criteria", "- [x] a", "- [ ] b", "").join(
+			"\n",
+		);
 		const { content: out, changes } = applyCheckboxStates(
 			content,
-			states({ 0: { 0: true, 1: false } }),
+			states({ p1: { 0: true, 1: false } }),
 		);
 		expect(out).toBe(content);
 		expect(changes).toHaveLength(0);
 	});
 
 	test("only rewrites checkboxes inside the AC section, never the narrative", () => {
-		const content = [
-			"## S",
-			"",
+		const content = linked(
+			"p1",
+			"S",
 			"- [ ] a narrative todo (not a criterion)",
 			"",
 			"### Acceptance Criteria",
 			"- [ ] real criterion",
 			"",
-		].join("\n");
-		const { content: out } = applyCheckboxStates(content, states({ 0: { 0: true } }));
+		).join("\n");
+		const { content: out } = applyCheckboxStates(content, states({ p1: { 0: true } }));
 		expect(out).toContain("- [ ] a narrative todo (not a criterion)"); // untouched
 		expect(out).toContain("- [x] real criterion");
 	});
 
 	test("preserves criterion text exactly (does NOT rebuild from board names)", () => {
-		const content = [
-			"## S",
-			"",
+		const content = linked(
+			"p1",
+			"S",
 			"### Acceptance Criteria",
 			"- [ ] `foo.stories.md` passes **planestories** validation",
 			"",
-		].join("\n");
-		const { content: out } = applyCheckboxStates(content, states({ 0: { 0: true } }));
+		).join("\n");
+		const { content: out } = applyCheckboxStates(content, states({ p1: { 0: true } }));
 		expect(out).toContain("- [x] `foo.stories.md` passes **planestories** validation");
 	});
 
 	test("a gap in the desired map (missing ::acN index) leaves that box untouched", () => {
-		const content = [
-			"## S",
-			"",
+		const content = linked(
+			"p1",
+			"S",
 			"### Acceptance Criteria",
 			"- [ ] a",
 			"- [ ] b",
 			"- [ ] c",
 			"",
-		].join("\n");
+		).join("\n");
 		// Only positions 0 and 2 known (criterion 1 was removed on the board).
 		const { content: out, changes } = applyCheckboxStates(
 			content,
-			states({ 0: { 0: true, 2: true } }),
+			states({ p1: { 0: true, 2: true } }),
 		);
 		expect(out).toContain("- [x] a");
 		expect(out).toContain("- [ ] b"); // untouched
@@ -113,81 +122,38 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 		expect(changes).toHaveLength(2);
 	});
 
-	test("keys by H2 ordinal across multiple stories", () => {
+	test("keys by plane_id across multiple stories", () => {
 		const content = [
-			"## First",
+			...linked("p1", "First", "### Acceptance Criteria", "- [ ] one"),
 			"",
-			"### Acceptance Criteria",
-			"- [ ] one",
-			"",
-			"## Second",
-			"",
-			"### Acceptance Criteria",
-			"- [ ] two",
+			...linked("p2", "Second", "### Acceptance Criteria", "- [ ] two"),
 			"",
 		].join("\n");
 		const { content: out } = applyCheckboxStates(
 			content,
-			states({ 0: { 0: true }, 1: { 0: false } }),
+			states({ p1: { 0: true }, p2: { 0: false } }),
 		);
 		expect(out).toContain("- [x] one");
 		expect(out).toContain("- [ ] two");
 	});
 
-	test("duplicate H2 titles do NOT cross-contaminate — only the targeted ordinal changes", () => {
-		// Two "## S": ordinal 0 is targeted, ordinal 1 (e.g. an unlinked twin) is NOT.
-		const content = [
-			"## S",
-			"",
-			"### Acceptance Criteria",
-			"- [ ] linked one",
-			"",
-			"## S",
-			"",
-			"### Acceptance Criteria",
-			"- [ ] unlinked twin",
-			"",
-		].join("\n");
-		const { content: out, changes } = applyCheckboxStates(content, states({ 0: { 0: true } }));
-		expect(out).toContain("- [x] linked one");
-		expect(out).toContain("- [ ] unlinked twin"); // second "## S" untouched
-		expect(changes).toHaveLength(1);
-	});
-
-	test("skips a leading frontmatter block so ordinal 0 is the first real story", () => {
-		const content = [
-			"---",
-			"project: Data Platform",
-			"---",
-			"",
-			"## Only story",
-			"",
-			"### Acceptance Criteria",
-			"- [ ] real",
-			"",
-		].join("\n");
-		const { content: out } = applyCheckboxStates(content, states({ 0: { 0: true } }));
-		expect(out).toContain("- [x] real");
-	});
-
 	test("recognizes a Setext acceptance-criteria heading", () => {
-		const content = [
-			"## S",
-			"",
+		const content = linked(
+			"p1",
+			"S",
 			"Acceptance Criteria",
 			"===================",
 			"- [ ] setext criterion",
 			"",
-		].join("\n");
-		const { content: out, changes } = applyCheckboxStates(content, states({ 0: { 0: true } }));
+		).join("\n");
+		const { content: out, changes } = applyCheckboxStates(content, states({ p1: { 0: true } }));
 		expect(out).toContain("- [x] setext criterion");
 		expect(changes).toHaveLength(1);
 	});
 
-	test("ignores an acceptance-criteria heading BEFORE the yaml fence (position aligns with the parser)", () => {
-		// A decoy AC heading + box before the ```yaml``` block must NOT be counted —
-		// the importer numbers ::ac<n> from the body AFTER the fence, so write-back
-		// must too. Position 0 is the post-fence "real" criterion.
+	test("ignores an acceptance-criteria heading BEFORE the yaml block (body starts after yaml)", () => {
+		// A decoy AC + box before the ```yaml``` block must NOT be counted — the parser
+		// takes the body AFTER the yaml block, so ::ac0 is the post-yaml "real" criterion.
 		const content = [
 			"## S",
 			"",
@@ -195,33 +161,72 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 			"- [ ] decoy before yaml",
 			"",
 			"```yaml",
-			"plane_id: x",
+			"plane_id: p1",
 			"```",
 			"",
 			"### Acceptance Criteria",
 			"- [ ] real",
 			"",
 		].join("\n");
-		const { content: out, changes } = applyCheckboxStates(content, states({ 0: { 0: true } }));
+		const { content: out, changes } = applyCheckboxStates(content, states({ p1: { 0: true } }));
 		expect(out).toContain("- [ ] decoy before yaml"); // untouched
 		expect(out).toContain("- [x] real");
 		expect(changes).toHaveLength(1);
 		expect(changes[0]?.text).toBe("real");
 	});
 
-	test("stops counting criteria at the next heading after AC", () => {
+	test("duplicate H2 titles do NOT cross-contaminate — only the plane_id-matched story changes", () => {
+		// One "## S" is linked (plane_id p1); an identical "## S" is UNLINKED (no yaml).
+		// The unlinked twin must be left alone.
 		const content = [
+			...linked("p1", "S", "### Acceptance Criteria", "- [ ] linked one"),
+			"",
 			"## S",
 			"",
+			"### Acceptance Criteria",
+			"- [ ] unlinked twin",
+			"",
+		].join("\n");
+		const { content: out, changes } = applyCheckboxStates(content, states({ p1: { 0: true } }));
+		expect(out).toContain("- [x] linked one");
+		expect(out).toContain("- [ ] unlinked twin"); // the twin (no plane_id) is untouched
+		expect(changes).toHaveLength(1);
+	});
+
+	test("a leading frontmatter block does not shift matching (plane_id keying is offset-free)", () => {
+		const content = [
+			"---",
+			"project: Data Platform",
+			"---",
+			"",
+			...linked("p1", "Only story", "### Acceptance Criteria", "- [ ] real"),
+			"",
+		].join("\n");
+		const { content: out } = applyCheckboxStates(content, states({ p1: { 0: true } }));
+		expect(out).toContain("- [x] real");
+	});
+
+	test("a story with no yaml plane_id is never matched", () => {
+		const content = ["## Bare", "", "### Acceptance Criteria", "- [ ] nope", ""].join("\n");
+		// Even if the caller (wrongly) had a state for some id, a yaml-less section is skipped.
+		const { content: out, changes } = applyCheckboxStates(content, states({ p1: { 0: true } }));
+		expect(out).toBe(content);
+		expect(changes).toHaveLength(0);
+	});
+
+	test("stops counting criteria at the next heading after AC", () => {
+		const content = linked(
+			"p1",
+			"S",
 			"### Acceptance Criteria",
 			"- [ ] real",
 			"",
 			"### Notes",
 			"- [ ] not a criterion",
 			"",
-		].join("\n");
+		).join("\n");
 		// Position 1 would be the Notes checkbox; it must NOT be affected.
-		const { content: out } = applyCheckboxStates(content, states({ 0: { 0: true, 1: true } }));
+		const { content: out } = applyCheckboxStates(content, states({ p1: { 0: true, 1: true } }));
 		expect(out).toContain("- [x] real");
 		expect(out).toContain("- [ ] not a criterion");
 	});

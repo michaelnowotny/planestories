@@ -1,3 +1,4 @@
+import matter from "gray-matter";
 import { ConfigError } from "../errors.ts";
 import {
 	acHeadingIndex,
@@ -32,37 +33,38 @@ export interface CheckboxChange {
 
 /**
  * Apply desired checkbox states to a file's acceptance-criteria checklists IN
- * PLACE. `statesByStory` maps a story's **0-based H2 ordinal** (its position among
- * the file's `## ` headings, after any leading frontmatter) to a sparse map of
- * (0-based criterion position -> desired checked state). Keying by ordinal — NOT by
- * title — means two stories that share an H2 title never cross-contaminate: each H2
- * is addressed independently, so an unlinked duplicate-title story is genuinely left
- * alone. Only positions present in a story's map are touched; a gap (e.g. a criterion
+ * PLACE. `statesByPlaneId` maps a story's **`plane_id`** (read from its own yaml
+ * block) to a sparse map of (0-based criterion position -> desired checked state).
+ *
+ * Keying by `plane_id` — NOT by title or ordinal — is the load-bearing choice: a
+ * story is identified by the unique board id in its OWN yaml, so nothing depends on
+ * how many `## ` headings or frontmatter blocks precede it. Two stories sharing an
+ * H2 title never cross-contaminate, and an UNLINKED story (no `plane_id`) is simply
+ * never matched. To locate each story's yaml block and body, it uses the SAME regex
+ * (`` /```yaml\n([\s\S]*?)```/ ``) and gray-matter parse as `parseMarkdownFile`, so
+ * write-back and the parser can never disagree about where a story's body — and thus
+ * its `::ac<n>` numbering — begins.
+ *
+ * Only positions present in a story's map are touched; a gap (e.g. a criterion
  * removed on the board) leaves that box exactly as authored. Everything outside the
- * AC checklists — narrative, text, ordering, YAML — is preserved byte-for-byte.
- *
- * The ordinal numbering matches `parseMarkdownFile`'s story order (both skip a leading
- * frontmatter block, then count `## ` headings in document order), so the caller can
- * key by each parsed story's index.
- *
- * This is the pure, offline heart of the reverse-sync: it does NOT rebuild the
- * criterion text from the board (unlike `export --sync-criteria`), so hand-authored
- * wording survives. It reuses `acHeadingIndex`/`isHeadingLine`/`checkboxState` so a
- * checkbox's position matches exactly the `::ac<n>` numbering the importer assigned.
+ * AC checklists — narrative, text, ordering, YAML — is preserved byte-for-byte. It
+ * does NOT rebuild criterion text from the board (unlike `export --sync-criteria`),
+ * so hand-authored wording survives.
  */
 export function applyCheckboxStates(
 	content: string,
-	statesByStory: Map<number, Map<number, boolean>>,
-	identifiersByStory?: Map<number, string | null>,
+	statesByPlaneId: Map<string, Map<number, boolean>>,
+	identifiersByPlaneId?: Map<string, string | null>,
 ): { content: string; changes: CheckboxChange[] } {
 	const lines = content.split("\n");
 	const changes: CheckboxChange[] = [];
 
-	// H2 boundaries, skipping a leading frontmatter block so ordinals align with
-	// parseMarkdownFile (which strips frontmatter before splitting on `## `).
-	const bodyStart = bodyStartLine(lines);
+	// Section boundaries: every `## ` line (naive, exactly like parseMarkdownFile's
+	// `split(/^(?=## )/m)`). Over-segmentation (a `## ` in frontmatter or a code
+	// fence) is harmless — only a section whose yaml carries a targeted `plane_id`
+	// is ever touched.
 	const boundaries: number[] = [];
-	for (let i = bodyStart; i < lines.length; i++) {
+	for (let i = 0; i < lines.length; i++) {
 		if ((lines[i] as string).startsWith("## ")) {
 			boundaries.push(i);
 		}
@@ -71,27 +73,27 @@ export function applyCheckboxStates(
 	for (let b = 0; b < boundaries.length; b++) {
 		const start = boundaries[b] as number;
 		const end = b + 1 < boundaries.length ? (boundaries[b + 1] as number) : lines.length;
-		const ordinal = b; // this H2's position matches the caller's parsed-story index
-		const title = (lines[start] as string).replace(/^## /, "").trim();
-		const desired = statesByStory.get(ordinal);
+		const sectionLines = lines.slice(start, end);
+
+		const { planeId, bodyLine } = sectionYaml(sectionLines);
+		if (planeId === null) {
+			continue; // no board link in this section's yaml -> never a write-back target
+		}
+		const desired = statesByPlaneId.get(planeId.trim());
 		if (!desired) {
 			continue;
 		}
 
-		const storyLines = lines.slice(start, end);
-		// Start the AC search AFTER the story's ```yaml``` block, exactly like the
-		// parser extracts the body — otherwise an AC heading placed before the yaml
-		// fence would be counted here but not by the importer, misaligning ::ac<n>.
-		const contentStart = contentStartOffset(storyLines);
-		const acRel = acHeadingIndex(storyLines.slice(contentStart));
+		const acRel = acHeadingIndex(sectionLines.slice(bodyLine));
 		if (acRel === -1) {
 			continue;
 		}
-		const acIdx = contentStart + acRel;
+		const acIdx = bodyLine + acRel;
+		const title = (lines[start] as string).replace(/^## /, "").trim();
 
 		let pos = 0;
-		for (let j = acIdx + 1; j < storyLines.length; j++) {
-			const rel = storyLines[j] as string;
+		for (let j = acIdx + 1; j < sectionLines.length; j++) {
+			const rel = sectionLines[j] as string;
 			if (isHeadingLine(rel)) {
 				break; // next section — criteria numbering ends here (matches splitBody)
 			}
@@ -108,7 +110,7 @@ export function applyCheckboxStates(
 						lines[abs] = rewritten;
 						changes.push({
 							title,
-							identifier: identifiersByStory?.get(ordinal) ?? null,
+							identifier: identifiersByPlaneId?.get(planeId.trim()) ?? null,
 							position: pos,
 							text: checkboxText(rel) ?? "",
 							from: current,
@@ -125,40 +127,32 @@ export function applyCheckboxStates(
 }
 
 /**
- * Line index at which the document body begins, skipping a leading YAML
- * frontmatter block (`---` … `---`) exactly as gray-matter does. Returns 0 when
- * there is no leading frontmatter (or the opening `---` is never closed).
+ * For one `## ` section (whose [0] is the heading line), return its `plane_id`
+ * (from the first ```yaml``` block) and the section-line index at which the body
+ * begins (just after that yaml block; 1 — right after the H2 — when there is no
+ * yaml block). Uses the SAME yaml regex + gray-matter parse as `parseMarkdownFile`
+ * so the two never disagree about the body boundary.
  */
-function bodyStartLine(lines: string[]): number {
-	if ((lines[0] ?? "").trim() !== "---") {
-		return 0;
+function sectionYaml(sectionLines: string[]): { planeId: string | null; bodyLine: number } {
+	const restContent = sectionLines.slice(1).join("\n");
+	const match = restContent.match(/```yaml\n([\s\S]*?)```/);
+	if (!match || match.index === undefined) {
+		return { planeId: null, bodyLine: 1 };
 	}
-	for (let i = 1; i < lines.length; i++) {
-		if ((lines[i] as string).trim() === "---") {
-			return i + 1;
-		}
+	let planeId: string | null = null;
+	try {
+		const data = matter(`---\n${match[1]}---\n`).data as Record<string, unknown>;
+		const raw = data.plane_id;
+		planeId = raw === undefined || raw === null || raw === "" ? null : String(raw);
+	} catch {
+		planeId = null; // malformed yaml -> treat as unlinked
 	}
-	return 0;
-}
-
-/**
- * Offset within a story's lines (whose [0] is the `## ` heading) at which the
- * body content begins — i.e. after the first ```yaml ... ``` block, mirroring how
- * the parser slices the body. Returns 1 (just after the H2) when there is no yaml
- * block, and the whole length when a yaml fence is opened but never closed.
- */
-function contentStartOffset(storyLines: string[]): number {
-	for (let k = 1; k < storyLines.length; k++) {
-		if ((storyLines[k] as string).trim() === "```yaml") {
-			for (let m = k + 1; m < storyLines.length; m++) {
-				if ((storyLines[m] as string).trim() === "```") {
-					return m + 1;
-				}
-			}
-			return storyLines.length; // unclosed fence — no usable body
-		}
-	}
-	return 1;
+	// The body begins on the line AFTER the yaml block's closing fence. Count the
+	// newlines consumed up to the end of the match: that many lines of `restContent`
+	// precede the body, and `restContent` line k is `sectionLines[1 + k]`.
+	const consumed = restContent.slice(0, match.index + match[0].length);
+	const newlineCount = (consumed.match(/\n/g) ?? []).length;
+	return { planeId, bodyLine: newlineCount + 2 };
 }
 
 export interface WriteBackOptions {
@@ -238,20 +232,18 @@ export async function reverseSyncCriteria(
 		const original = await Bun.file(filePath).text();
 		const parsed = parseMarkdownFile(original, filePath);
 
-		// Keyed by 0-based H2 ordinal (position among parsed stories), NOT title, so
-		// two same-title stories can never cross-contaminate. The index MUST advance
-		// for EVERY parsed story (including skipped ones) to stay aligned with the H2
-		// ordinal applyCheckboxStates counts.
-		const statesByStory = new Map<number, Map<number, boolean>>();
-		const identifiersByStory = new Map<number, string | null>();
+		// Keyed by `plane_id` (the unique board id), NOT title or ordinal, so two
+		// same-title stories can never cross-contaminate and an unlinked story (no
+		// plane_id) is never a target. applyCheckboxStates re-reads each section's
+		// plane_id from its own yaml, so these keys line up by construction.
+		const statesByPlaneId = new Map<string, Map<number, boolean>>();
+		const identifiersByPlaneId = new Map<string, string | null>();
 		let linkedStories = 0;
 		let unlinkedStories = 0;
 		const missingOnBoard: string[] = [];
 		const warnings: string[] = [];
 
-		let storyIndex = -1;
 		for (const story of parsed.stories) {
-			storyIndex++;
 			if (story.kind === "criterion") {
 				continue; // criterion sub-items aren't parents of criteria
 			}
@@ -261,7 +253,7 @@ export async function reverseSyncCriteria(
 			}
 			const planeId = story.planeId.trim();
 			linkedStories++;
-			identifiersByStory.set(storyIndex, story.planeIdentifier ?? null);
+			identifiersByPlaneId.set(planeId, story.planeIdentifier ?? null);
 
 			const projectName = story.project ?? options.project ?? options.config.defaultProject;
 			if (!projectName) {
@@ -311,14 +303,14 @@ export async function reverseSyncCriteria(
 				);
 			}
 			if (desired.size > 0) {
-				statesByStory.set(storyIndex, desired);
+				statesByPlaneId.set(planeId, desired);
 			}
 		}
 
 		const { content: updated, changes } = applyCheckboxStates(
 			original,
-			statesByStory,
-			identifiersByStory,
+			statesByPlaneId,
+			identifiersByPlaneId,
 		);
 		pending.push({
 			filePath,

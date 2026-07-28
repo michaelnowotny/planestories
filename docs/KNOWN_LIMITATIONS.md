@@ -72,7 +72,7 @@ extra work-item update, after which it is stable. The reconciler never creates t
 Avoid referencing an identifier that will only be assigned during the same run (the same guidance as the
 dry-run limitation above).
 
-## `groom --write-back` matches criteria by position, and stories by H2 ordinal
+## `groom --write-back` matches stories by `plane_id`, and criteria by position
 
 The in-place checkbox reverse-sync maps a criterion sub-item to a file checkbox by the `::ac<n>`
 **positional index** — the Nth acceptance-criteria checkbox in the file corresponds to the child whose
@@ -81,13 +81,16 @@ importer created them (the normal case). If you REORDER criteria in the file wit
 board's `::ac<n>` numbering no longer matches the file order), write-back can tick the wrong box. Re-import
 after reordering criteria so the board renumbers them, then write-back.
 
-Write-back locates a story within a file by its **H2 ordinal** (its position among the file's `## `
-headings, after any leading frontmatter) — NOT by title — so two stories with the identical `## Title`
-do NOT cross-contaminate: each H2 is addressed independently, and an unlinked twin is genuinely left
-alone. The one alignment assumption is that write-back and the parser count H2 headings identically;
-both split naively on lines starting with `## `, so a `## ` line inside a fenced code block in the
-narrative would be counted by both (consistently) — avoid literal `## ` at the start of a line inside
-prose if you can.
+Write-back locates a story within a file by the **`plane_id`** in its own yaml block — NOT by title or by
+position — so two stories with the identical `## Title` never cross-contaminate, and an UNLINKED story
+(no `plane_id`) is never a target. It reads each section's `plane_id` and body boundary with the SAME
+yaml regex + gray-matter parse as the importer's parser, so the two cannot disagree about where a story's
+body (and thus its `::ac<n>` numbering) begins — leading frontmatter, an extra `## ` heading, or a yaml
+fence with text before it on the line all resolve identically. The one residual shared limitation is that
+both split sections naively on lines starting with `## `, so a literal `## ` at the start of a line inside
+a story's narrative or a fenced code block splits that story for BOTH the parser and write-back
+(consistently); the checkboxes after such a split land in a sub-section with no yaml `plane_id`, so
+write-back simply won't touch them. Avoid a line-leading `## ` inside prose.
 
 If a parent has two criterion sub-items with the SAME `::ac<n>` index (which can happen after a title
 rename: the importer derives the criterion external-id prefix from the title slug, so a renamed story
