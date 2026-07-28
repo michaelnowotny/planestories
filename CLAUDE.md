@@ -43,8 +43,12 @@ owns **state/completion**. Import pushes content file→board and only when it a
 - `src/markdown/` — `parser.ts`/`serializer.ts` (YAML keys incl. `plane_hash`), `writer.ts`
   (`writeBackIds`/`clearWriteBack`), `criteria.ts` (`splitBody`/checklist), `html.ts`
   (`markdownToHtml`/`htmlToMarkdown`).
-- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`groom`/`doctor`/`atlas`/`lint`/`packet`.
+- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`groom`/`doctor`/`atlas`/`lint`/`packet`/`epic`.
   `src/types.ts` is the type home.
+- `src/sync/rollup.ts` — the **epic rollup** (`epic` command). `rollupEpic` reuses packet's
+  `collectDescendants`/`isEpic` to summarize an epic: leaf-story status breakdown, completion %
+  (cancelled excluded from the denominator), Σ leaf effort + unestimated count, and blocked/blocking
+  leaves. Read-only.
 - `src/sync/packet.ts` — the **agent spec-packet** builder. `generatePacket` (board wrapper: resolve →
   `fetchProjectIndex` → resolve target by identifier → fetch relations for root+children, bounded) +
   pure `buildPacketStory`/`renderPacketMarkdown`. Emits a self-contained implementable brief (machine-
@@ -123,8 +127,9 @@ zero-dependency artifact. Ref: `docs/ATLAS.md`; code in `src/atlas/` + `src/cli/
   ticking, keyed by `plane_id` (see the `src/sync/writeback.ts` note above; survived a 5-round Grok+Codex
   review, all edge cases fail closed).
 - **Agent spec-packet** (`packet`, `src/sync/packet.ts`) — see the architecture-map note above.
-- Still pending: epic rollup; then Tier 3 (`.planestories.yml`, evidence log, doctor graph checks); then
-  the atlas dependency-graph overhaul.
+- **Epic rollup** (`epic`, `src/sync/rollup.ts`) — see the architecture-map note above.
+- Still pending: Tier 3 (`.planestories.yml`, evidence log, doctor graph checks); then the atlas
+  dependency-graph overhaul (needs the user's layout decisions).
 
 The load-bearing gotchas, alternatives-not-chosen, and Plane-API findings are in
 **`docs/DESIGN_DECISIONS_tier1.md`** — READ IT before touching effort/relations/lint. Verified Plane-API

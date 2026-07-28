@@ -152,6 +152,11 @@ bun run src/cli/index.ts atlas --project "My Project" -o atlas.html        # fro
 bun run src/cli/index.ts packet DATA-123                     # to stdout (pipe to an agent)
 bun run src/cli/index.ts packet DATA-1 -o epic-packet.md     # an epic + its whole subtree, to a file
 
+# Epic rollup: a concise summary of an epic — story status breakdown, completion %
+# (cancelled stories excluded from the denominator), total effort (with a count of
+# unestimated stories), and which stories are blocked / blocking. Read-only.
+bun run src/cli/index.ts epic DATA-1
+
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects
 

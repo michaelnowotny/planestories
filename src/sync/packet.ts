@@ -68,7 +68,7 @@ export interface Packet {
 
 const PLANNING_REF = /planning\/[A-Za-z0-9._/-]+/g;
 
-function isEpic(item: FetchedWorkItem, index: ProjectIndex): boolean {
+export function isEpic(item: FetchedWorkItem, index: ProjectIndex): boolean {
 	return (index.childrenByParent.get(item.id) ?? []).some((c) => !isCriterionChild(c));
 }
 
@@ -78,7 +78,7 @@ function isEpic(item: FetchedWorkItem, index: ProjectIndex): boolean {
  * Excludes `root` itself. A `visited` guard makes it safe against a malformed
  * parent cycle.
  */
-function collectDescendants(root: FetchedWorkItem, index: ProjectIndex): FetchedWorkItem[] {
+export function collectDescendants(root: FetchedWorkItem, index: ProjectIndex): FetchedWorkItem[] {
 	const out: FetchedWorkItem[] = [];
 	const visited = new Set<string>([root.id]);
 	const walk = (parent: FetchedWorkItem): void => {

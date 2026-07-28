@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { registerAtlasCommand } from "./commands/atlas.ts";
 import { registerDeleteCommand } from "./commands/delete.ts";
 import { registerDoctorCommand } from "./commands/doctor.ts";
+import { registerEpicCommand } from "./commands/epic.ts";
 import { registerExportCommand } from "./commands/export.ts";
 import { registerGroomCommand } from "./commands/groom.ts";
 import { registerImportCommand } from "./commands/import.ts";
@@ -28,5 +29,6 @@ registerDoctorCommand(program);
 registerAtlasCommand(program);
 registerLintCommand(program);
 registerPacketCommand(program);
+registerEpicCommand(program);
 
 program.parse();
