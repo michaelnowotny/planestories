@@ -122,6 +122,14 @@ export async function setWorkItems(client: PlaneClient, options: SetOptions): Pr
 			if (options.evidence) {
 				const marker = evidenceMarker(options.evidence);
 				const html = `<p>${escapeHtml(options.evidence.trim())} <sub>${marker}</sub></p>`;
+				// Dedup is via `ensureComment` — the SAME marker-idempotent primitive the
+				// importer's `comment:` and groom's auto-close comments use. Its list-then-
+				// create is best-effort, NOT atomic: two concurrent identical calls, or a
+				// POST retried after a lost response, can still double-post. That is a
+				// shared property of every comment path here, not specific to evidence;
+				// hardening it (server-side idempotency / safe POST reconciliation) is a
+				// cross-cutting follow-up across all callers. For the sequential CLI it is
+				// a rare edge.
 				result.evidence = await ensureComment(client, project.id, id, marker, html);
 			}
 			results.push(result);
