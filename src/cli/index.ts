@@ -6,6 +6,7 @@ import { registerDoctorCommand } from "./commands/doctor.ts";
 import { registerExportCommand } from "./commands/export.ts";
 import { registerGroomCommand } from "./commands/groom.ts";
 import { registerImportCommand } from "./commands/import.ts";
+import { registerLintCommand } from "./commands/lint.ts";
 import { registerProjectsCommand } from "./commands/projects.ts";
 import { registerSetCommand } from "./commands/set.ts";
 
@@ -24,5 +25,6 @@ registerProjectsCommand(program);
 registerGroomCommand(program);
 registerDoctorCommand(program);
 registerAtlasCommand(program);
+registerLintCommand(program);
 
 program.parse();

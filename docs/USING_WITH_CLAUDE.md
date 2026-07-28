@@ -123,6 +123,15 @@ bun run src/cli/index.ts export --project "My Project" -o exported.md
 bun run src/cli/index.ts groom --project "My Project"          # dry-run report
 bun run src/cli/index.ts groom --project "My Project" --yes    # apply (close sub-items)
 
+# Lint: offline mechanical pre-import check (no API); exits non-zero on violations.
+bun run src/cli/index.ts lint stories/*.md              # strict by default
+bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
+#   Rules (cross-file aware): non-epic story missing AC or effort; epic missing
+#   "### Why is this needed?" or carrying AC; dependency cycle/self-ref; dangling
+#   reference (warning — may exist on the board); duplicate identifier; orphan
+#   criterion; parent not an epic.
+#   Complements doctor (board-side) and /rate-userstories (LLM), does not duplicate them.
+
 # Doctor: read-only CI check; exits non-zero on findings (board rot).
 bun run src/cli/index.ts doctor --project "My Project"
 

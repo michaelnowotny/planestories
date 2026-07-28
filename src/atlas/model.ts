@@ -147,9 +147,7 @@ export function buildAtlasFromFile(fileContent: string, filePath: string): Atlas
 	}
 
 	const issues = parsed.stories.filter((s) => s.kind !== "criterion");
-	const referencedAsParent = new Set(
-		issues.map((s) => s.parent).filter((p): p is string => Boolean(p)),
-	);
+	const epics = classifyFileEpics(parsed.stories);
 
 	const raws: RawNode[] = issues.map((story) => {
 		const { narrative, criteria: inlineCriteria } = splitBody(story.body);
@@ -157,7 +155,7 @@ export function buildAtlasFromFile(fileContent: string, filePath: string): Atlas
 			...inlineCriteria.map((c) => ({ text: c.text, checked: c.checked })),
 			...(story.planeIdentifier ? (criteriaByParent.get(story.planeIdentifier) ?? []) : []),
 		];
-		const isEpic = classifyFileEpic(story, criteria.length, referencedAsParent);
+		const isEpic = epics.has(story);
 		const key = story.planeIdentifier ?? nextId("f");
 		return {
 			key,
@@ -182,21 +180,41 @@ export function buildAtlasFromFile(fileContent: string, filePath: string): Atlas
 	return summarize(project, "file", assembleTree(raws));
 }
 
-function classifyFileEpic(
-	story: UserStory,
-	criteriaCount: number,
-	referencedAsParent: Set<string>,
-): boolean {
-	if (story.kind === "epic") return true;
-	if (story.labels.includes("Epic")) return true;
-	if (
-		criteriaCount === 0 &&
-		story.planeIdentifier &&
-		referencedAsParent.has(story.planeIdentifier)
-	) {
-		return true;
-	}
-	return false;
+/**
+ * Classify epics in an offline markdown fileset.
+ *
+ * This is shared by Atlas and file linting so hierarchy-derived epics cannot be
+ * interpreted differently by the two offline views. An exact `Epic` label is
+ * retained as a backwards-compatible marker alongside the preferred `kind:
+ * epic`; otherwise a criteria-free non-criterion item referenced as the parent
+ * of another non-criterion item is an epic.
+ */
+export function classifyFileEpics(stories: readonly UserStory[]): Set<UserStory> {
+	const issues = stories.filter((story) => story.kind !== "criterion");
+	const referencedAsParent = new Set(
+		issues
+			.map((story) => story.parent)
+			.filter((identifier): identifier is string => identifier !== null),
+	);
+	const criterionParents = new Set(
+		stories
+			.filter((story) => story.kind === "criterion")
+			.map((story) => story.parent)
+			.filter((identifier): identifier is string => identifier !== null),
+	);
+
+	return new Set(
+		issues.filter((story) => {
+			if (story.kind === "epic" || story.labels.includes("Epic")) {
+				return true;
+			}
+			const identifier = story.planeIdentifier;
+			const hasCriteria =
+				splitBody(story.body).criteria.length > 0 ||
+				(identifier !== null && criterionParents.has(identifier));
+			return identifier !== null && !hasCriteria && referencedAsParent.has(identifier);
+		}),
+	);
 }
 
 // --- Board source ----------------------------------------------------------

@@ -285,6 +285,25 @@ findings** (pass `--no-fail-on-findings` to just report):
 planestories doctor --project <name>
 ```
 
+### `lint`
+
+An **offline, mechanical** pre-import check over one or more story files — no Plane API, no credentials.
+Exits non-zero on any violation, so you can gate CI on it before importing:
+
+```
+planestories lint stories/*.md              # strict by default: any error fails (exit 1)
+planestories lint stories/*.md --warn-only  # report only, always exit 0 (gradual adoption)
+```
+
+Lint is strict by default; use `--warn-only` to downgrade all violations to warnings. It enforces the
+house conventions across the passed fileset (cross-file aware): every non-epic story has
+acceptance criteria (inline or a criterion child) **and** an effort value; every epic has a
+`### Why is this needed?` section and no acceptance criteria; dependencies are well-formed (no cycles, no
+self-references; identifiers not in the fileset are flagged as *warnings* since they may live on the
+board); Plane identifiers are unique; no criteria are orphaned; and `parent:` targets resolve to an epic.
+It complements — does not duplicate — `doctor` (board-side) and the `/rate-userstories` skill (LLM
+grading).
+
 ### `atlas`
 
 Render an interactive **Project Atlas** — a single self-contained HTML file (no server, no CDN, works

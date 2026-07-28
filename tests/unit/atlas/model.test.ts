@@ -65,6 +65,37 @@ describe("buildAtlasFromFile", () => {
 		const b = buildAtlasFromFile(FILE, "x.md");
 		expect(JSON.stringify(a)).toBe(JSON.stringify(b));
 	});
+
+	test("keeps case-mismatched parent identifiers unlinked and non-epic", () => {
+		const graph = buildAtlasFromFile(
+			[
+				"## Potential parent",
+				"",
+				"```yaml",
+				"plane_identifier: DATA-1",
+				"```",
+				"",
+				"Parent scope.",
+				"",
+				"## Unlinked child",
+				"",
+				"```yaml",
+				"plane_identifier: DATA-2",
+				"parent: data-1",
+				"```",
+				"",
+				"### Acceptance Criteria",
+				"- [ ] It works",
+			].join("\n"),
+			"x.md",
+		);
+
+		expect(graph.nodes).toHaveLength(2);
+		expect(graph.counts.epics).toBe(0);
+		expect(graph.nodes[0]?.kind).toBe("story");
+		expect(graph.nodes[0]?.children).toEqual([]);
+		expect(graph.nodes[1]?.identifier).toBe("DATA-2");
+	});
 });
 
 describe("buildAtlasFromBoard", () => {

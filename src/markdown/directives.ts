@@ -50,7 +50,7 @@ const MAX_EFFORT_DAYS = 100_000;
  *    opener, and with NO info string. So a ``` line inside a ```` block, or a
  *    `~~~` inside a ``` block, is content, not a delimiter.
  */
-function fenceMask(lines: string[]): boolean[] {
+export function fenceMask(lines: string[]): boolean[] {
 	const mask = new Array<boolean>(lines.length).fill(false);
 	let open: { char: string; length: number } | null = null;
 	for (let i = 0; i < lines.length; i++) {
