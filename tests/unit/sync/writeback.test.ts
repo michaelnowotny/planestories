@@ -214,6 +214,48 @@ describe("applyCheckboxStates (pure, plane_id-keyed reverse-sync)", () => {
 		expect(changes).toHaveLength(0);
 	});
 
+	test("fails closed when content shares the closing ``` line (ambiguous body boundary)", () => {
+		// The parser's body starts mid-line here (after the closing ```), but this
+		// line-based rewriter cannot — so it must leave the section untouched + warn.
+		const content = [
+			"## S",
+			"",
+			"```yaml",
+			"plane_id: p",
+			"```### Acceptance Criteria",
+			"- [ ] jammed",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] real",
+			"",
+		].join("\n");
+		const {
+			content: out,
+			changes,
+			warnings,
+		} = applyCheckboxStates(content, states({ p: { 0: true } }));
+		expect(out).toBe(content); // nothing changed
+		expect(changes).toHaveLength(0);
+		expect(warnings.join(" ")).toContain("same line");
+	});
+
+	test("fails closed on a duplicate plane_id across two sections", () => {
+		const content = [
+			...linked("dup", "First", "### Acceptance Criteria", "- [ ] a"),
+			"",
+			...linked("dup", "Second copy", "### Acceptance Criteria", "- [ ] b"),
+			"",
+		].join("\n");
+		const {
+			content: out,
+			changes,
+			warnings,
+		} = applyCheckboxStates(content, states({ dup: { 0: true } }));
+		expect(out).toBe(content); // neither section touched
+		expect(changes).toHaveLength(0);
+		expect(warnings.join(" ")).toContain("more than one story");
+	});
+
 	test("stops counting criteria at the next heading after AC", () => {
 		const content = linked(
 			"p1",

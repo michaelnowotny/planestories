@@ -55,9 +55,10 @@ export function applyCheckboxStates(
 	content: string,
 	statesByPlaneId: Map<string, Map<number, boolean>>,
 	identifiersByPlaneId?: Map<string, string | null>,
-): { content: string; changes: CheckboxChange[] } {
+): { content: string; changes: CheckboxChange[]; warnings: string[] } {
 	const lines = content.split("\n");
 	const changes: CheckboxChange[] = [];
+	const warnings: string[] = [];
 
 	// Section boundaries: every `## ` line (naive, exactly like parseMarkdownFile's
 	// `split(/^(?=## )/m)`). Over-segmentation (a `## ` in frontmatter or a code
@@ -70,20 +71,55 @@ export function applyCheckboxStates(
 		}
 	}
 
-	for (let b = 0; b < boundaries.length; b++) {
-		const start = boundaries[b] as number;
+	// Resolve each section's yaml up front so we can fail closed on an AMBIGUOUS
+	// plane_id (the same id on more than one section — e.g. a copy-pasted story
+	// whose metadata wasn't cleared). Applying one board state to two sections
+	// would silently tick the wrong story, so a duplicated id is left untouched.
+	const sections = boundaries.map((start, b) => {
 		const end = b + 1 < boundaries.length ? (boundaries[b + 1] as number) : lines.length;
-		const sectionLines = lines.slice(start, end);
+		return { start, end, ...sectionYaml(lines.slice(start, end)) };
+	});
+	const idCounts = new Map<string, number>();
+	for (const s of sections) {
+		if (s.planeId !== null) {
+			const id = s.planeId.trim();
+			idCounts.set(id, (idCounts.get(id) ?? 0) + 1);
+		}
+	}
 
-		const { planeId, bodyLine } = sectionYaml(sectionLines);
-		if (planeId === null) {
+	const warnedDuplicateId = new Set<string>();
+	for (const section of sections) {
+		if (section.planeId === null) {
 			continue; // no board link in this section's yaml -> never a write-back target
 		}
-		const desired = statesByPlaneId.get(planeId.trim());
+		const id = section.planeId.trim();
+		const desired = statesByPlaneId.get(id);
 		if (!desired) {
 			continue;
 		}
+		if ((idCounts.get(id) ?? 0) > 1) {
+			if (!warnedDuplicateId.has(id)) {
+				const label = identifiersByPlaneId?.get(id) ?? id;
+				warnings.push(
+					`${label}: plane_id appears on more than one story in this file — ambiguous, left unchanged`,
+				);
+				warnedDuplicateId.add(id);
+			}
+			continue;
+		}
+		if (section.inlineTrailer) {
+			// The parser's body begins immediately after the closing ``` (mid-line),
+			// but this line-based rewriter can only start at the next line — so content
+			// jammed onto the closing-fence line would desync `::ac<n>`. Fail closed.
+			const label = identifiersByPlaneId?.get(id) ?? id;
+			warnings.push(
+				`${label}: text on the same line as the yaml block's closing \`\`\` — ambiguous body boundary, left unchanged`,
+			);
+			continue;
+		}
 
+		const { start, end, bodyLine } = section;
+		const sectionLines = lines.slice(start, end);
 		const acRel = acHeadingIndex(sectionLines.slice(bodyLine));
 		if (acRel === -1) {
 			continue;
@@ -110,7 +146,7 @@ export function applyCheckboxStates(
 						lines[abs] = rewritten;
 						changes.push({
 							title,
-							identifier: identifiersByPlaneId?.get(planeId.trim()) ?? null,
+							identifier: identifiersByPlaneId?.get(id) ?? null,
 							position: pos,
 							text: checkboxText(rel) ?? "",
 							from: current,
@@ -123,21 +159,28 @@ export function applyCheckboxStates(
 		}
 	}
 
-	return { content: lines.join("\n"), changes };
+	return { content: lines.join("\n"), changes, warnings };
 }
 
 /**
- * For one `## ` section (whose [0] is the heading line), return its `plane_id`
+ * For one `## ` section (whose [0] is the heading line), resolve its `plane_id`
  * (from the first ```yaml``` block) and the section-line index at which the body
  * begins (just after that yaml block; 1 — right after the H2 — when there is no
- * yaml block). Uses the SAME yaml regex + gray-matter parse as `parseMarkdownFile`
- * so the two never disagree about the body boundary.
+ * yaml block). Uses the SAME yaml regex + gray-matter parse as `parseMarkdownFile`.
+ *
+ * `inlineTrailer` is true when there is non-whitespace content on the SAME physical
+ * line as the closing ```` ``` ````. In that one case the parser's body starts
+ * mid-line while this line-based rewriter cannot, so the caller fails closed.
  */
-function sectionYaml(sectionLines: string[]): { planeId: string | null; bodyLine: number } {
+function sectionYaml(sectionLines: string[]): {
+	planeId: string | null;
+	bodyLine: number;
+	inlineTrailer: boolean;
+} {
 	const restContent = sectionLines.slice(1).join("\n");
 	const match = restContent.match(/```yaml\n([\s\S]*?)```/);
 	if (!match || match.index === undefined) {
-		return { planeId: null, bodyLine: 1 };
+		return { planeId: null, bodyLine: 1, inlineTrailer: false };
 	}
 	let planeId: string | null = null;
 	try {
@@ -150,9 +193,12 @@ function sectionYaml(sectionLines: string[]): { planeId: string | null; bodyLine
 	// The body begins on the line AFTER the yaml block's closing fence. Count the
 	// newlines consumed up to the end of the match: that many lines of `restContent`
 	// precede the body, and `restContent` line k is `sectionLines[1 + k]`.
-	const consumed = restContent.slice(0, match.index + match[0].length);
-	const newlineCount = (consumed.match(/\n/g) ?? []).length;
-	return { planeId, bodyLine: newlineCount + 2 };
+	const endChar = match.index + match[0].length;
+	const newlineCount = (restContent.slice(0, endChar).match(/\n/g) ?? []).length;
+	const nextNewline = restContent.indexOf("\n", endChar);
+	const remainder =
+		nextNewline === -1 ? restContent.slice(endChar) : restContent.slice(endChar, nextNewline);
+	return { planeId, bodyLine: newlineCount + 2, inlineTrailer: remainder.trim().length > 0 };
 }
 
 export interface WriteBackOptions {
@@ -307,11 +353,11 @@ export async function reverseSyncCriteria(
 			}
 		}
 
-		const { content: updated, changes } = applyCheckboxStates(
-			original,
-			statesByPlaneId,
-			identifiersByPlaneId,
-		);
+		const {
+			content: updated,
+			changes,
+			warnings: coreWarnings,
+		} = applyCheckboxStates(original, statesByPlaneId, identifiersByPlaneId);
 		pending.push({
 			filePath,
 			original,
@@ -320,7 +366,7 @@ export async function reverseSyncCriteria(
 			linkedStories,
 			unlinkedStories,
 			missingOnBoard,
-			warnings,
+			warnings: [...warnings, ...coreWarnings],
 		});
 	}
 

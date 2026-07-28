@@ -84,13 +84,25 @@ after reordering criteria so the board renumbers them, then write-back.
 Write-back locates a story within a file by the **`plane_id`** in its own yaml block — NOT by title or by
 position — so two stories with the identical `## Title` never cross-contaminate, and an UNLINKED story
 (no `plane_id`) is never a target. It reads each section's `plane_id` and body boundary with the SAME
-yaml regex + gray-matter parse as the importer's parser, so the two cannot disagree about where a story's
-body (and thus its `::ac<n>` numbering) begins — leading frontmatter, an extra `## ` heading, or a yaml
-fence with text before it on the line all resolve identically. The one residual shared limitation is that
-both split sections naively on lines starting with `## `, so a literal `## ` at the start of a line inside
-a story's narrative or a fenced code block splits that story for BOTH the parser and write-back
-(consistently); the checkboxes after such a split land in a sub-section with no yaml `plane_id`, so
-write-back simply won't touch them. Avoid a line-leading `## ` inside prose.
+yaml regex + gray-matter parse as the importer's parser, so the two agree about where a story's body (and
+thus its `::ac<n>` numbering) begins — leading frontmatter, an extra `## ` heading, or a yaml fence with
+text before it on the line all resolve identically.
+
+Two authoring pathologies are handled by **failing closed** (leaving the story untouched + printing a
+warning) rather than risking a wrong-box write:
+
+- **A duplicate `plane_id`** on more than one story in the same file (e.g. a copy-pasted story whose
+  `plane_id` wasn't cleared): applying one board state to two sections could tick the wrong story, so
+  neither is touched. Clear the copy's metadata (or delete the duplicate) and re-import.
+- **Content on the SAME physical line as a yaml block's closing ```` ``` ````** (e.g.
+  `` ```### Acceptance Criteria ``): the parser's body starts mid-line there while this line-based
+  rewriter cannot, so that section is left alone. Put the closing ```` ``` ```` on its own line (the
+  normal, serializer-produced form).
+
+The one residual shared limitation is that both the parser and write-back split sections naively on lines
+starting with `## `, so a literal `## ` at the start of a line inside a story's narrative or a fenced code
+block splits that story for BOTH (consistently); the checkboxes after such a split land in a sub-section
+with no yaml `plane_id`, so write-back simply won't touch them. Avoid a line-leading `## ` inside prose.
 
 If a parent has two criterion sub-items with the SAME `::ac<n>` index (which can happen after a title
 rename: the importer derives the criterion external-id prefix from the title slug, so a renamed story
