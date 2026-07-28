@@ -224,6 +224,30 @@ describe("buildPacketStory + renderPacketMarkdown (pure)", () => {
 		expect(md).toContain("⚠ unresolved");
 		expect(md).toContain("blocked_by: []"); // the unresolved uuid is not a valid header id
 	});
+
+	test("preserves description content AFTER an inline AC section (self-contained brief)", () => {
+		const target = item({
+			id: "wi-50",
+			sequenceId: 50,
+			name: "T",
+			description: [
+				"Intro paragraph.",
+				"",
+				"### Acceptance Criteria",
+				"- [ ] one",
+				"",
+				"### Implementation notes",
+				"Use the fast path.",
+			].join("\n"),
+		});
+		const index = indexOf([target], "DATA");
+		const story = buildPacketStory(client, target, index, "p", "DATA", relations({}));
+		expect(story.narrative).toContain("Intro paragraph.");
+		expect(story.narrative).toContain("### Implementation notes");
+		expect(story.narrative).toContain("Use the fast path.");
+		expect(story.narrative).not.toContain("- [ ] one"); // checklist rendered separately, not duplicated
+		expect(story.criteria).toEqual([{ text: "one", checked: false }]);
+	});
 });
 
 const PROJECT_UUID = "aaaaaaaa-1111-2222-3333-444444444444";
@@ -383,5 +407,56 @@ describe("generatePacket (board wrapper)", () => {
 		// Effort sum = leaf stories C(1) + D(2) only; sub-epic B(5) excluded.
 		expect(markdown).toContain("children_effort_days: 3");
 		expect(markdown).not.toContain("children_effort_days: 8");
+	});
+
+	test("rejects a criterion sub-item target, pointing at its parent story", async () => {
+		const backlog = { id: "s", name: "Backlog", group: "backlog" };
+		const board: FakeData = {
+			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{ id: "wi-p", sequence_id: 5, name: "Parent story", state: backlog },
+					{
+						id: "wi-ac",
+						sequence_id: 6,
+						name: "a criterion",
+						parent: "wi-p",
+						external_source: "planestories",
+						external_id: "p::ac0",
+						state: backlog,
+					},
+				],
+			},
+		};
+		const { client } = makeFakeClient(board);
+		await expect(generatePacket(client, { config, identifier: "DATA-6" })).rejects.toThrow(
+			/criterion sub-item.*DATA-5/,
+		);
+	});
+
+	test("children_effort_missing flags leaf stories with no effort", async () => {
+		const started = { id: "s", name: "In Progress", group: "started" };
+		const backlog = { id: "s2", name: "Backlog", group: "backlog" };
+		const board: FakeData = {
+			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{ id: "e", sequence_id: 1, name: "Epic", state: started },
+					{
+						id: "a",
+						sequence_id: 2,
+						name: "A (estimated)",
+						parent: "e",
+						state: backlog,
+						description_html: "<p><strong>Effort:</strong> 2 dev-days</p>",
+					},
+					{ id: "b", sequence_id: 3, name: "B (no effort)", parent: "e", state: backlog },
+				],
+			},
+		};
+		const { client } = makeFakeClient(board);
+		const { markdown } = await generatePacket(client, { config, identifier: "DATA-1" });
+		expect(markdown).toContain("children_effort_days: 2");
+		expect(markdown).toContain("children_effort_missing: 1"); // B's effort is unknown
 	});
 });

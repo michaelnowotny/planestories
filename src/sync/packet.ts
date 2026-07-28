@@ -1,5 +1,10 @@
 import { ConfigError } from "../errors.ts";
-import { type AcceptanceCriterion, splitBody } from "../markdown/criteria.ts";
+import {
+	type AcceptanceCriterion,
+	acHeadingIndex,
+	isHeadingLine,
+	splitBody,
+} from "../markdown/criteria.ts";
 import { formatDevDays, parseEffortDays } from "../markdown/directives.ts";
 import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import { type FetchedWorkItem, fetchProjectIndex, type ProjectIndex } from "../plane/issues.ts";
@@ -107,6 +112,29 @@ function criteriaForItem(item: FetchedWorkItem, index: ProjectIndex): Acceptance
 	return splitBody(item.description ?? "").criteria;
 }
 
+/**
+ * The description with ONLY the inline acceptance-criteria checklist removed —
+ * text before AND after the AC section is kept. `splitBody(...).narrative` drops
+ * everything from the AC heading onward, which would lose e.g. a following
+ * `### Implementation notes` from the "self-contained" packet. The AC checklist
+ * itself is rendered separately (from sub-items or the inline criteria) with the
+ * board's current state, so keeping it here too would duplicate it.
+ */
+function narrativeWithoutCriteria(body: string): string {
+	const lines = body.split("\n");
+	const acIdx = acHeadingIndex(lines);
+	if (acIdx === -1) {
+		return body.trim();
+	}
+	// The AC section runs from its heading to the next ATX heading (matching how
+	// splitBody collects criteria); everything after that heading is kept.
+	let end = acIdx + 1;
+	while (end < lines.length && !isHeadingLine(lines[end] as string)) {
+		end++;
+	}
+	return [...lines.slice(0, acIdx), ...lines.slice(end)].join("\n").trim();
+}
+
 function planningRefs(narrative: string): string[] {
 	// Strip trailing sentence punctuation the greedy char-class would otherwise
 	// swallow (e.g. "...planning/329-x.md." -> "planning/329-x.md").
@@ -169,7 +197,7 @@ export function buildPacketStory(
 	projectIdentifier: string,
 	relations: PlaneIssueRelations,
 ): PacketStory {
-	const split = splitBody(item.description ?? "");
+	const narrative = narrativeWithoutCriteria(item.description ?? "");
 	const parent = item.parent ? index.byId.get(item.parent) : undefined;
 	return {
 		identifier: `${projectIdentifier}-${item.sequenceId}`,
@@ -181,12 +209,12 @@ export function buildPacketStory(
 		parent: parent
 			? { identifier: `${projectIdentifier}-${parent.sequenceId}`, title: parent.name }
 			: null,
-		narrative: split.narrative,
+		narrative,
 		criteria: criteriaForItem(item, index),
 		blockedBy: dependencyRefs(relations.blocked_by ?? [], index, projectIdentifier),
 		blocks: dependencyRefs(relations.blocking ?? [], index, projectIdentifier),
 		relatesTo: dependencyRefs(relations.relates_to ?? [], index, projectIdentifier),
-		planningRefs: planningRefs(split.narrative),
+		planningRefs: planningRefs(narrative),
 		url: client.workItemWebUrl(projectId, item.id),
 	};
 }
@@ -289,10 +317,13 @@ export function renderPacketMarkdown(packet: Packet): string {
 		header.push(`children: [${packet.children.map((c) => c.identifier).join(", ")}]`);
 		// Sum only non-epic descendants' effort (epics carry no work of their own) and
 		// format via formatDevDays so 0.1 + 0.2 renders "0.3", not "0.30000000000000004".
-		const total = packet.children
-			.filter((c) => !c.isEpic)
-			.reduce((sum, c) => sum + (c.effortDays ?? 0), 0);
+		const leaves = packet.children.filter((c) => !c.isEpic);
+		const total = leaves.reduce((sum, c) => sum + (c.effortDays ?? 0), 0);
+		const missing = leaves.filter((c) => c.effortDays === null).length;
 		header.push(`children_effort_days: ${formatDevDays(total)}`);
+		// The sum is a LOWER BOUND when some leaf stories have no effort — say so, so a
+		// consumer never mistakes a partial estimate for a complete one.
+		header.push(`children_effort_missing: ${missing}`);
 	}
 	header.push(`url: ${root.url}`);
 	header.push("generated_by: planestories");
@@ -346,6 +377,18 @@ export async function generatePacket(
 	if (!target) {
 		throw new ConfigError(
 			`Work item ${options.identifier} not found in project ${project.identifier}.`,
+		);
+	}
+	// A criterion sub-item is not an implementable ticket on its own — packeting it
+	// would present a single acceptance criterion as work and mislabel its parent
+	// story as an "Epic". Point the caller at the owning story instead.
+	if (isCriterionChild(target)) {
+		const parent = target.parent ? index.byId.get(target.parent) : undefined;
+		const parentHint = parent
+			? ` — packet its parent story ${project.identifier}-${parent.sequenceId} instead`
+			: "";
+		throw new ConfigError(
+			`${options.identifier} is an acceptance-criterion sub-item, not an implementable ticket${parentHint}.`,
 		);
 	}
 
