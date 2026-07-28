@@ -27,6 +27,9 @@ export interface PayloadHashInput {
 	 * synced files stay warm) while a parent edit still triggers a re-sync.
 	 */
 	parent?: string | null;
+	blockedBy?: string[];
+	blocks?: string[];
+	relatesTo?: string[];
 }
 
 /**
@@ -42,6 +45,9 @@ export interface PayloadHashInput {
  * serves (the item is already identified by plane_id).
  */
 export function payloadHash(input: PayloadHashInput): string {
+	const blockedBy = input.blockedBy ?? [];
+	const blocks = input.blocks ?? [];
+	const relatesTo = input.relatesTo ?? [];
 	const canonical = {
 		name: input.name,
 		descriptionHtml: input.descriptionHtml,
@@ -56,6 +62,15 @@ export function payloadHash(input: PayloadHashInput): string {
 			: [],
 		// Only present when set, so parentless stories keep their pre-parent hash.
 		...(input.parent ? { parent: input.parent } : {}),
+		// Preserve legacy hashes for relation-free stories while making all three
+		// dependency sets part of the payload as soon as any relation is present.
+		...(blockedBy.length > 0 || blocks.length > 0 || relatesTo.length > 0
+			? {
+					blockedBy: [...blockedBy].sort(),
+					blocks: [...blocks].sort(),
+					relatesTo: [...relatesTo].sort(),
+				}
+			: {}),
 	};
 	return createHash("sha256").update(JSON.stringify(canonical)).digest("hex").slice(0, 16);
 }

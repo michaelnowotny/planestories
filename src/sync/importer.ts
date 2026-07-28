@@ -18,7 +18,12 @@ import {
 } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ImportResult, ImportSummary, ResolvedConfig, UserStory } from "../types.ts";
-import { boardItemToStory } from "./board-story.ts";
+import { boardItemToStory, resolveStoryRelationIdentifiers } from "./board-story.ts";
+import {
+	type RelationProject,
+	type RelationSyncStory,
+	reconcileProjectRelations,
+} from "./relations.ts";
 import { hashStoryPayload } from "./story-hash.ts";
 
 /** Lazily fetch (and memoize) a project's work-item index — one list per project per run. */
@@ -80,6 +85,15 @@ export async function importStories(
 	const resolver = new Resolver(client);
 	const results: ImportResult[] = [];
 	const structureWarnings: string[] = [];
+	const relationRecords = new Map<
+		string,
+		{ project: RelationProject; records: RelationSyncStory[] }
+	>();
+	const pendingWriteBacks: Array<{
+		filePath: string;
+		fileContent: string;
+		entries: Array<{ story: UserStory; result: ImportResult }>;
+	}> = [];
 
 	// One work-item index per project, fetched lazily (only creates, adopts, and
 	// hashless-linked stories need it) and reused across every story in the run.
@@ -97,7 +111,7 @@ export async function importStories(
 		const fileContent = await Bun.file(filePath).text();
 		const parsed = parseMarkdownFile(fileContent, filePath);
 
-		const writeBackUpdates: WriteBackUpdate[] = [];
+		const writeBackEntries: Array<{ story: UserStory; result: ImportResult }> = [];
 		const suspicious = new Set(findNonStoryHeadings(fileContent));
 
 		for (const story of parsed.stories) {
@@ -121,35 +135,110 @@ export async function importStories(
 			const result = await processStory(client, resolver, story, options, getIndex);
 			results.push(result);
 
+			const relationEligible =
+				!options.statusOnly &&
+				(result.action === "created" ||
+					result.action === "updated" ||
+					result.action === "unchanged" ||
+					(Boolean(options.dryRun) && result.wouldAction !== undefined));
+			if (relationEligible) {
+				const projectName = options.project ?? story.project ?? options.config.defaultProject;
+				if (projectName) {
+					try {
+						const project = await resolver.resolveProject(projectName);
+						const group = relationRecords.get(project.id) ?? {
+							project: { id: project.id, identifier: project.identifier },
+							records: [],
+						};
+						group.records.push({ story, result });
+						relationRecords.set(project.id, group);
+					} catch {
+						// The per-story result already carries the resolver failure. A fast
+						// unchanged path can reach here without resolution; preserve its
+						// existing behavior and simply omit relation reconciliation.
+					}
+				}
+			}
+
 			// Write back identifiers + content hash for created/updated stories, and
 			// for an ADOPTED hashless-but-linked story (action "unchanged" but the file
 			// had no plane_hash yet — store it so it is warm next time). In-place hash
 			// refreshes are idempotent on plane_id/identifier/url. Fast-path unchanged
 			// (file already had a matching hash) and failed/skipped write nothing.
-			const linkable =
-				result.action === "created" ||
-				result.action === "updated" ||
-				(result.action === "unchanged" && story.planeHash === null);
-			if (linkable && result.planeId && result.planeIdentifier && result.planeUrl) {
-				writeBackUpdates.push({
-					title: story.title,
-					planeId: result.planeId,
-					planeIdentifier: result.planeIdentifier,
-					planeUrl: result.planeUrl,
-					// Undefined on a partial follow-up -> plane_hash is not written, so a
-					// re-run recomputes and completes the interrupted work.
-					planeHash: result.planeHash,
-				});
-			}
+			writeBackEntries.push({ story, result });
 		}
 
-		if (!options.dryRun && !options.noWriteBack && writeBackUpdates.length > 0) {
-			const updatedContent = writeBackIds(filePath, fileContent, writeBackUpdates);
-			await Bun.write(filePath, updatedContent);
-		}
+		pendingWriteBacks.push({ filePath, fileContent, entries: writeBackEntries });
 	}
 
 	const summary = buildSummary(results);
+	for (const { project, records } of relationRecords.values()) {
+		try {
+			// Deliberately bypass the per-story cache: items created earlier in this
+			// import must be present before identifier resolution and reconciliation.
+			const freshIndex = await fetchProjectIndex(client, project.id, project.identifier);
+			const reconciled = await reconcileProjectRelations(
+				client,
+				project,
+				freshIndex,
+				records,
+				Boolean(options.dryRun),
+			);
+			summary.relationsCreated += reconciled.created;
+			summary.relationsRemoved += reconciled.removed;
+			summary.relationWarnings.push(...reconciled.warnings);
+			summary.relationErrors.push(...reconciled.errors);
+			summary.relationChanges.push(...reconciled.changes);
+			if (reconciled.hashWithholdIds.size > 0) {
+				// A cycle aborted the relation writes. The work items are linked, but do
+				// not claim their dependency hash was synced for any story whose relations
+				// were not written; a corrected re-run must re-enter reconciliation.
+				for (const record of records) {
+					const issueId = record.result.planeId ?? record.story.planeId;
+					if (issueId && reconciled.hashWithholdIds.has(issueId)) {
+						record.result.planeHash = undefined;
+					}
+				}
+			}
+		} catch (error) {
+			summary.relationErrors.push(
+				`${project.identifier}: relation reconciliation failed: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			);
+			for (const record of records) record.result.planeHash = undefined;
+		}
+	}
+
+	if (!options.dryRun && !options.noWriteBack) {
+		for (const pending of pendingWriteBacks) {
+			const writeBackUpdates: WriteBackUpdate[] = [];
+			for (const { story, result } of pending.entries) {
+				const linkable =
+					result.action === "created" ||
+					result.action === "updated" ||
+					(result.action === "unchanged" && story.planeHash === null);
+				if (linkable && result.planeId && result.planeIdentifier && result.planeUrl) {
+					writeBackUpdates.push({
+						title: story.title,
+						planeId: result.planeId,
+						planeIdentifier: result.planeIdentifier,
+						planeUrl: result.planeUrl,
+						planeHash: result.planeHash,
+					});
+				}
+			}
+			if (writeBackUpdates.length > 0) {
+				const updatedContent = writeBackIds(
+					pending.filePath,
+					pending.fileContent,
+					writeBackUpdates,
+				);
+				await Bun.write(pending.filePath, updatedContent);
+			}
+		}
+	}
+
 	summary.labelsCreated = [...resolver.createdLabelNames];
 	summary.labelsSkipped = [...resolver.skippedLabelNames];
 	summary.structureWarnings = structureWarnings;
@@ -269,6 +358,13 @@ async function processStory(
 					projectName,
 					Boolean(options.syncCriteria),
 					children,
+					undefined,
+					undefined,
+					resolveStoryRelationIdentifiers(
+						await client.getRelations(project.id, boardItem.id),
+						index,
+						project.identifier,
+					),
 				);
 				if (boardStory.planeHash === contentHash) {
 					return {
@@ -469,7 +565,7 @@ function makeResult(
 
 /** What an import would do with a story — resolved once, used by preview AND apply. */
 type Target =
-	| { kind: "update"; id: string }
+	| { kind: "update"; id: string; item?: FetchedWorkItem }
 	| { kind: "create" }
 	| { kind: "skip-duplicate"; item: FetchedWorkItem }
 	| { kind: "duplicate-multi"; items: FetchedWorkItem[] };
@@ -519,7 +615,11 @@ async function resolveTarget(
 	if (options.adoptDuplicates) {
 		return list.length > 1
 			? { kind: "duplicate-multi", items: list }
-			: { kind: "update", id: (list[0] as FetchedWorkItem).id };
+			: {
+					kind: "update",
+					id: (list[0] as FetchedWorkItem).id,
+					item: list[0] as FetchedWorkItem,
+				};
 	}
 	return { kind: "skip-duplicate", item: list[0] as FetchedWorkItem };
 }
@@ -537,7 +637,14 @@ function previewFromTarget(
 		case "create":
 			return { story, action: "skipped", wouldAction: "create", note: extraNote };
 		case "update":
-			return { story, action: "skipped", wouldAction: "update", note: extraNote };
+			return {
+				story,
+				action: "skipped",
+				wouldAction: "update",
+				planeId: target.id,
+				planeIdentifier: target.item ? ident(target.item) : (story.planeIdentifier ?? undefined),
+				note: extraNote,
+			};
 		case "skip-duplicate":
 			return {
 				story,
@@ -749,5 +856,10 @@ function buildSummary(results: ImportResult[]): ImportSummary {
 		labelsCreated: [],
 		labelsSkipped: [],
 		structureWarnings: [],
+		relationsCreated: 0,
+		relationsRemoved: 0,
+		relationWarnings: [],
+		relationErrors: [],
+		relationChanges: [],
 	};
 }

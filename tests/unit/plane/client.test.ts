@@ -97,6 +97,49 @@ describe("PlaneClient.findWorkItemByExternalId", () => {
 	});
 });
 
+describe("PlaneClient relation endpoints", () => {
+	test("uses the verified relation and relations/remove paths", async () => {
+		const requests: Array<{ method: string; url: string; body?: string }> = [];
+		globalThis.fetch = (async (input, init) => {
+			requests.push({
+				method: init?.method ?? "GET",
+				url: String(input),
+				body: init?.body as string | undefined,
+			});
+			if (init?.method === "GET") {
+				return new Response(
+					JSON.stringify({
+						blocking: [],
+						blocked_by: ["other"],
+						relates_to: [],
+						duplicate: [],
+						start_before: [],
+						start_after: [],
+						finish_before: [],
+						finish_after: [],
+					}),
+					{ status: 200 },
+				);
+			}
+			return new Response(null, { status: 204 });
+		}) as typeof fetch;
+
+		expect((await client.getRelations("p", "a")).blocked_by).toEqual(["other"]);
+		await client.createRelation("p", "a", "blocked_by", ["other"]);
+		await client.removeRelation("p", "a", "blocked_by", "other");
+
+		expect(requests[0]?.url).toEndWith("/projects/p/issues/a/relations/");
+		expect(requests[1]).toMatchObject({
+			method: "POST",
+			body: JSON.stringify({ relation_type: "blocked_by", issues: ["other"] }),
+		});
+		expect(requests[2]?.url).toEndWith("/projects/p/issues/a/relations/remove/");
+		expect(requests[2]?.body).toBe(
+			JSON.stringify({ relation_type: "blocked_by", related_issue: "other" }),
+		);
+	});
+});
+
 describe("PlaneClient.request", () => {
 	test("throws PlaneApiError on a 404 by default (no allowNotFound)", async () => {
 		stubFetch(404, { error: "nope" });

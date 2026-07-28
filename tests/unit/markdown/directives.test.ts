@@ -101,7 +101,7 @@ describe("parseYamlEffort", () => {
 	test("rejects magnitudes that lose precision or exceed the sane bound", () => {
 		// 16-digit integer STRING > 2^53: Number() would silently alter it.
 		expect(parseYamlEffort("9007199254740993")).toBeNull();
-		expect(parseYamlEffort(9007199254740993)).toBeNull();
+		expect(parseYamlEffort(Number("9007199254740993"))).toBeNull();
 		expect(parseYamlEffort(100_001)).toBeNull();
 		expect(parseYamlEffort(100_000)).toBe(100_000);
 	});

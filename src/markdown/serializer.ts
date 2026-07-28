@@ -1,4 +1,5 @@
 import type { FileFrontmatter, UserStory } from "../types.ts";
+import { normalizeRelationIdentifiers } from "./directives.ts";
 
 /**
  * Serialize an array of UserStory objects back to markdown format.
@@ -76,6 +77,18 @@ function buildYamlLines(story: UserStory): string[] {
 	}
 	if (story.parent !== null) {
 		lines.push(`parent: ${story.parent}`);
+	}
+	const blockedBy = normalizeRelationIdentifiers(story.blockedBy);
+	const blocks = normalizeRelationIdentifiers(story.blocks);
+	const relatesTo = normalizeRelationIdentifiers(story.relatesTo);
+	if (blockedBy.length > 0) {
+		lines.push(`blocked_by: [${blockedBy.join(", ")}]`);
+	}
+	if (blocks.length > 0) {
+		lines.push(`blocks: [${blocks.join(", ")}]`);
+	}
+	if (relatesTo.length > 0) {
+		lines.push(`relates_to: [${relatesTo.join(", ")}]`);
 	}
 
 	if (story.priority !== null) {

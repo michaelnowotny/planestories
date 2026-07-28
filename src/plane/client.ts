@@ -27,6 +27,19 @@ export interface PlaneClientOptions {
 	sleep?: (ms: number) => Promise<void>;
 }
 
+export type PlaneDependencyRelationType = "blocked_by" | "blocking" | "relates_to";
+
+export interface PlaneIssueRelations {
+	blocking: string[];
+	blocked_by: string[];
+	relates_to: string[];
+	duplicate: string[];
+	start_before: string[];
+	start_after: string[];
+	finish_before: string[];
+	finish_after: string[];
+}
+
 interface RequestOptions {
 	query?: Record<string, string | number | boolean | undefined>;
 	body?: unknown;
@@ -264,6 +277,39 @@ export class PlaneClient {
 		return this.request<T>(
 			"GET",
 			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/`),
+		);
+	}
+
+	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations> {
+		return this.request<PlaneIssueRelations>(
+			"GET",
+			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/relations/`),
+		);
+	}
+
+	createRelation(
+		projectId: string,
+		workItemId: string,
+		relationType: PlaneDependencyRelationType,
+		issues: string[],
+	): Promise<void> {
+		return this.request<void>(
+			"POST",
+			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/relations/`),
+			{ body: { relation_type: relationType, issues } },
+		);
+	}
+
+	removeRelation(
+		projectId: string,
+		workItemId: string,
+		relationType: PlaneDependencyRelationType,
+		relatedIssue: string,
+	): Promise<void> {
+		return this.request<void>(
+			"POST",
+			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/relations/remove/`),
+			{ body: { relation_type: relationType, related_issue: relatedIssue } },
 		);
 	}
 

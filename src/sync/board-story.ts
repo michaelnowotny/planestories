@@ -1,7 +1,7 @@
 import { buildAcceptanceCriteria, joinBody, splitBody } from "../markdown/criteria.ts";
-import { parseEffortDays } from "../markdown/directives.ts";
-import type { PlaneClient } from "../plane/client.ts";
-import type { FetchedWorkItem } from "../plane/issues.ts";
+import { normalizeRelationIdentifiers, parseEffortDays } from "../markdown/directives.ts";
+import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
+import type { FetchedWorkItem, ProjectIndex } from "../plane/issues.ts";
 import type { UserStory } from "../types.ts";
 import { hashStoryPayload } from "./story-hash.ts";
 
@@ -38,6 +38,11 @@ export function boardItemToStory(
 	parentIdentifier?: string | null,
 	/** True when this item parents at least one non-criterion child (i.e. an epic). */
 	isEpic?: boolean,
+	relations: StoryRelationIdentifiers = {
+		blockedBy: [],
+		blocks: [],
+		relatesTo: [],
+	},
 ): UserStory {
 	let body = item.description ?? "";
 
@@ -67,6 +72,9 @@ export function boardItemToStory(
 		body,
 		project: projectName,
 		parent: parentIdentifier ?? null,
+		blockedBy: normalizeRelationIdentifiers(relations.blockedBy),
+		blocks: normalizeRelationIdentifiers(relations.blocks),
+		relatesTo: normalizeRelationIdentifiers(relations.relatesTo),
 		kind: isCriterionChild(item) ? "criterion" : isEpic ? "epic" : "story",
 		comment: null,
 	};
@@ -75,4 +83,30 @@ export function boardItemToStory(
 	// default/source labels are an import-time concern the board can't know).
 	story.planeHash = hashStoryPayload(story, { syncCriteria, labels: story.labels });
 	return story;
+}
+
+export interface StoryRelationIdentifiers {
+	blockedBy: string[];
+	blocks: string[];
+	relatesTo: string[];
+}
+
+/** Map relation UUIDs from Plane back to deterministic human identifiers. */
+export function resolveStoryRelationIdentifiers(
+	relations: PlaneIssueRelations,
+	index: ProjectIndex,
+	projectIdentifier: string,
+): StoryRelationIdentifiers {
+	const identifiers = (ids: string[]): string[] =>
+		normalizeRelationIdentifiers(
+			ids.flatMap((id) => {
+				const item = index.byId.get(id);
+				return item ? [`${projectIdentifier}-${item.sequenceId}`] : [];
+			}),
+		);
+	return {
+		blockedBy: identifiers(relations.blocked_by ?? []),
+		blocks: identifiers(relations.blocking ?? []),
+		relatesTo: identifiers(relations.relates_to ?? []),
+	};
 }

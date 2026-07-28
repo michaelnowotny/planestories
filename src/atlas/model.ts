@@ -1,7 +1,7 @@
 import { splitBody } from "../markdown/criteria.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
 import type { PlaneClient } from "../plane/client.ts";
-import type { FetchedWorkItem, ProjectIndex } from "../plane/issues.ts";
+import type { ProjectIndex } from "../plane/issues.ts";
 import { criterionIndex, isCriterionChild } from "../sync/board-story.ts";
 import type { UserStory } from "../types.ts";
 import { assessQuality, type QualityAssessment } from "./quality.ts";

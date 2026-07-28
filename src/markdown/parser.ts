@@ -2,9 +2,12 @@ import matter from "gray-matter";
 import { ParseError } from "../errors.ts";
 import type { FileFrontmatter, ParsedFile, PlanePriority, StoryKind, UserStory } from "../types.ts";
 import {
+	extractDependencyDirectives,
 	hasAnyEffortMention,
 	injectEffortLine,
+	normalizeRelationIdentifiers,
 	parseEffortDays,
+	parseRelationIdentifiers,
 	parseYamlEffort,
 } from "./directives.ts";
 import { htmlToMarkdown, markdownToHtml } from "./html.ts";
@@ -138,6 +141,33 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 	// Per-story `project:` overrides the file frontmatter; falls back to it.
 	const project = extractStringOrNull(metadata.project) ?? frontmatter.project ?? null;
 	const parent = extractStringOrNull(metadata.parent);
+	const dependencyDirectives = extractDependencyDirectives(body);
+	body = dependencyDirectives.body;
+	let blockedBy = normalizeRelationIdentifiers([
+		...parseRelationIdentifiers(metadata.blocked_by),
+		...dependencyDirectives.blockedBy,
+	]);
+	let blocks = normalizeRelationIdentifiers([
+		...parseRelationIdentifiers(metadata.blocks),
+		...dependencyDirectives.blocks,
+	]);
+	let relatesTo = parseRelationIdentifiers(metadata.relates_to);
+	const ownIdentifier = planeIdentifier?.trim().toUpperCase();
+	const relationValidationErrors: string[] = [];
+	if (ownIdentifier) {
+		for (const [field, values] of [
+			["blocked_by", blockedBy],
+			["blocks", blocks],
+			["relates_to", relatesTo],
+		] as const) {
+			if (values.includes(ownIdentifier)) {
+				relationValidationErrors.push(`${ownIdentifier} cannot reference itself in ${field}`);
+			}
+		}
+		blockedBy = blockedBy.filter((identifier) => identifier !== ownIdentifier);
+		blocks = blocks.filter((identifier) => identifier !== ownIdentifier);
+		relatesTo = relatesTo.filter((identifier) => identifier !== ownIdentifier);
+	}
 	const kind = normalizeKind(metadata.kind);
 	const comment = extractStringOrNull(metadata.comment);
 
@@ -187,6 +217,10 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 		body,
 		project,
 		parent,
+		blockedBy,
+		blocks,
+		relatesTo,
+		...(relationValidationErrors.length > 0 ? { relationValidationErrors } : {}),
 		kind,
 		comment,
 	};

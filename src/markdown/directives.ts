@@ -1,7 +1,7 @@
 /**
  * Body-line "directive" conventions — human-writable, agent-parseable metadata
  * that lives as bold-label lines in a story's markdown body rather than in the
- * fenced YAML block. Today: effort.
+ * fenced YAML block. Today: effort and dependency input sugar.
  *
  *   **Effort:** 2.5 dev-days
  *
@@ -15,8 +15,6 @@
  * `splitBody` (the criteria splitter that feeds the hash and the --sync-criteria
  * parent body) considers narrative — and never inside a fenced code block.
  *
- * (The dependency directives `**Depends on:**` / `**Blocks:**` land in a later
- * change and will share this module.)
  */
 
 import { acHeadingIndex, splitBody } from "./criteria.ts";
@@ -72,6 +70,77 @@ function fenceMask(lines: string[]): boolean[] {
 		mask[i] = open !== null;
 	}
 	return mask;
+}
+
+const DEPENDENCY_LINE = /^ {0,3}(\*\*|__)(depends on|blocks):\1[ \t]*(.*?)[ \t]*$/i;
+
+/**
+ * Normalize Plane identifiers for deterministic hashing and serialization.
+ * Plane identifiers are case-insensitive in markdown input but canonical on the
+ * board, so store them uppercased, deduplicated, and sorted.
+ */
+export function normalizeRelationIdentifiers(values: Iterable<string>): string[] {
+	const identifiers = new Set<string>();
+	for (const value of values) {
+		const identifier = value.trim().toUpperCase();
+		if (identifier) {
+			identifiers.add(identifier);
+		}
+	}
+	return [...identifiers].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+/** Parse a YAML list or comma-separated dependency field. */
+export function parseRelationIdentifiers(value: unknown): string[] {
+	if (Array.isArray(value)) {
+		return normalizeRelationIdentifiers(value.map(String));
+	}
+	if (typeof value === "string" && value.trim()) {
+		return normalizeRelationIdentifiers(value.split(","));
+	}
+	return [];
+}
+
+export interface ParsedDependencyDirectives {
+	body: string;
+	blockedBy: string[];
+	blocks: string[];
+}
+
+/**
+ * Extract dependency body-line input sugar and remove recognized lines from the
+ * description. Directives are line-anchored bold labels and are ignored inside
+ * fenced code blocks.
+ */
+export function extractDependencyDirectives(body: string): ParsedDependencyDirectives {
+	const lines = body.split("\n");
+	const mask = fenceMask(lines);
+	const kept: string[] = [];
+	const blockedBy: string[] = [];
+	const blocks: string[] = [];
+	let found = false;
+
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] as string;
+		const match = mask[i] ? null : line.match(DEPENDENCY_LINE);
+		if (!match) {
+			kept.push(line);
+			continue;
+		}
+		found = true;
+		const values = parseRelationIdentifiers(match[3]);
+		if ((match[2] as string).toLowerCase() === "depends on") {
+			blockedBy.push(...values);
+		} else {
+			blocks.push(...values);
+		}
+	}
+
+	return {
+		body: found ? kept.join("\n").trim() : body,
+		blockedBy: normalizeRelationIdentifiers(blockedBy),
+		blocks: normalizeRelationIdentifiers(blocks),
+	};
 }
 
 /**

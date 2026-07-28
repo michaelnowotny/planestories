@@ -51,6 +51,14 @@ export interface UserStory {
 	project: string | null;
 	/** Human identifier of the parent work item (e.g. "DATA-12"), or null. */
 	parent: string | null;
+	/** Human identifiers of work items that block this story. */
+	blockedBy: string[];
+	/** Human identifiers of work items this story blocks. */
+	blocks: string[];
+	/** Human identifiers of work items related to this story. */
+	relatesTo: string[];
+	/** Parser-level dependency validation findings retained after normalization. */
+	relationValidationErrors?: string[];
 	/** story | criterion | epic — informational on export; read on import. */
 	kind: StoryKind | null;
 	/** Optional evidence note posted once (idempotently) on create/update. */
@@ -166,4 +174,20 @@ export interface ImportSummary {
 	labelsSkipped: string[];
 	/** Headings that look like design-doc sections, not stories (import --strict). */
 	structureWarnings: string[];
+	/** Dependency relations created during the reconciliation phase. */
+	relationsCreated: number;
+	/** Dependency relations removed during the reconciliation phase. */
+	relationsRemoved: number;
+	/** Dangling dependency references skipped during reconciliation. */
+	relationWarnings: string[];
+	/** Dependency validation/cycle errors. In dry-run these are reported, not thrown. */
+	relationErrors: string[];
+	/** Per-issue relation changes, or proposed changes in dry-run. */
+	relationChanges: RelationChange[];
+}
+
+export interface RelationChange {
+	identifier: string;
+	created: string[];
+	removed: string[];
 }

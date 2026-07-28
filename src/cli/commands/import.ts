@@ -41,6 +41,40 @@ function printStructureWarnings(summary: ImportSummary): void {
 	}
 }
 
+/** Print dependency reconciliation changes, warnings, and validation errors. */
+function printRelationSummary(summary: ImportSummary, dryRun: boolean): void {
+	if (
+		summary.relationsCreated === 0 &&
+		summary.relationsRemoved === 0 &&
+		summary.relationWarnings.length === 0 &&
+		summary.relationErrors.length === 0
+	) {
+		return;
+	}
+	const createLabel = dryRun ? "Relations would create" : "Relations created";
+	const removeLabel = dryRun ? "Relations would remove" : "Relations removed";
+	console.log(`  ${createLabel}: ${chalk.green(String(summary.relationsCreated))}`);
+	console.log(`  ${removeLabel}: ${chalk.yellow(String(summary.relationsRemoved))}`);
+	for (const change of summary.relationChanges) {
+		for (const relation of change.created) {
+			console.log(
+				chalk.green(`  + ${dryRun ? "would create " : ""}${change.identifier}: ${relation}`),
+			);
+		}
+		for (const relation of change.removed) {
+			console.log(
+				chalk.yellow(`  - ${dryRun ? "would remove " : ""}${change.identifier}: ${relation}`),
+			);
+		}
+	}
+	for (const warning of summary.relationWarnings) {
+		console.log(chalk.yellow(`  ⚠ ${warning}`));
+	}
+	for (const error of summary.relationErrors) {
+		console.log(chalk.red(`  x ${error}`));
+	}
+}
+
 /** Print a dry-run preview: what WOULD happen, plus any validation findings. */
 function printDryRun(summary: ImportSummary, checked: boolean): void {
 	const wouldCreate = summary.results.filter((r) => r.wouldAction === "create").length;
@@ -83,6 +117,7 @@ function printDryRun(summary: ImportSummary, checked: boolean): void {
 
 	printLabelSummary(summary);
 	printStructureWarnings(summary);
+	printRelationSummary(summary, true);
 }
 
 /** Print the summary after a real import. */
@@ -112,6 +147,7 @@ function printSummary(summary: ImportSummary): void {
 
 	printLabelSummary(summary);
 	printStructureWarnings(summary);
+	printRelationSummary(summary, false);
 	printBoardLinks(summary);
 }
 
@@ -231,7 +267,7 @@ export function registerImportCommand(program: Command) {
 				}
 
 				// Exit with error code if any failures (incl. failed validation in --check)
-				if (summary.failed > 0) {
+				if (summary.failed > 0 || summary.relationErrors.length > 0) {
 					process.exit(1);
 				}
 			} catch (error) {

@@ -67,7 +67,12 @@ afterEach(() => {
 
 describe("exportStories", () => {
 	test("writes resolved work items to a markdown file", async () => {
-		const { client } = makeFakeClient(dataWithItems());
+		const data = dataWithItems();
+		data.relations = {
+			"wi-1": { blocked_by: ["wi-2"], relates_to: ["wi-2"] },
+			"wi-2": { blocking: ["wi-1"], relates_to: ["wi-1"] },
+		};
+		const { client } = makeFakeClient(data);
 		const outputPath = join(tmpDir, "out.md");
 
 		const result = await exportStories(client, { config, filters: {}, outputPath });
@@ -81,6 +86,9 @@ describe("exportStories", () => {
 		expect(md).toContain("status: Backlog");
 		expect(md).toContain("assignee: jane@co.com");
 		expect(md).toContain("labels: [Feature]");
+		expect(md).toContain("blocked_by: [ENG-9]");
+		expect(md).toContain("relates_to: [ENG-9]");
+		expect(md).toContain("blocks: [ENG-8]");
 		// Body HTML is converted back to markdown, including the AC checklist.
 		expect(md).toContain("### Acceptance Criteria");
 		expect(md).toContain("- [ ] enters email");

@@ -1,4 +1,8 @@
-import type { PlaneClient } from "../../src/plane/client.ts";
+import type {
+	PlaneClient,
+	PlaneDependencyRelationType,
+	PlaneIssueRelations,
+} from "../../src/plane/client.ts";
 
 export interface FakeProject {
 	id: string;
@@ -27,6 +31,8 @@ export interface FakeData {
 	workItems?: Record<string, Array<Record<string, unknown>>>;
 	/** Existing comments keyed by work item id, returned by listWorkItemComments. */
 	comments?: Record<string, Array<Record<string, unknown>>>;
+	/** Plane relation UUID arrays keyed by work item id. */
+	relations?: Record<string, Partial<PlaneIssueRelations>>;
 	/** When true, creating a child work item (body has `parent`) throws — for testing follow-up-failure recovery. */
 	failChildCreates?: boolean;
 }
@@ -39,6 +45,18 @@ export interface FakeClient {
 	updatedItems: Array<{ projectId: string; workItemId: string; body: Record<string, unknown> }>;
 	deletedItems: Array<{ projectId: string; workItemId: string }>;
 	createdComments: Array<{ workItemId: string; body: Record<string, unknown> }>;
+	createdRelations: Array<{
+		projectId: string;
+		workItemId: string;
+		relationType: PlaneDependencyRelationType;
+		issues: string[];
+	}>;
+	removedRelations: Array<{
+		projectId: string;
+		workItemId: string;
+		relationType: PlaneDependencyRelationType;
+		relatedIssue: string;
+	}>;
 }
 
 /**
@@ -52,9 +70,45 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 	const updatedItems: FakeClient["updatedItems"] = [];
 	const deletedItems: FakeClient["deletedItems"] = [];
 	const createdComments: FakeClient["createdComments"] = [];
+	const createdRelations: FakeClient["createdRelations"] = [];
+	const removedRelations: FakeClient["removedRelations"] = [];
 	let sequence = 100;
 
 	const record = (method: string, args: unknown[]) => calls.push({ method, args });
+	const addUnique = (values: string[], value: string): void => {
+		if (!values.includes(value)) values.push(value);
+	};
+	const relationState = (workItemId: string): PlaneIssueRelations => {
+		if (!data.relations) data.relations = {};
+		const current = data.relations[workItemId] ?? {};
+		const complete: PlaneIssueRelations = {
+			blocking: [...new Set(current.blocking ?? [])],
+			blocked_by: [...new Set(current.blocked_by ?? [])],
+			relates_to: [...new Set(current.relates_to ?? [])],
+			duplicate: [...new Set(current.duplicate ?? [])],
+			start_before: [...new Set(current.start_before ?? [])],
+			start_after: [...new Set(current.start_after ?? [])],
+			finish_before: [...new Set(current.finish_before ?? [])],
+			finish_after: [...new Set(current.finish_after ?? [])],
+		};
+		data.relations[workItemId] = complete;
+		return complete;
+	};
+
+	// Plane always returns dependency and relates_to relations mirrored on the
+	// opposite issue. Normalize partial test seeds to that same reachable state.
+	for (const workItemId of Object.keys(data.relations ?? {})) {
+		const source = relationState(workItemId);
+		for (const blocked of source.blocking) {
+			addUnique(relationState(blocked).blocked_by, workItemId);
+		}
+		for (const blocker of source.blocked_by) {
+			addUnique(relationState(blocker).blocking, workItemId);
+		}
+		for (const related of source.relates_to) {
+			addUnique(relationState(related).relates_to, workItemId);
+		}
+	}
 
 	const impl = {
 		workItemWebUrl(projectId: string, workItemId: string): string {
@@ -108,7 +162,12 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			}
 			createdItems.push({ projectId, body });
 			sequence += 1;
-			return { id: `wi-${sequence}`, sequence_id: sequence } as unknown as T;
+			const item = { id: `wi-${sequence}`, sequence_id: sequence, ...body };
+			if (!data.workItems) data.workItems = {};
+			const projectItems = data.workItems[projectId] ?? [];
+			projectItems.push(item);
+			data.workItems[projectId] = projectItems;
+			return item as unknown as T;
 		},
 
 		async updateWorkItem<T>(
@@ -121,7 +180,12 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 				throw new Error("400 Bad Request: Work item title cannot exceed 255 characters");
 			}
 			updatedItems.push({ projectId, workItemId, body });
-			return { id: workItemId, sequence_id: 7 } as unknown as T;
+			const existing = data.workItems?.[projectId]?.find((item) => item.id === workItemId);
+			if (existing) Object.assign(existing, body);
+			return {
+				id: workItemId,
+				sequence_id: (existing?.sequence_id as number | undefined) ?? 7,
+			} as unknown as T;
 		},
 
 		async listWorkItems<T>(
@@ -179,6 +243,71 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			const found = items.find((i) => i.id === workItemId);
 			return (found ?? { id: workItemId, labels: [] }) as unknown as T;
 		},
+
+		async getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations> {
+			record("getRelations", [projectId, workItemId]);
+			const state = relationState(workItemId);
+			return {
+				blocking: [...state.blocking],
+				blocked_by: [...state.blocked_by],
+				relates_to: [...state.relates_to],
+				duplicate: [...state.duplicate],
+				start_before: [...state.start_before],
+				start_after: [...state.start_after],
+				finish_before: [...state.finish_before],
+				finish_after: [...state.finish_after],
+			};
+		},
+
+		async createRelation(
+			projectId: string,
+			workItemId: string,
+			relationType: PlaneDependencyRelationType,
+			issues: string[],
+		): Promise<void> {
+			record("createRelation", [projectId, workItemId, relationType, issues]);
+			createdRelations.push({ projectId, workItemId, relationType, issues: [...issues] });
+			for (const related of issues) {
+				const source = relationState(workItemId);
+				const target = relationState(related);
+				if (relationType === "blocked_by") {
+					addUnique(source.blocked_by, related);
+					addUnique(target.blocking, workItemId);
+				} else if (relationType === "blocking") {
+					addUnique(source.blocking, related);
+					addUnique(target.blocked_by, workItemId);
+				} else {
+					addUnique(source.relates_to, related);
+					addUnique(target.relates_to, workItemId);
+				}
+			}
+		},
+
+		async removeRelation(
+			projectId: string,
+			workItemId: string,
+			relationType: PlaneDependencyRelationType,
+			relatedIssue: string,
+		): Promise<void> {
+			record("removeRelation", [projectId, workItemId, relationType, relatedIssue]);
+			removedRelations.push({ projectId, workItemId, relationType, relatedIssue });
+			const source = relationState(workItemId);
+			const target = relationState(relatedIssue);
+			const remove = (values: string[], value: string): void => {
+				const index = values.indexOf(value);
+				if (index !== -1) values.splice(index, 1);
+			};
+			if (relationType === "blocked_by") {
+				remove(source.blocked_by, relatedIssue);
+				remove(target.blocking, workItemId);
+			} else if (relationType === "blocking") {
+				remove(source.blocking, relatedIssue);
+				remove(target.blocked_by, workItemId);
+			} else {
+				remove(source.relates_to, relatedIssue);
+				remove(target.relates_to, workItemId);
+			}
+		},
 	};
 
 	return {
@@ -189,5 +318,7 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 		updatedItems,
 		deletedItems,
 		createdComments,
+		createdRelations,
+		removedRelations,
 	};
 }

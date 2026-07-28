@@ -62,6 +62,9 @@ Fenced YAML block (` ```yaml ` ... ` ``` `) immediately after the H2 heading. Al
 | `assignee`         | string   | Email or display name (resolved to a project member).                 |
 | `status`           | string   | State name: `Backlog`, `Todo`, `In Progress`, `Done`, etc. (resolved within the project) |
 | `parent`           | string   | Nest under an existing work item by identifier (e.g. `DATA-12`) — e.g. an epic in another file. |
+| `blocked_by`       | string[] | Work item identifiers that block this story (for example, `[ENG-12, ENG-19]`). |
+| `blocks`           | string[] | Work item identifiers that this story blocks. |
+| `relates_to`       | string[] | Work item identifiers related to this story (symmetric, with no dependency direction). |
 | `kind`             | string   | `story` / `criterion` / `epic`. Informational; emitted by `export`, read on import. |
 | `comment`          | string   | Optional evidence note posted once (idempotently) on create/update or a status change. |
 
@@ -91,6 +94,8 @@ human-readable in the description and first-class to planestories:
 | Body line | Meaning |
 |---|---|
 | `**Effort:** 2.5 dev-days` | Developer-day effort (decimals allowed). This line is the source of truth and lives in the description, so it round-trips faithfully (Plane's `point` field is integer-only — verified — so it cannot carry `2.5`). |
+| `**Depends on:** ENG-12, ENG-19` | Input sugar for `blocked_by: [ENG-12, ENG-19]`. The line is removed from the stored description. |
+| `**Blocks:** ENG-20` | Input sugar for `blocks: [ENG-20]`. The line is removed from the stored description. |
 
 Put the `**Effort:**` line in the narrative (before `### Acceptance Criteria`) so it stays on the parent
 work item under `--sync-criteria`. You may instead set `effort_days:` in the YAML block; when there is no
@@ -166,3 +171,19 @@ User should be able to reset their password via email link.
 | Present          | Updates the existing work item by UUID                              |
 
 After import, `plane_id`, `plane_identifier`, and `plane_url` are written back into the file. On create, planestories also stamps the work item with `external_id` (derived from the title) and `external_source: "planestories"` so re-imports are idempotent.
+
+## Relation reconciliation
+
+Relation fields are additive on a subset import. To remove a dependency or `relates_to` link, re-import
+both endpoints—normally by importing the full project story set—with the relation absent from the
+files. A single-file import will not remove relations because declarations on the omitted endpoint are
+unknown.
+
+Planestories also never removes a relation when either endpoint is outside the current import or either
+endpoint is not a planestories-managed item. Those relations are intentionally one-way from
+planestories' perspective: files may add them, but removal must be done in Plane or by importing both
+managed endpoints.
+
+Cycle detection fetches the imported stories and their directly referenced targets. This catches a
+cycle closed through one cross-file target, but a cycle that traverses multiple consecutive
+non-imported items may be left to Plane's own cycle guard.

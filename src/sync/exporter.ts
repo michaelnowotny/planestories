@@ -6,7 +6,12 @@ import { filterWorkItems, type WorkItemFilterInput } from "../plane/filters.ts";
 import { type FetchedWorkItem, fetchProjectIndex } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ExportFilters, FileFrontmatter, ResolvedConfig } from "../types.ts";
-import { boardItemToStory, isCriterionChild } from "./board-story.ts";
+import { mapWithConcurrency } from "../utils/concurrency.ts";
+import {
+	boardItemToStory,
+	isCriterionChild,
+	resolveStoryRelationIdentifiers,
+} from "./board-story.ts";
 
 export interface ExportOptions {
 	config: ResolvedConfig;
@@ -111,8 +116,9 @@ export async function exportStories(
 	const isEpic = (item: FetchedWorkItem): boolean =>
 		(index.childrenByParent.get(item.id) ?? []).some((c) => !isCriterionChild(c));
 
-	const stories = filtered.map((item) =>
-		boardItemToStory(
+	const stories = await mapWithConcurrency(filtered, 6, async (item) => {
+		const relations = await client.getRelations(project.id, item.id);
+		return boardItemToStory(
 			client,
 			item,
 			project.id,
@@ -122,8 +128,9 @@ export async function exportStories(
 			options.syncCriteria ? criterionChildren.get(item.id) : undefined,
 			parentIdentifier(item),
 			isEpic(item),
-		),
-	);
+			resolveStoryRelationIdentifiers(relations, index, project.identifier),
+		);
+	});
 
 	const frontmatter: FileFrontmatter = { project: projectName };
 

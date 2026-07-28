@@ -1,4 +1,5 @@
 import { splitBody } from "../markdown/criteria.ts";
+import { normalizeRelationIdentifiers } from "../markdown/directives.ts";
 import { markdownToHtml } from "../markdown/html.ts";
 import type { UserStory } from "../types.ts";
 import { payloadHash } from "./content-hash.ts";
@@ -36,5 +37,8 @@ export function hashStoryPayload(story: UserStory, options: StoryHashOptions): s
 		syncCriteria: options.syncCriteria,
 		criteria: criteria.map((c) => ({ text: c.text, checked: c.checked })),
 		parent: story.parent,
+		blockedBy: normalizeRelationIdentifiers(story.blockedBy),
+		blocks: normalizeRelationIdentifiers(story.blocks),
+		relatesTo: normalizeRelationIdentifiers(story.relatesTo),
 	});
 }

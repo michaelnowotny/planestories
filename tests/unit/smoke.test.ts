@@ -23,6 +23,9 @@ describe("smoke test", () => {
 			body: "Test body",
 			project: null,
 			parent: null,
+			blockedBy: [],
+			blocks: [],
+			relatesTo: [],
 			kind: null,
 			comment: null,
 		};

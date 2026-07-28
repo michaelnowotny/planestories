@@ -50,11 +50,16 @@ labels: [Feature]              # skipped with a warning if absent (see --create-
 estimate: 3                    # story points -> Plane's integer `point`
 assignee: someone@example.com  # resolved by email to a project member
 status: Backlog                # must match a state name in the project
+blocked_by: [PROJ-12]          # these identifiers block this story
+blocks: [PROJ-20]              # this story blocks these identifiers
+relates_to: [PROJ-30]          # symmetric, non-directional links
 ```
 
 <description in markdown — rendered to HTML in Plane>
 
 **Effort:** 2.5 dev-days       # developer-days (decimals ok); body line is source of truth
+**Depends on:** PROJ-12        # input sugar for blocked_by
+**Blocks:** PROJ-20            # input sugar for blocks
 
 ### Acceptance Criteria
 - [ ] concrete, testable criterion
@@ -66,6 +71,15 @@ Write `**Effort:** N.n dev-days` as a body line (before the criteria); it lives 
 round-trips faithfully. `effort_days:` in the YAML block is accepted as an alternative input — planestories
 materializes the body line and `export` re-emits it. `estimate` (story points) is kept separate and
 untouched.
+
+**Dependency relations.** Use `blocked_by`, `blocks`, and `relates_to` in story YAML. The
+`**Depends on:** PROJ-12, PROJ-13` and `**Blocks:** PROJ-20` body lines are equivalent input sugar for
+the two directional fields (and are removed from the description during parsing). To remove a relation,
+re-import both endpoints—normally the full project story set—with the relation deleted from the files.
+A single-file import is add-only for relations because the omitted endpoint's declarations are unknown.
+Planestories will not remove a relation to a non-planestories item or any relation whose endpoint is
+outside the current import; those links are one-way and must be removed in Plane or by importing both
+managed endpoints.
 
 A single file can hold many stories (each `## ` heading is one). Frontmatter sets the
 default project; per-story overrides are not needed for the project in v1. Start from
@@ -207,6 +221,9 @@ project.
   on create/update/status-change (idempotent — a re-run won't duplicate it). Use `groom` after a
   batch of work completes to close the now-orphaned acceptance-criteria sub-items, and `doctor`
   in CI to fail a build when board rot exists.
+- Dependency-cycle checks inspect imported stories plus each directly referenced cross-file target.
+  A cycle through multiple consecutive non-imported items may not be visible to planestories; Plane's
+  own relation guard remains the final backstop.
 
 ## Optional: you're doing a shakedown / test run
 
