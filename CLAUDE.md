@@ -43,8 +43,22 @@ owns **state/completion**. Import pushes content file→board and only when it a
 - `src/markdown/` — `parser.ts`/`serializer.ts` (YAML keys incl. `plane_hash`), `writer.ts`
   (`writeBackIds`/`clearWriteBack`), `criteria.ts` (`splitBody`/checklist), `html.ts`
   (`markdownToHtml`/`htmlToMarkdown`).
-- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`groom`/`doctor`/`atlas`.
+- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`groom`/`doctor`/`atlas`/`lint`.
   `src/types.ts` is the type home.
+- `src/markdown/directives.ts` — body-line "directive" conventions (`**Effort:**`, `**Depends on:**`,
+  `**Blocks:**`). Effort detection runs on the CANONICAL form `htmlToMarkdown(markdownToHtml(splitBody(
+  body).narrative))` so `marked` (a real CommonMark engine) owns all code/heading parsing and detection
+  can't diverge from the hashed narrative. `parseYamlEffort` / `injectEffortLine` / dependency-directive
+  parsing live here.
+- `src/sync/relations.ts` — the dependency **reconciliation engine** (a GLOBAL post-create phase over a
+  FRESH `fetchProjectIndex`, bounded to concurrency 6). Canonical block-edge keys dedup Plane's auto-mirror;
+  removal only when BOTH endpoints are in the import batch AND `external_source=planestories`; SELECTIVE
+  cycle handling (skip only cyclic edges, sync the rest); withhold `plane_hash` for skipped-edge stories.
+  `src/plane/client.ts` gains `getRelations`/`createRelation`/`removeRelation`.
+- `src/lint/` — `rules.ts` (10 offline mechanical rules) + `linter.ts` (parse fileset → run rules →
+  exit code). PARENT-related rules resolve identifiers EXACTLY (matches import's exact parent lookup);
+  DEPENDENCY rules resolve NORMALIZED (matches relations' case-insensitive resolution). Reuses the shared
+  raw `classifyFileEpics` from `atlas/model.ts`.
 - `src/atlas/` — the **Project Atlas** visualizer. `model.ts` builds an `AtlasGraph` from either a
   parsed file (`buildAtlasFromFile`) or the shared `fetchProjectIndex` (`buildAtlasFromBoard` — folds
   `kind: criterion` children into their parent story's AC ring, treats any item that parents a
@@ -86,8 +100,23 @@ details panel, and a light spec-quality overlay. Renders from a file (offline, n
 board. Inspired by Ijonas Kisselbach's Project Atlas in linearstories, rethought for Plane as a
 zero-dependency artifact. Ref: `docs/ATLAS.md`; code in `src/atlas/` + `src/cli/commands/atlas.ts`.
 
-Design + locked decisions: `docs/plan-production-feedback-2026-07.md`; state/how-to:
-`docs/handoff-2026-07-17.md`; full CLI reference: `docs/USING_WITH_CLAUDE.md`.
+**Tier 1 of the data-platform team's improvement brief (2026-07-28, all merged to `main`):**
+- **Effort** (`85a83ae`) — decimal developer-day effort as a `**Effort:** N.n dev-days` body line
+  (source of truth; round-trips via the description). `estimate`/`point` untouched (Plane `point` is
+  integer-only — verified). `effort_days:` YAML is sugar.
+- **Relations** (`c1ad503`) — `blocked_by`/`blocks`/`relates_to` (+ `**Depends on:**`/`**Blocks:**`
+  sugar) synced to real Plane relations. See `src/sync/relations.ts` reconciliation rules above.
+- **Lint** (`44108ad`) — `planestories lint <files…>`, offline CI gate, 10 rules, `--warn-only`.
+The load-bearing gotchas, alternatives-not-chosen, and Plane-API findings are in
+**`docs/DESIGN_DECISIONS_tier1.md`** — READ IT before touching effort/relations/lint. Verified Plane-API
+facts: `point` integer-only; integer `point` persists with no estimate system; relations auto-mirror;
+**Plane silently drops cycle-creating relations** (server-side backstop). Known limits:
+`docs/KNOWN_LIMITATIONS.md`.
+
+Design + locked decisions: `docs/DESIGN_DECISIONS_tier1.md` (Tier 1) +
+`docs/plan-production-feedback-2026-07.md` (v2 slices); NEXT-SESSION handoff:
+`docs/handoff-2026-07-28.md`; state/how-to: `docs/handoff-2026-07-17.md`; full CLI reference:
+`docs/USING_WITH_CLAUDE.md`.
 
 ---
 
