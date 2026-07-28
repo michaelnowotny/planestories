@@ -87,3 +87,12 @@ Two stories with the identical `## Title` in one file would collide; keep titles
 
 Cancelled criterion sub-items are treated as **not** completed (only `stateGroup === "completed"` ticks a
 box) — a cancelled acceptance criterion is not a passed one.
+
+## Checkbox parsing (incl. `groom --write-back`) assumes LF line endings
+
+`CHECKBOX_LINE` (the single source of truth for a criterion checkbox) anchors on `$`, and lines are
+split on `\n`, so a CRLF (`\r\n`) file leaves a trailing `\r` that prevents the match. A CRLF
+`.stories.md` therefore parses zero criteria — `splitBody`, `--sync-criteria`, and `groom --write-back`
+all silently see no checkboxes (no error, no change). This is pre-existing behavior across the parser,
+not specific to write-back. Author `.stories.md` files with LF endings (the norm on this Linux/Bun
+toolchain); if you must support CRLF, normalize `\r\n` → `\n` before parsing.

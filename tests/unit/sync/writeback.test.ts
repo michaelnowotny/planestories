@@ -148,6 +148,31 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 		expect(changes).toHaveLength(1);
 	});
 
+	test("ignores an acceptance-criteria heading BEFORE the yaml fence (position aligns with the parser)", () => {
+		// A decoy AC heading + box before the ```yaml``` block must NOT be counted —
+		// the importer numbers ::ac<n> from the body AFTER the fence, so write-back
+		// must too. Position 0 is the post-fence "real" criterion.
+		const content = [
+			"## S",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] decoy before yaml",
+			"",
+			"```yaml",
+			"plane_id: x",
+			"```",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] real",
+			"",
+		].join("\n");
+		const { content: out, changes } = applyCheckboxStates(content, states({ S: { 0: true } }));
+		expect(out).toContain("- [ ] decoy before yaml"); // untouched
+		expect(out).toContain("- [x] real");
+		expect(changes).toHaveLength(1);
+		expect(changes[0]?.text).toBe("real");
+	});
+
 	test("stops counting criteria at the next heading after AC", () => {
 		const content = [
 			"## S",
@@ -298,6 +323,49 @@ describe("reverseSyncCriteria (board→file wrapper)", () => {
 
 		expect(report.totalChanges).toBe(0);
 		expect(report.files[0]?.missingOnBoard).toContain("DATA-12");
+	});
+
+	test("a blank plane_id counts as unlinked, not a stale link", async () => {
+		const filePath = join(tmpDir, "s.stories.md");
+		const content = storyFile().replace("plane_id: wi-parent", 'plane_id: "   "');
+		writeFileSync(filePath, content);
+		const { client } = makeFakeClient(boardData());
+
+		const report = await reverseSyncCriteria(client, { config, files: [filePath], apply: true });
+
+		expect(report.files[0]?.linkedStories).toBe(0);
+		expect(report.files[0]?.unlinkedStories).toBe(1);
+		expect(report.files[0]?.missingOnBoard).toHaveLength(0);
+	});
+
+	test("a mid-batch error leaves NO partial writes (two-pass)", async () => {
+		const good = join(tmpDir, "a.stories.md");
+		const goodBefore = storyFile(); // frontmatter project: Data Platform, needs a tick
+		writeFileSync(good, goodBefore);
+		// Second file: a linked story with NO project and NO default -> throws in pass 1.
+		const bad = join(tmpDir, "b.stories.md");
+		writeFileSync(
+			bad,
+			[
+				"## Orphan",
+				"",
+				"```yaml",
+				"plane_id: wi-parent",
+				"```",
+				"",
+				"### Acceptance Criteria",
+				"- [ ] x",
+				"",
+			].join("\n"),
+		);
+		const noDefault: ResolvedConfig = { ...config, defaultProject: null };
+		const { client } = makeFakeClient(boardData());
+
+		await expect(
+			reverseSyncCriteria(client, { config: noDefault, files: [good, bad], apply: true }),
+		).rejects.toBeTruthy();
+		// The good file must be untouched despite having pending changes.
+		expect(readFileSync(good, "utf8")).toBe(goodBefore);
 	});
 
 	test("an unlinked story (no plane_id) is skipped and counted", async () => {

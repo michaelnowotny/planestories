@@ -69,10 +69,15 @@ export function applyCheckboxStates(
 		}
 
 		const storyLines = lines.slice(start, end);
-		const acIdx = acHeadingIndex(storyLines);
-		if (acIdx === -1) {
+		// Start the AC search AFTER the story's ```yaml``` block, exactly like the
+		// parser extracts the body — otherwise an AC heading placed before the yaml
+		// fence would be counted here but not by the importer, misaligning ::ac<n>.
+		const contentStart = contentStartOffset(storyLines);
+		const acRel = acHeadingIndex(storyLines.slice(contentStart));
+		if (acRel === -1) {
 			continue;
 		}
+		const acIdx = contentStart + acRel;
 
 		let pos = 0;
 		for (let j = acIdx + 1; j < storyLines.length; j++) {
@@ -107,6 +112,26 @@ export function applyCheckboxStates(
 	}
 
 	return { content: lines.join("\n"), changes };
+}
+
+/**
+ * Offset within a story's lines (whose [0] is the `## ` heading) at which the
+ * body content begins — i.e. after the first ```yaml ... ``` block, mirroring how
+ * the parser slices the body. Returns 1 (just after the H2) when there is no yaml
+ * block, and the whole length when a yaml fence is opened but never closed.
+ */
+function contentStartOffset(storyLines: string[]): number {
+	for (let k = 1; k < storyLines.length; k++) {
+		if ((storyLines[k] as string).trim() === "```yaml") {
+			for (let m = k + 1; m < storyLines.length; m++) {
+				if ((storyLines[m] as string).trim() === "```") {
+					return m + 1;
+				}
+			}
+			return storyLines.length; // unclosed fence — no usable body
+		}
+	}
+	return 1;
 }
 
 export interface WriteBackOptions {
@@ -165,7 +190,19 @@ export async function reverseSyncCriteria(
 		return index;
 	};
 
-	const results: WriteBackFileResult[] = [];
+	// Pass 1: read every file and compute its updated content, WITHOUT writing.
+	// A throw here (e.g. a linked story with no resolvable project) aborts before
+	// any file is touched, so a multi-file batch never leaves partial writes.
+	interface Pending {
+		filePath: string;
+		original: string;
+		updated: string;
+		changes: CheckboxChange[];
+		linkedStories: number;
+		unlinkedStories: number;
+		missingOnBoard: string[];
+	}
+	const pending: Pending[] = [];
 
 	for (const filePath of options.files) {
 		const original = await Bun.file(filePath).text();
@@ -181,10 +218,11 @@ export async function reverseSyncCriteria(
 			if (story.kind === "criterion") {
 				continue; // criterion sub-items aren't parents of criteria
 			}
-			if (!story.planeId) {
-				unlinkedStories++;
+			if (!story.planeId?.trim()) {
+				unlinkedStories++; // no board link yet (blank/absent plane_id)
 				continue;
 			}
+			const planeId = story.planeId.trim();
 			linkedStories++;
 			identifiersByTitle.set(story.title, story.planeIdentifier ?? null);
 
@@ -195,13 +233,13 @@ export async function reverseSyncCriteria(
 				);
 			}
 			const index = await getIndex(projectName);
-			const parent = index.byId.get(story.planeId);
+			const parent = index.byId.get(planeId);
 			if (!parent) {
 				missingOnBoard.push(story.planeIdentifier ?? story.title);
 				continue;
 			}
 
-			const children = (index.childrenByParent.get(story.planeId) ?? []).filter(
+			const children = (index.childrenByParent.get(planeId) ?? []).filter(
 				(child: FetchedWorkItem) =>
 					isCriterionChild(child) && child.externalSource === EXTERNAL_SOURCE,
 			);
@@ -221,20 +259,32 @@ export async function reverseSyncCriteria(
 			statesByTitle,
 			identifiersByTitle,
 		);
-
-		let written = false;
-		if (options.apply && changes.length > 0 && updated !== original) {
-			await Bun.write(filePath, updated);
-			written = true;
-		}
-
-		results.push({
+		pending.push({
 			filePath,
+			original,
+			updated,
 			changes,
-			written,
 			linkedStories,
 			unlinkedStories,
 			missingOnBoard,
+		});
+	}
+
+	// Pass 2: write the files that changed (only when applying).
+	const results: WriteBackFileResult[] = [];
+	for (const p of pending) {
+		let written = false;
+		if (options.apply && p.changes.length > 0 && p.updated !== p.original) {
+			await Bun.write(p.filePath, p.updated);
+			written = true;
+		}
+		results.push({
+			filePath: p.filePath,
+			changes: p.changes,
+			written,
+			linkedStories: p.linkedStories,
+			unlinkedStories: p.unlinkedStories,
+			missingOnBoard: p.missingOnBoard,
 		});
 	}
 

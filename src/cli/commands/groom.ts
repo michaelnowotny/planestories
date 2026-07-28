@@ -79,7 +79,8 @@ function printWriteBack(report: WriteBackReport): void {
 		),
 	);
 
-	if (report.totalChanges === 0) {
+	const anyMissing = report.files.some((f) => f.missingOnBoard.length > 0);
+	if (report.totalChanges === 0 && !anyMissing) {
 		console.log(chalk.gray("  All checkboxes already match the board."));
 	}
 
@@ -92,7 +93,8 @@ function printWriteBack(report: WriteBackReport): void {
 		);
 		for (const change of file.changes) {
 			const arrow = `[${change.from ? "x" : " "}] → [${change.to ? "x" : " "}]`;
-			const verb = report.applied ? "ticked" : "would tick";
+			const dir = change.to ? "tick" : "untick";
+			const verb = report.applied ? `${dir}ed` : `would ${dir}`;
 			console.log(
 				`    ${report.applied ? chalk.green(arrow) : chalk.yellow(arrow)} ${chalk.dim(
 					`${change.identifier ?? change.title} #${change.position}`,
@@ -115,7 +117,7 @@ export function registerGroomCommand(program: Command) {
 	program
 		.command("groom")
 		.description(
-			"Reconcile a project: close orphaned criterion sub-items; report duplicate-title and parentless items. With --write-back, reverse-sync criterion done-state board→file.",
+			"Reconcile a project: close orphaned criterion sub-items; report duplicate-title and parentless items. With --write-back <files>, INSTEAD reverse-sync criterion done-state board→file (no board writes).",
 		)
 		.option("-c, --config <path>", "Config file path")
 		.option("--context <name>", "Select a named context from multi-context config")
@@ -141,20 +143,11 @@ export function registerGroomCommand(program: Command) {
 
 				const writeBackFiles: string[] = options.writeBack ?? [];
 
-				// Board-side reconcile (close orphaned sub-items, report duplicates/parentless).
-				// Skipped only when the caller asked ONLY for write-back and no project is
-				// resolvable — so `groom --write-back f.md` works from file frontmatter alone.
-				const projectResolvable = Boolean(options.project ?? config.defaultProject);
-				if (projectResolvable || writeBackFiles.length === 0) {
-					const report = await groom(client, {
-						config,
-						project: options.project,
-						apply: options.yes,
-					});
-					printReport(report, Boolean(options.yes));
-				}
-
-				// File-side reverse-sync (the other half of the reconcile loop).
+				// --write-back is a FOCUSED, file-only mode: it reverse-syncs checkbox
+				// state board→file and makes NO board writes. It deliberately does NOT
+				// also run the board-side orphan-close — otherwise `groom --write-back
+				// f.md --yes` with a defaultProject set would silently close sub-items on
+				// that default board. Run plain `groom` for the board-side reconcile.
 				if (writeBackFiles.length > 0) {
 					const writeBack = await reverseSyncCriteria(client, {
 						config,
@@ -163,6 +156,13 @@ export function registerGroomCommand(program: Command) {
 						apply: options.yes,
 					});
 					printWriteBack(writeBack);
+				} else {
+					const report = await groom(client, {
+						config,
+						project: options.project,
+						apply: options.yes,
+					});
+					printReport(report, Boolean(options.yes));
 				}
 			} catch (error) {
 				handleError(error);
