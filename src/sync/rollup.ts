@@ -97,6 +97,11 @@ export async function rollupEpic(
 	}
 
 	const descendants = collectDescendants(target, index);
+	// A "leaf" is a non-epic descendant. Structural `isEpic` (parents a non-criterion
+	// child) is the SAME classifier used by export (`kind`), packet, and atlas — so a
+	// CHILDLESS descendant is a leaf story here too, consistently. A childless item is
+	// not distinguishable from a story, and an "empty sub-epic" is a transient/malformed
+	// state the rest of the system already treats as a story.
 	const leaves = descendants.filter((d) => !isEpic(d, index));
 	const subEpics = descendants.length - leaves.length;
 
@@ -108,7 +113,10 @@ export async function rollupEpic(
 	const completed = leaves.filter((l) => l.stateGroup === COMPLETED_GROUP).length;
 	const cancelled = leaves.filter((l) => l.stateGroup === CANCELLED_GROUP).length;
 	const active = leaves.length - cancelled;
-	const completionPct = active > 0 ? (completed / active) * 100 : null;
+	// Integer arithmetic BEFORE the ratio so an exact percentage stays exact — computing
+	// `(completed / active) * 100` first can yield e.g. 28.999999999999996 for 29/100,
+	// which would floor to 28 in the display. `(completed * 100) / active` is exact there.
+	const completionPct = active > 0 ? (completed * 100) / active : null;
 
 	const efforts = leaves.map((l) => parseEffortDays(l.description ?? ""));
 	// Round off IEEE noise so the structured field matches the displayed value

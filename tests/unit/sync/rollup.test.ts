@@ -159,6 +159,26 @@ describe("rollupEpic", () => {
 		expect(rollup.blocking.map((c) => c.identifier)).toEqual(["DATA-4"]); // D blocks
 	});
 
+	test("an exact percentage is not under-reported by float error (29/100 = 29%)", async () => {
+		// (29 / 100) * 100 === 28.999999999999996 -> would floor to 28. Integer-first math fixes it.
+		const items: Array<Record<string, unknown>> = [
+			{ id: "e", sequence_id: 1, name: "Epic", state: started },
+		];
+		for (let i = 0; i < 100; i++) {
+			items.push({
+				id: `s${i}`,
+				sequence_id: 100 + i,
+				name: `S${i}`,
+				parent: "e",
+				state: i < 29 ? done : backlog,
+			});
+		}
+		const { client } = makeFakeClient(board(items));
+		const { rollup, text } = await rollupEpic(client, { config, identifier: "DATA-1" });
+		expect(rollup.completionPct).toBe(29);
+		expect(text).toContain("29% complete");
+	});
+
 	test("a story blocked only by a DONE item is not listed as blocked (active filter)", async () => {
 		const { client } = makeFakeClient({
 			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
