@@ -69,13 +69,18 @@ owns **state/completion**. Import pushes content file→board and only when it a
   exit code). PARENT-related rules resolve identifiers EXACTLY (matches import's exact parent lookup);
   DEPENDENCY rules resolve NORMALIZED (matches relations' case-insensitive resolution). Reuses the shared
   raw `classifyFileEpics` from `atlas/model.ts`.
-- `src/atlas/` — the **Project Atlas** visualizer. `model.ts` builds an `AtlasGraph` from either a
-  parsed file (`buildAtlasFromFile`) or the shared `fetchProjectIndex` (`buildAtlasFromBoard` — folds
-  `kind: criterion` children into their parent story's AC ring, treats any item that parents a
-  non-criterion child as an epic). `quality.ts` = the light heuristic spec-quality overlay
-  (`assessQuality`, stories only). `render.ts` = `renderAtlasHtml(graph)` → one self-contained HTML
-  string (inlined CSS/JS + embedded JSON with `</script>` unicode-escaped; hand-rolled tidy-tree
-  layout, no D3/CDN). Node ids are reset per build so output is diff-stable.
+- `src/atlas/` — the **Project Atlas** visualizer (FORCE-DIRECTED dependency graph). `model.ts` builds an
+  `AtlasGraph` (nodes + dependency `edges`) from either a parsed file (`buildAtlasFromFile`) or the shared
+  `fetchProjectIndex` (`buildAtlasFromBoard(…, relationsById?)` — folds `kind: criterion` children into
+  their parent's AC ring; any item parenting a non-criterion child is an epic). Edges: blocked_by/blocks →
+  directed `"blocks"`, relates_to → undirected `"relates"`, deduped (mirror + unordered pair), self/dangling
+  dropped. `quality.ts` = the light spec-quality overlay. `render.ts` = `renderAtlasHtml(graph)` → one
+  self-contained HTML (inlined CSS/JS + embedded JSON with `</script>` unicode-escaped; NO D3/CDN) running a
+  hand-rolled `<canvas>` force sim (repulsion + parent/dependency springs + gravity, alpha cooling; a
+  ResizeObserver keeps the bitmap matched to its box). ALL nodes shown; drag/pan/zoom/hover/click-details/
+  filters. The `atlas` command fetches per-item relations (bounded, per-item failures DROP that item's edges
+  + warn, `--no-dependencies` skips). Node ids reset per build (diff-stable). Layout/behaviour verified on
+  the live 665-item DATA board via a headless screenshot.
 
 ## Identity / idempotency (load-bearing)
 
@@ -137,9 +142,13 @@ zero-dependency artifact. Ref: `docs/ATLAS.md`; code in `src/atlas/` + `src/cli/
   non-secret conventions file (DISTINCT from the JSON credentials/context config), discovered upward from
   cwd. v1: `lint.strictness` (warn|error default mode) + `lint.disable` (rule ids to skip). `lint` reads
   it; `--warn-only` always wins; disabled rules are printed (never silently dropped); a present-but-invalid
-  file fails loudly. Consumed in `src/lint/linter.ts` (`disabledRules`).
-- Still pending: structured evidence log; then the **atlas dependency-graph overhaul** — user decisions
-  CONFIRMED: force-directed/organic layout, show ALL nodes (see `docs/handoff-2026-07-28.md`).
+  file fails loudly (parsed with the `yaml` package). Consumed in `src/lint/linter.ts` (`disabledRules`).
+
+**Atlas force-directed overhaul (DONE, merged):** see the `src/atlas/` architecture note above — the
+headline visual feature (user-chosen force-directed layout, all nodes shown), both engines APPROVE.
+
+Remaining brief item: **structured evidence log** (Tier 3 — append-only idempotent evidence comments on a
+status change; build on the marker-idempotent `ensureComment`).
 
 The load-bearing gotchas, alternatives-not-chosen, and Plane-API findings are in
 **`docs/DESIGN_DECISIONS_tier1.md`** — READ IT before touching effort/relations/lint. Verified Plane-API
