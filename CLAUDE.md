@@ -77,10 +77,15 @@ owns **state/completion**. Import pushes content file→board and only when it a
   dropped. `quality.ts` = the light spec-quality overlay. `render.ts` = `renderAtlasHtml(graph)` → one
   self-contained HTML (inlined CSS/JS + embedded JSON with `</script>` unicode-escaped; NO D3/CDN) running a
   hand-rolled `<canvas>` force sim (repulsion + parent/dependency springs + gravity, alpha cooling; a
-  ResizeObserver keeps the bitmap matched to its box). ALL nodes shown; drag/pan/zoom/hover/click-details/
-  filters. The `atlas` command fetches per-item relations (bounded, per-item failures DROP that item's edges
-  + warn, `--no-dependencies` skips). Node ids reset per build (diff-stable). Layout/behaviour verified on
-  the live 665-item DATA board via a headless screenshot.
+  ResizeObserver keeps the bitmap matched to its box). Polished visuals: soft **convex-hull cluster blobs**
+  per epic in a stable golden-angle hue (so a big board reads as grouped regions), a **"Dependencies only"**
+  toggle (`visible()`/`inDeps` — hides pure-hierarchy nodes to focus the web), a hover **tooltip**
+  (`esc()`-escaped — the only innerHTML sink; the panel uses textContent/createElement), pill-backed labels
+  (epics always, stories on zoom-in), curved edges + arrowheads, glow on hover/selected. ALL nodes shown by
+  default; drag/pan/zoom/hover/click-details (progress bar + clickable dependency list). The `atlas` command
+  fetches per-item relations (bounded, per-item failures DROP that item's edges + warn, `--no-dependencies`
+  skips). Node ids reset per build (diff-stable). Verified on the live 665-item DATA board via headless
+  screenshots (overview, deps-only, zoomed).
 
 ## Identity / idempotency (load-bearing)
 
