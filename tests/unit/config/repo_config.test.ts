@@ -119,6 +119,17 @@ describe("loadRepoConfig / findRepoConfigPath", () => {
 		expect(await loadRepoConfig(tmpDir)).toEqual({});
 	});
 
+	test("discovery finds a config INSIDE the repo (at the .git root or above cwd)", async () => {
+		// tmpDir/repo/.git + tmpDir/repo/.planestories.yml ; search from tmpDir/repo/sub
+		const repo = join(tmpDir, "repo");
+		const sub = join(repo, "sub");
+		mkdirSync(sub, { recursive: true });
+		mkdirSync(join(repo, ".git"), { recursive: true });
+		writeFileSync(join(repo, REPO_CONFIG_FILENAME), "lint:\n  strictness: warn\n");
+		expect(findRepoConfigPath(sub)).toBe(join(repo, REPO_CONFIG_FILENAME));
+		expect(await loadRepoConfig(sub)).toEqual({ lint: { strictness: "warn" } });
+	});
+
 	test("discovery stops at the repo root (.git) — a config ABOVE the repo is ignored", async () => {
 		// tmpDir/above/.planestories.yml  <- must NOT be found
 		// tmpDir/above/repo/.git          <- repo boundary
