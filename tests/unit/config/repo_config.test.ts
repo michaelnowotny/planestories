@@ -46,6 +46,13 @@ describe("validateRepoConfig", () => {
 			ConfigError,
 		);
 	});
+
+	test("rejects a non-object root (null / array / primitive) with ConfigError, not a crash", () => {
+		expect(() => validateRepoConfig(null, "x")).toThrow(ConfigError);
+		expect(() => validateRepoConfig([], "x")).toThrow(ConfigError);
+		expect(() => validateRepoConfig(false, "x")).toThrow(ConfigError);
+		expect(() => validateRepoConfig("hello", "x")).toThrow(ConfigError);
+	});
 });
 
 describe("loadRepoConfig / findRepoConfigPath", () => {
@@ -85,5 +92,44 @@ describe("loadRepoConfig / findRepoConfigPath", () => {
 		expect(await loadRepoConfig(tmpDir)).toEqual({
 			lint: { disable: ["missing-effort", "missing-acceptance-criteria"] },
 		});
+	});
+
+	test("a LEADING `---` (YAML doc-start) does NOT silently empty the config", async () => {
+		writeFileSync(join(tmpDir, REPO_CONFIG_FILENAME), "---\nlint:\n  strictness: warn\n");
+		expect(await loadRepoConfig(tmpDir)).toEqual({ lint: { strictness: "warn" } });
+	});
+
+	test("a mid-file `---` (multiple documents) fails loudly, not silently truncated", async () => {
+		writeFileSync(
+			join(tmpDir, REPO_CONFIG_FILENAME),
+			"lint:\n  strictness: error\n---\nlint:\n  strictness: warn\n",
+		);
+		await expect(loadRepoConfig(tmpDir)).rejects.toBeInstanceOf(ConfigError);
+	});
+
+	test("a non-mapping root (false / a list) fails loudly, not treated as empty", async () => {
+		writeFileSync(join(tmpDir, REPO_CONFIG_FILENAME), "false\n");
+		await expect(loadRepoConfig(tmpDir)).rejects.toBeInstanceOf(ConfigError);
+		writeFileSync(join(tmpDir, REPO_CONFIG_FILENAME), "- a\n- b\n");
+		await expect(loadRepoConfig(tmpDir)).rejects.toBeInstanceOf(ConfigError);
+	});
+
+	test("an empty / comment-only file is a legitimately empty config", async () => {
+		writeFileSync(join(tmpDir, REPO_CONFIG_FILENAME), "# just a comment\n");
+		expect(await loadRepoConfig(tmpDir)).toEqual({});
+	});
+
+	test("discovery stops at the repo root (.git) — a config ABOVE the repo is ignored", async () => {
+		// tmpDir/above/.planestories.yml  <- must NOT be found
+		// tmpDir/above/repo/.git          <- repo boundary
+		// tmpDir/above/repo/sub           <- search starts here
+		const above = join(tmpDir, "above");
+		const repo = join(above, "repo");
+		const sub = join(repo, "sub");
+		mkdirSync(sub, { recursive: true });
+		mkdirSync(join(repo, ".git"), { recursive: true });
+		writeFileSync(join(above, REPO_CONFIG_FILENAME), "lint:\n  strictness: warn\n");
+		expect(findRepoConfigPath(sub)).toBeNull();
+		expect(await loadRepoConfig(sub)).toEqual({});
 	});
 });

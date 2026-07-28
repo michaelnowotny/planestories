@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
-import { dirname, join, parse as parsePath } from "node:path";
-import matter from "gray-matter";
+import { dirname, join } from "node:path";
 import { ConfigError } from "../errors.ts";
 import type { LintRule } from "../lint/rules.ts";
 
@@ -36,22 +35,26 @@ const KNOWN_RULES: ReadonlySet<string> = new Set<LintRule>([
 	"bad-parent",
 ]);
 
-/** Find `.planestories.yml` in `startDir` or any ancestor directory; null if none. */
+/**
+ * Find `.planestories.yml` in `startDir` or an ancestor, stopping at the enclosing
+ * repository root (the first ancestor containing a `.git`) so the file stays
+ * genuinely REPO-local — a stray `~/.planestories.yml` never applies. Returns null
+ * if no config exists within the repo (or, outside any repo, up to the fs root).
+ */
 export function findRepoConfigPath(startDir: string): string | null {
 	let dir = startDir;
-	const rootDir = parsePath(dir).root;
-	// Walk up to (and including) the filesystem root.
 	while (true) {
 		const candidate = join(dir, REPO_CONFIG_FILENAME);
 		if (existsSync(candidate)) {
 			return candidate;
 		}
-		if (dir === rootDir) {
+		// A directory containing `.git` is the repo root — don't search above it.
+		if (existsSync(join(dir, ".git"))) {
 			return null;
 		}
 		const parent = dirname(dir);
 		if (parent === dir) {
-			return null;
+			return null; // reached the filesystem root
 		}
 		dir = parent;
 	}
@@ -70,34 +73,53 @@ export async function loadRepoConfig(cwd: string = process.cwd()): Promise<RepoC
 	}
 	const text = await Bun.file(path).text();
 
-	let data: Record<string, unknown>;
+	let parsed: unknown;
 	try {
-		// Reuse gray-matter's YAML parser by framing the file as frontmatter.
-		data = matter(`---\n${text}\n---\n`).data as Record<string, unknown>;
+		// A real YAML parser (built into Bun) — NOT frontmatter framing, which would
+		// mis-handle a leading or mid-file `---` and silently drop the config.
+		parsed = Bun.YAML.parse(text);
 	} catch (error) {
 		throw new ConfigError(
 			`${path} is not valid YAML: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
 
-	return validateRepoConfig(data, path);
+	// An empty/comment-only file (parses to null) is a legitimately empty config.
+	if (parsed === null || parsed === undefined) {
+		return {};
+	}
+	// Anything that isn't a single top-level mapping is malformed — reject loudly.
+	// (An array here means a top-level list OR multiple `---`-separated documents.)
+	if (typeof parsed !== "object" || Array.isArray(parsed)) {
+		throw new ConfigError(
+			`${path}: expected a single YAML mapping at the top level (a "lint:" section), got ${
+				Array.isArray(parsed) ? "a list / multiple documents" : typeof parsed
+			}.`,
+		);
+	}
+
+	return validateRepoConfig(parsed as Record<string, unknown>, path);
 }
 
 /** Validate a parsed conventions object. Exported for unit testing. */
-export function validateRepoConfig(data: Record<string, unknown>, path: string): RepoConfig {
+export function validateRepoConfig(data: unknown, path: string): RepoConfig {
+	if (typeof data !== "object" || data === null || Array.isArray(data)) {
+		throw new ConfigError(`${path}: expected a YAML mapping at the top level.`);
+	}
+	const record = data as Record<string, unknown>;
 	const config: RepoConfig = {};
-	const unknownTop = Object.keys(data).filter((k) => k !== "lint");
+	const unknownTop = Object.keys(record).filter((k) => k !== "lint");
 	if (unknownTop.length > 0) {
 		throw new ConfigError(
 			`${path}: unknown key(s): ${unknownTop.join(", ")}. Only "lint" is supported.`,
 		);
 	}
 
-	if (data.lint !== undefined) {
-		if (typeof data.lint !== "object" || data.lint === null || Array.isArray(data.lint)) {
+	if (record.lint !== undefined) {
+		if (typeof record.lint !== "object" || record.lint === null || Array.isArray(record.lint)) {
 			throw new ConfigError(`${path}: "lint" must be a mapping.`);
 		}
-		const lintRaw = data.lint as Record<string, unknown>;
+		const lintRaw = record.lint as Record<string, unknown>;
 		const unknownLint = Object.keys(lintRaw).filter((k) => k !== "strictness" && k !== "disable");
 		if (unknownLint.length > 0) {
 			throw new ConfigError(
