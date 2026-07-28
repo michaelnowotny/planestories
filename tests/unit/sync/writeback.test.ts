@@ -484,6 +484,57 @@ describe("reverseSyncCriteria (board→file wrapper)", () => {
 		expect(report.files[0]?.missingOnBoard).toHaveLength(0);
 	});
 
+	test("warns about a duplicate plane_id even when the board parent has no criteria", async () => {
+		// Regression: the warning must NOT be gated on the story having children.
+		const board: FakeData = {
+			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{
+						id: "wi-parent",
+						sequence_id: 12,
+						name: "Childless",
+						external_source: "planestories",
+						external_id: "childless",
+						state: { id: "s", name: "In Progress", group: "started" },
+					},
+				],
+			},
+		};
+		const filePath = join(tmpDir, "dup.stories.md");
+		const content = [
+			"---",
+			"project: Data Platform",
+			"---",
+			"",
+			"## First copy",
+			"",
+			"```yaml",
+			"plane_id: wi-parent",
+			"```",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] a",
+			"",
+			"## Second copy",
+			"",
+			"```yaml",
+			"plane_id: wi-parent",
+			"```",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] b",
+			"",
+		].join("\n");
+		writeFileSync(filePath, content);
+		const { client } = makeFakeClient(board);
+
+		const report = await reverseSyncCriteria(client, { config, files: [filePath], apply: true });
+
+		expect(report.totalChanges).toBe(0);
+		expect(report.files[0]?.warnings.join(" ")).toContain("more than one story");
+	});
+
 	test("a mid-batch error leaves NO partial writes (two-pass)", async () => {
 		const good = join(tmpDir, "a.stories.md");
 		const goodBefore = storyFile(); // frontmatter project: Data Platform, needs a tick

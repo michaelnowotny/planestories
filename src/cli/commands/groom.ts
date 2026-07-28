@@ -80,7 +80,8 @@ function printWriteBack(report: WriteBackReport): void {
 	);
 
 	const anyMissing = report.files.some((f) => f.missingOnBoard.length > 0);
-	if (report.totalChanges === 0 && !anyMissing) {
+	const anyWarnings = report.files.some((f) => f.warnings.length > 0);
+	if (report.totalChanges === 0 && !anyMissing && !anyWarnings) {
 		console.log(chalk.gray("  All checkboxes already match the board."));
 	}
 

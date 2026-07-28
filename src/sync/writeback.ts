@@ -318,9 +318,6 @@ export async function reverseSyncCriteria(
 				(child: FetchedWorkItem) =>
 					isCriterionChild(child) && child.externalSource === EXTERNAL_SOURCE,
 			);
-			if (children.length === 0) {
-				continue;
-			}
 
 			// Fail closed on ambiguous `::ac<n>`: after a title rename the importer can
 			// leave stale `<old-slug>::acN` children alongside fresh `<new-slug>::acN`
@@ -348,9 +345,11 @@ export async function reverseSyncCriteria(
 						.join(", ")} on the board (stale renamed criteria?) — those boxes were left unchanged`,
 				);
 			}
-			if (desired.size > 0) {
-				statesByPlaneId.set(planeId, desired);
-			}
+			// Register EVERY linked, on-board story (even one with no criterion children,
+			// so `desired` is empty) so applyCheckboxStates still surfaces file-level
+			// ambiguities — a duplicate plane_id or an inline closing-fence — for it. An
+			// empty `desired` makes no changes but does not suppress those warnings.
+			statesByPlaneId.set(planeId, desired);
 		}
 
 		const {
