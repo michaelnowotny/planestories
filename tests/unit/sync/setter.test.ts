@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ConfigError } from "../../../src/errors.ts";
-import { setWorkItems } from "../../../src/sync/setter.ts";
+import { evidenceMarker, setWorkItems } from "../../../src/sync/setter.ts";
 import type { ResolvedConfig } from "../../../src/types.ts";
 import { type FakeData, makeFakeClient } from "../../helpers/fake-plane-client.ts";
 
@@ -72,5 +72,58 @@ describe("setWorkItems", () => {
 
 		expect(summary.failed).toBe(1);
 		expect(summary.results[0]?.error).toContain("not found");
+	});
+});
+
+describe("evidence log (--evidence)", () => {
+	test("evidence-only: posts a comment and does NOT patch the work item", async () => {
+		const { client, updatedItems, createdComments } = makeFakeClient(data());
+		const summary = await setWorkItems(client, {
+			config,
+			identifiers: ["ENG-12"],
+			evidence: "deployed abc123; p95 200ms -> 80ms",
+		});
+		expect(summary.updated).toBe(1);
+		expect(summary.results[0]?.evidence).toBe("posted");
+		expect(updatedItems).toHaveLength(0); // no field change => no PATCH
+		expect(createdComments).toHaveLength(1);
+	});
+
+	test("re-posting the SAME evidence is idempotent (append-only, deduped)", async () => {
+		const shared = data();
+		const { client, createdComments } = makeFakeClient(shared);
+		const opts = { config, identifiers: ["ENG-12"], evidence: "shipped def456" };
+		const first = await setWorkItems(client, opts);
+		const second = await setWorkItems(client, opts);
+		expect(first.results[0]?.evidence).toBe("posted");
+		expect(second.results[0]?.evidence).toBe("exists"); // not re-posted
+		expect(createdComments).toHaveLength(1); // only one comment total
+	});
+
+	test("DIFFERENT evidence appends a new comment", async () => {
+		const shared = data();
+		const { client, createdComments } = makeFakeClient(shared);
+		await setWorkItems(client, { config, identifiers: ["ENG-12"], evidence: "one" });
+		await setWorkItems(client, { config, identifiers: ["ENG-12"], evidence: "two" });
+		expect(createdComments).toHaveLength(2);
+	});
+
+	test("status + evidence: patches the state AND posts evidence", async () => {
+		const { client, updatedItems, createdComments } = makeFakeClient(data());
+		const summary = await setWorkItems(client, {
+			config,
+			identifiers: ["ENG-12"],
+			status: "In Progress",
+			evidence: "moved to In Progress in commit abc",
+		});
+		expect(updatedItems[0]?.body.state).toBe("s-progress");
+		expect(createdComments).toHaveLength(1);
+		expect(summary.results[0]?.evidence).toBe("posted");
+	});
+
+	test("evidenceMarker is content-derived (stable per text, differs across text)", () => {
+		expect(evidenceMarker("same")).toBe(evidenceMarker(" same ")); // trimmed
+		expect(evidenceMarker("a")).not.toBe(evidenceMarker("b"));
+		expect(evidenceMarker("x").startsWith("planestories:evidence:")).toBe(true);
 	});
 });

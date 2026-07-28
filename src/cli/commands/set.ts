@@ -33,6 +33,10 @@ export function registerSetCommand(program: Command) {
 		.option("-s, --status <state>", "Set the state by name (e.g. 'In Progress')")
 		.option("--priority <level>", "Set priority: urgent|high|medium|low|none")
 		.option("-a, --assignee <email>", "Set the assignee by email")
+		.option(
+			"-e, --evidence <note>",
+			"Append an evidence note (commit SHA, metric before→after, …) as a comment — idempotent, append-only",
+		)
 		.action(async (identifiers: string[], options) => {
 			try {
 				let priority: PlanePriority | undefined;
@@ -64,6 +68,7 @@ export function registerSetCommand(program: Command) {
 					status: options.status,
 					priority,
 					assignee: options.assignee,
+					evidence: options.evidence,
 				});
 
 				console.log("");
@@ -72,7 +77,13 @@ export function registerSetCommand(program: Command) {
 				console.log(`  Failed:  ${chalk.red(String(summary.failed))}`);
 				for (const r of summary.results) {
 					if (r.action === "updated") {
-						console.log(chalk.green(`  ~ ${r.identifier}`));
+						const ev =
+							r.evidence === "posted"
+								? chalk.dim(" (evidence posted)")
+								: r.evidence === "exists"
+									? chalk.dim(" (evidence already logged)")
+									: "";
+						console.log(chalk.green(`  ~ ${r.identifier}`) + ev);
 					} else {
 						console.log(chalk.red(`  x ${r.identifier}: ${r.error}`));
 					}

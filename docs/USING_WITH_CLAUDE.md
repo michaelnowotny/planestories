@@ -171,8 +171,12 @@ bun run src/cli/index.ts epic DATA-1
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects
 
-# Move a card's state without editing YAML:
+# Move a card's state without editing YAML (optionally attach an evidence note):
 bun run src/cli/index.ts set PROJ-12 --status "In Progress" --project "My Project"
+#   --evidence "deployed abc123; p95 200ms -> 80ms"  append an idempotent, append-only
+#     evidence comment (commit SHA / metric before→after). Re-running with the SAME text is
+#     a no-op (deduped by a content-hash marker); different text appends a new comment.
+#     Works with or without --status (evidence-only is allowed).
 
 # Clean up test items — scoped + safe (dry-run, then --yes to confirm):
 bun run src/cli/index.ts delete /path/to/stories.md --dry-run

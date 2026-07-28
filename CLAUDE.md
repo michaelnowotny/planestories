@@ -144,11 +144,15 @@ zero-dependency artifact. Ref: `docs/ATLAS.md`; code in `src/atlas/` + `src/cli/
   it; `--warn-only` always wins; disabled rules are printed (never silently dropped); a present-but-invalid
   file fails loudly (parsed with the `yaml` package). Consumed in `src/lint/linter.ts` (`disabledRules`).
 
+- **Structured evidence log** (`set --evidence <note>`, `src/sync/setter.ts`) — append-only, idempotent
+  evidence comments (commit SHA / metric before→after) on a `set`, deduped by a content-hash marker
+  (`evidenceMarker` via `ensureComment`); re-posting identical text is a no-op, different text appends.
+  Works evidence-only (no field change → no PATCH) or alongside `--status`/etc.
+
 **Atlas force-directed overhaul (DONE, merged):** see the `src/atlas/` architecture note above — the
 headline visual feature (user-chosen force-directed layout, all nodes shown), both engines APPROVE.
 
-Remaining brief item: **structured evidence log** (Tier 3 — append-only idempotent evidence comments on a
-status change; build on the marker-idempotent `ensureComment`).
+**The entire improvement brief (Tier 1 + 2 + 3) + the atlas overhaul are now COMPLETE.**
 
 The load-bearing gotchas, alternatives-not-chosen, and Plane-API findings are in
 **`docs/DESIGN_DECISIONS_tier1.md`** — READ IT before touching effort/relations/lint. Verified Plane-API

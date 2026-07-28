@@ -1,5 +1,6 @@
 import { ConfigError } from "../errors.ts";
 import type { PlaneClient } from "../plane/client.ts";
+import { ensureComment } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { PlanePriority, ResolvedConfig } from "../types.ts";
 
@@ -10,12 +11,33 @@ export interface SetOptions {
 	status?: string;
 	priority?: PlanePriority;
 	assignee?: string;
+	/** Append an evidence note (commit SHA, metric before→after, …) as a comment. */
+	evidence?: string;
 }
 
 export interface SetResult {
 	identifier: string;
 	action: "updated" | "failed";
+	/** Evidence-comment outcome when --evidence was given. */
+	evidence?: "posted" | "exists";
 	error?: string;
+}
+
+function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
+}
+
+/**
+ * The idempotency marker for an evidence note: a content hash of the text, so
+ * re-running with the SAME evidence is a no-op (dedup) while DIFFERENT evidence
+ * appends a new comment — an append-only, deduplicated evidence trail.
+ */
+export function evidenceMarker(evidence: string): string {
+	return `planestories:evidence:${Bun.hash(evidence.trim()).toString(16)}`;
 }
 
 export interface SetSummary {
@@ -35,8 +57,10 @@ interface RawItem {
  * re-importing when you just want to move a card's state.
  */
 export async function setWorkItems(client: PlaneClient, options: SetOptions): Promise<SetSummary> {
-	if (!options.status && !options.priority && !options.assignee) {
-		throw new ConfigError("set requires at least one of --status, --priority, or --assignee.");
+	if (!options.status && !options.priority && !options.assignee && !options.evidence) {
+		throw new ConfigError(
+			"set requires at least one of --status, --priority, --assignee, or --evidence.",
+		);
 	}
 
 	const resolver = new Resolver(client);
@@ -79,8 +103,17 @@ export async function setWorkItems(client: PlaneClient, options: SetOptions): Pr
 				}
 				body.state = stateId;
 			}
-			await client.updateWorkItem(project.id, id, body);
-			results.push({ identifier, action: "updated" });
+			// Only PATCH when a field actually changed (evidence-only calls skip it).
+			if (Object.keys(body).length > 0) {
+				await client.updateWorkItem(project.id, id, body);
+			}
+			const result: SetResult = { identifier, action: "updated" };
+			if (options.evidence) {
+				const marker = evidenceMarker(options.evidence);
+				const html = `<p>${escapeHtml(options.evidence.trim())} <sub>[${marker}]</sub></p>`;
+				result.evidence = await ensureComment(client, project.id, id, marker, html);
+			}
+			results.push(result);
 		} catch (error) {
 			results.push({
 				identifier,
