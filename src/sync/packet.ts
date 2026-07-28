@@ -146,7 +146,8 @@ function dependencyRefs(
 		.sort()
 		.map((id) => ({
 			identifier: "(unresolved)",
-			title: `not in project ${projectIdentifier} (${id.slice(0, 8)}…)`,
+			// Full UUID so an agent can re-query it (cross-project / recently-deleted).
+			title: `not in project ${projectIdentifier} (${id})`,
 			status: null,
 			done: false,
 			unresolved: true,

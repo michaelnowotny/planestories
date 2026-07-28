@@ -338,14 +338,37 @@ describe("generatePacket (board wrapper)", () => {
 	test("a nested epic includes grandchildren (the whole subtree)", async () => {
 		const started = { id: "s", name: "In Progress", group: "started" };
 		const backlog = { id: "s2", name: "Backlog", group: "backlog" };
+		const effort = (n: string) => `<p><strong>Effort:</strong> ${n} dev-days</p>`;
 		const board: FakeData = {
 			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
 			workItems: {
 				[PROJECT_UUID]: [
 					{ id: "A", sequence_id: 1, name: "Epic A", state: started },
-					{ id: "B", sequence_id: 2, name: "Epic B", parent: "A", state: started },
-					{ id: "C", sequence_id: 3, name: "Story C", parent: "B", state: backlog },
-					{ id: "D", sequence_id: 4, name: "Story D", parent: "A", state: backlog },
+					// Sub-epic B carries a (spurious) effort — it must be EXCLUDED from the sum.
+					{
+						id: "B",
+						sequence_id: 2,
+						name: "Epic B",
+						parent: "A",
+						state: started,
+						description_html: effort("5"),
+					},
+					{
+						id: "C",
+						sequence_id: 3,
+						name: "Story C",
+						parent: "B",
+						state: backlog,
+						description_html: effort("1"),
+					},
+					{
+						id: "D",
+						sequence_id: 4,
+						name: "Story D",
+						parent: "A",
+						state: backlog,
+						description_html: effort("2"),
+					},
 				],
 			},
 		};
@@ -357,5 +380,8 @@ describe("generatePacket (board wrapper)", () => {
 		expect(ids).toContain("DATA-3"); // Story C (grandchild) — must not be omitted
 		expect(ids).toContain("DATA-4"); // Story D
 		expect(markdown).toContain("Story C");
+		// Effort sum = leaf stories C(1) + D(2) only; sub-epic B(5) excluded.
+		expect(markdown).toContain("children_effort_days: 3");
+		expect(markdown).not.toContain("children_effort_days: 8");
 	});
 });
