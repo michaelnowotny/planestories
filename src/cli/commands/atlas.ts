@@ -5,9 +5,11 @@ import { type AtlasGraph, buildAtlasFromBoard, buildAtlasFromFile } from "../../
 import { renderAtlasHtml } from "../../atlas/render.ts";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient } from "../../plane/client.ts";
+import { createPlaneClient, type PlaneIssueRelations } from "../../plane/client.ts";
 import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
+import { isCriterionChild } from "../../sync/board-story.ts";
+import { mapWithConcurrency } from "../../utils/concurrency.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -51,6 +53,10 @@ export function registerAtlasCommand(program: Command) {
 		.option("-p, --project <name>", "Render the whole live Plane project instead of a file")
 		.option("-o, --output <file>", "Output HTML file", "./atlas.html")
 		.option("--open", "Open the generated file in your browser", false)
+		.option(
+			"--no-dependencies",
+			"Skip fetching dependency relations for the live board (faster; hierarchy only)",
+		)
 		.action(async (file: string | undefined, options) => {
 			try {
 				let graph: AtlasGraph;
@@ -80,7 +86,43 @@ export function registerAtlasCommand(program: Command) {
 					const resolver = new Resolver(client);
 					const project = await resolver.resolveProject(projectName);
 					const index = await fetchProjectIndex(client, project.id, project.identifier);
-					graph = buildAtlasFromBoard(client, project.id, project.identifier, projectName, index);
+					// Dependency edges need each story/epic's relations (one GET per
+					// non-criterion item). Skip with --no-dependencies. On a big board this
+					// is many calls, so keep concurrency modest and let a per-item failure
+					// (e.g. a 429 that outlived its retries) DROP that item's edges rather
+					// than abort the whole atlas — a graph with most edges beats no graph.
+					let relationsById: Map<string, PlaneIssueRelations> | undefined;
+					if (options.dependencies !== false) {
+						const items = index.items.filter((item) => !isCriterionChild(item));
+						let failed = 0;
+						const pairs = await mapWithConcurrency(items, 4, async (item) => {
+							try {
+								const relations = await client.getRelations(project.id, item.id);
+								return [item.id, relations] as const;
+							} catch {
+								failed++;
+								return null;
+							}
+						});
+						relationsById = new Map(
+							pairs.filter((p): p is readonly [string, PlaneIssueRelations] => p !== null),
+						);
+						if (failed > 0) {
+							console.error(
+								chalk.yellow(
+									`  ${failed}/${items.length} relation lookups failed (rate limit?) — some dependency edges may be missing.`,
+								),
+							);
+						}
+					}
+					graph = buildAtlasFromBoard(
+						client,
+						project.id,
+						project.identifier,
+						projectName,
+						index,
+						relationsById,
+					);
 				}
 
 				const html = renderAtlasHtml(graph);
@@ -88,9 +130,12 @@ export function registerAtlasCommand(program: Command) {
 				await Bun.write(abs, html);
 
 				const flagged = graph.counts.flagged ? `, ${graph.counts.flagged} flagged` : "";
+				const deps = graph.counts.edges ? `, ${graph.counts.edges} dependencies` : "";
 				console.log(
 					chalk.green(`Atlas written to ${options.output}`) +
-						chalk.dim(` (${graph.counts.epics} epics, ${graph.counts.stories} stories${flagged})`),
+						chalk.dim(
+							` (${graph.counts.epics} epics, ${graph.counts.stories} stories${deps}${flagged})`,
+						),
 				);
 
 				if (options.open) {

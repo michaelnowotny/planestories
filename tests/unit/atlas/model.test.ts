@@ -1,7 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import { buildAtlasFromBoard, buildAtlasFromFile } from "../../../src/atlas/model.ts";
+import {
+	type AtlasGraph,
+	buildAtlasFromBoard,
+	buildAtlasFromFile,
+} from "../../../src/atlas/model.ts";
+import type { PlaneIssueRelations } from "../../../src/plane/client.ts";
 import { fetchProjectIndex } from "../../../src/plane/issues.ts";
 import { makeFakeClient } from "../../helpers/fake-plane-client.ts";
+
+/** Resolve a graph's edges to human identifiers for readable assertions. */
+function edgeTriples(g: AtlasGraph): string[] {
+	const idToIdent = new Map<string, string | null>();
+	const walk = (n: (typeof g.nodes)[number]): void => {
+		idToIdent.set(n.id, n.identifier);
+		for (const c of n.children) walk(c);
+	};
+	for (const n of g.nodes) walk(n);
+	return g.edges
+		.map((e) => `${idToIdent.get(e.source)} ${e.type} ${idToIdent.get(e.target)}`)
+		.sort();
+}
 
 const FILE = `---
 project: "Q1"
@@ -162,5 +180,92 @@ describe("buildAtlasFromBoard", () => {
 		expect(story.statusGroup).toBe("backlog");
 		expect(story.criteria.map((c2) => c2.checked)).toEqual([true, false]);
 		expect(story.url).toContain("/issues/st");
+	});
+});
+
+describe("dependency edges", () => {
+	test("file source: blocks is directed, relates is undirected, mirror is deduped", () => {
+		const file = [
+			"## A",
+			"",
+			"```yaml",
+			"plane_identifier: DATA-1",
+			"blocks: [DATA-2]",
+			"relates_to: [DATA-3]",
+			"```",
+			"",
+			"Body one.",
+			"",
+			"## B",
+			"",
+			"```yaml",
+			"plane_identifier: DATA-2",
+			"blocked_by: [DATA-1]",
+			"```",
+			"",
+			"Body two.",
+			"",
+			"## C",
+			"",
+			"```yaml",
+			"plane_identifier: DATA-3",
+			"```",
+			"",
+			"Body three.",
+		].join("\n");
+		const g = buildAtlasFromFile(file, "x.md");
+		// A blocks B (declared from BOTH ends -> one edge); A relates C.
+		expect(edgeTriples(g)).toEqual(["DATA-1 blocks DATA-2", "DATA-1 relates DATA-3"]);
+		expect(g.counts.edges).toBe(2);
+	});
+
+	test("file source: a dependency on an unknown identifier is dropped", () => {
+		const file = [
+			"## A",
+			"",
+			"```yaml",
+			"plane_identifier: DATA-1",
+			"blocks: [DATA-999]",
+			"```",
+			"",
+			"Body.",
+		].join("\n");
+		expect(buildAtlasFromFile(file, "x.md").edges).toEqual([]);
+	});
+
+	test("board source: relations become edges (blocked_by/blocking dedup, relates undirected)", async () => {
+		const P = "p1";
+		const c = makeFakeClient({
+			projects: [{ id: P, name: "Proj", identifier: "ENG" }],
+			workItems: {
+				[P]: [
+					{ id: "a", sequence_id: 1, name: "A", state: { name: "Backlog", group: "backlog" } },
+					{ id: "b", sequence_id: 2, name: "B", state: { name: "Backlog", group: "backlog" } },
+					{ id: "d", sequence_id: 3, name: "D", state: { name: "Backlog", group: "backlog" } },
+				],
+			},
+			relations: { a: { blocking: ["b"], relates_to: ["d"] } },
+		}).client;
+		const index = await fetchProjectIndex(c, P, "ENG");
+		// The fake client mirrors relations, so a getRelations per item reflects both ends.
+		const relationsById = new Map<string, PlaneIssueRelations>();
+		for (const item of index.items) {
+			relationsById.set(item.id, await c.getRelations(P, item.id));
+		}
+		const g = buildAtlasFromBoard(c, P, "ENG", "Proj", index, relationsById);
+		expect(edgeTriples(g)).toEqual(["ENG-1 blocks ENG-2", "ENG-1 relates ENG-3"]);
+		expect(g.counts.edges).toBe(2);
+	});
+
+	test("board source: no edges without relations (backward-compatible)", async () => {
+		const P = "p1";
+		const c = makeFakeClient({
+			projects: [{ id: P, name: "Proj", identifier: "ENG" }],
+			workItems: {
+				[P]: [{ id: "a", sequence_id: 1, name: "A", state: { name: "Backlog", group: "backlog" } }],
+			},
+		}).client;
+		const index = await fetchProjectIndex(c, P, "ENG");
+		expect(buildAtlasFromBoard(c, P, "ENG", "Proj", index).edges).toEqual([]);
 	});
 });

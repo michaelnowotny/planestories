@@ -1,12 +1,22 @@
 import { splitBody } from "../markdown/criteria.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
-import type { PlaneClient } from "../plane/client.ts";
+import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import type { ProjectIndex } from "../plane/issues.ts";
 import { criterionIndex, isCriterionChild } from "../sync/board-story.ts";
 import type { UserStory } from "../types.ts";
 import { assessQuality, type QualityAssessment } from "./quality.ts";
 
 export type AtlasNodeKind = "epic" | "story";
+
+/** A dependency edge between two nodes (referenced by node id). */
+export type AtlasEdgeType = "blocks" | "relates";
+export interface AtlasEdge {
+	/** For "blocks": the blocker. For "relates": one (undirected) endpoint. */
+	source: string;
+	/** For "blocks": the thing being blocked. For "relates": the other endpoint. */
+	target: string;
+	type: AtlasEdgeType;
+}
 export type StatusGroup =
 	| "backlog"
 	| "unstarted"
@@ -45,11 +55,57 @@ export interface AtlasGraph {
 	source: "file" | "board";
 	/** Top-level nodes under the project: epics + standalone stories. */
 	nodes: AtlasNode[];
+	/** Dependency edges between nodes (blocked_by/blocks -> "blocks"; relates_to -> "relates"). */
+	edges: AtlasEdge[];
 	/** Distinct label names (for filter chips). */
 	labels: string[];
 	/** Distinct status names present. */
 	statuses: string[];
-	counts: { epics: number; stories: number; criteria: number; flagged: number };
+	counts: { epics: number; stories: number; criteria: number; flagged: number; edges: number };
+}
+
+/**
+ * Build a deduped edge list from per-node dependency identifiers. `resolve` maps a
+ * dependency identifier/uuid to a node id (or null when it isn't a node in this
+ * graph — a dangling/cross-project reference, which is skipped). A "blocks" edge
+ * always points blocker -> blocked; "relates" is undirected and deduped by the
+ * unordered pair. Self-edges are dropped.
+ */
+function buildEdges(
+	specs: Array<{ id: string; blockedBy: string[]; blocks: string[]; relatesTo: string[] }>,
+	resolve: (identifier: string) => string | null,
+): AtlasEdge[] {
+	const edges: AtlasEdge[] = [];
+	const seen = new Set<string>();
+	const addBlocks = (blockerId: string, blockedId: string): void => {
+		if (blockerId === blockedId) return;
+		const key = `b:${blockerId}>${blockedId}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		edges.push({ source: blockerId, target: blockedId, type: "blocks" });
+	};
+	const addRelates = (a: string, b: string): void => {
+		if (a === b) return;
+		const key = `r:${[a, b].sort().join("|")}`;
+		if (seen.has(key)) return;
+		seen.add(key);
+		edges.push({ source: a, target: b, type: "relates" });
+	};
+	for (const spec of specs) {
+		for (const raw of spec.blockedBy) {
+			const other = resolve(raw);
+			if (other) addBlocks(other, spec.id); // `other` blocks this node
+		}
+		for (const raw of spec.blocks) {
+			const other = resolve(raw);
+			if (other) addBlocks(spec.id, other); // this node blocks `other`
+		}
+		for (const raw of spec.relatesTo) {
+			const other = resolve(raw);
+			if (other) addRelates(spec.id, other);
+		}
+	}
+	return edges;
 }
 
 /** Map a free-text status name to a coarse group (used for the file source, which has no group). */
@@ -97,7 +153,12 @@ function assembleTree(raws: RawNode[]): AtlasNode[] {
 }
 
 /** Roll up the header metrics + filter vocabularies by walking the assembled tree. */
-function summarize(project: string, source: "file" | "board", roots: AtlasNode[]): AtlasGraph {
+function summarize(
+	project: string,
+	source: "file" | "board",
+	roots: AtlasNode[],
+	edges: AtlasEdge[],
+): AtlasGraph {
 	const labels = new Set<string>();
 	const statuses = new Set<string>();
 	let epics = 0;
@@ -120,9 +181,10 @@ function summarize(project: string, source: "file" | "board", roots: AtlasNode[]
 		project,
 		source,
 		nodes: roots,
+		edges,
 		labels: [...labels].sort(),
 		statuses: [...statuses],
-		counts: { epics, stories, criteria, flagged },
+		counts: { epics, stories, criteria, flagged, edges: edges.length },
 	};
 }
 
@@ -149,7 +211,7 @@ export function buildAtlasFromFile(fileContent: string, filePath: string): Atlas
 	const issues = parsed.stories.filter((s) => s.kind !== "criterion");
 	const epics = classifyFileEpics(parsed.stories);
 
-	const raws: RawNode[] = issues.map((story) => {
+	const pairs = issues.map((story) => {
 		const { narrative, criteria: inlineCriteria } = splitBody(story.body);
 		const criteria: AtlasCriterion[] = [
 			...inlineCriteria.map((c) => ({ text: c.text, checked: c.checked })),
@@ -157,7 +219,7 @@ export function buildAtlasFromFile(fileContent: string, filePath: string): Atlas
 		];
 		const isEpic = epics.has(story);
 		const key = story.planeIdentifier ?? nextId("f");
-		return {
+		const raw: RawNode = {
 			key,
 			parentKey: story.parent ?? null,
 			node: {
@@ -175,9 +237,27 @@ export function buildAtlasFromFile(fileContent: string, filePath: string): Atlas
 				children: [],
 			},
 		};
+		return { story, raw };
 	});
+	const raws = pairs.map((p) => p.raw);
 
-	return summarize(project, "file", assembleTree(raws));
+	// Dependency edges: resolve story identifiers to node ids.
+	const idToNode = new Map<string, string>();
+	for (const { story, raw } of pairs) {
+		if (story.planeIdentifier)
+			idToNode.set(story.planeIdentifier.trim().toUpperCase(), raw.node.id);
+	}
+	const edges = buildEdges(
+		pairs.map(({ story, raw }) => ({
+			id: raw.node.id,
+			blockedBy: story.blockedBy,
+			blocks: story.blocks,
+			relatesTo: story.relatesTo,
+		})),
+		(identifier) => idToNode.get(identifier.trim().toUpperCase()) ?? null,
+	);
+
+	return summarize(project, "file", assembleTree(raws), edges);
 }
 
 /**
@@ -219,16 +299,22 @@ export function classifyFileEpics(stories: readonly UserStory[]): Set<UserStory>
 
 // --- Board source ----------------------------------------------------------
 
-/** Build an Atlas graph from a live Plane project (via fetchProjectIndex). */
+/**
+ * Build an Atlas graph from a live Plane project (via fetchProjectIndex). Pass
+ * `relationsById` (work-item id -> its Plane relations, fetched by the caller) to
+ * include dependency edges; omit it for a hierarchy-only graph.
+ */
 export function buildAtlasFromBoard(
 	client: PlaneClient,
 	projectId: string,
 	projectIdentifier: string,
 	projectName: string,
 	index: ProjectIndex,
+	relationsById?: ReadonlyMap<string, PlaneIssueRelations>,
 ): AtlasGraph {
 	counter = 0; // deterministic node ids per build (diff-stable output)
 	const raws: RawNode[] = [];
+	const itemIdToNode = new Map<string, string>();
 
 	for (const item of index.items) {
 		if (isCriterionChild(item)) {
@@ -242,11 +328,13 @@ export function buildAtlasFromBoard(
 			.map((c) => ({ text: c.name, checked: c.stateGroup === "completed" }));
 		const isEpic = children.some((c) => !isCriterionChild(c));
 
+		const nodeId = nextId("n");
+		itemIdToNode.set(item.id, nodeId);
 		raws.push({
 			key: item.id,
 			parentKey: item.parent ?? null,
 			node: {
-				id: nextId("n"),
+				id: nodeId,
 				kind: isEpic ? "epic" : "story",
 				title: item.name,
 				identifier: `${projectIdentifier}-${item.sequenceId}`,
@@ -262,6 +350,21 @@ export function buildAtlasFromBoard(
 		});
 	}
 
+	// Dependency edges from the fetched relations (uuids resolve to node ids).
+	const edges = relationsById
+		? buildEdges(
+				[...relationsById.entries()]
+					.filter(([itemId]) => itemIdToNode.has(itemId))
+					.map(([itemId, rel]) => ({
+						id: itemIdToNode.get(itemId) as string,
+						blockedBy: rel.blocked_by ?? [],
+						blocks: rel.blocking ?? [],
+						relatesTo: rel.relates_to ?? [],
+					})),
+				(uuid) => itemIdToNode.get(uuid) ?? null,
+			)
+		: [];
+
 	// Criteria were skipped above, so assembleTree only links non-criterion nodes.
-	return summarize(projectName, "board", assembleTree(raws));
+	return summarize(projectName, "board", assembleTree(raws), edges);
 }
