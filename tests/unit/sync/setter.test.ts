@@ -124,6 +124,21 @@ describe("evidence log (--evidence)", () => {
 	test("evidenceMarker is content-derived (stable per text, differs across text)", () => {
 		expect(evidenceMarker("same")).toBe(evidenceMarker(" same ")); // trimmed
 		expect(evidenceMarker("a")).not.toBe(evidenceMarker("b"));
-		expect(evidenceMarker("x").startsWith("planestories:evidence:")).toBe(true);
+	});
+
+	test("evidenceMarker is bracketed + fixed 16-hex width (no prefix-collision under substring search)", () => {
+		// ensureComment uses includes(); an unpadded/unbracketed marker could be a prefix
+		// of a longer one and falsely dedup. Brackets + fixed width make that impossible.
+		const m = evidenceMarker("x");
+		expect(m).toMatch(/^\[planestories:evidence:[0-9a-f]{16}\]$/);
+		// No marker can be a prefix of another (all same length, both bracket-terminated).
+		expect(evidenceMarker("a").length).toBe(evidenceMarker("bb").length);
+	});
+
+	test("a whitespace-only --evidence note is rejected, not posted empty", async () => {
+		const { client } = makeFakeClient(data());
+		await expect(
+			setWorkItems(client, { config, identifiers: ["ENG-12"], evidence: "   " }),
+		).rejects.toBeInstanceOf(ConfigError);
 	});
 });

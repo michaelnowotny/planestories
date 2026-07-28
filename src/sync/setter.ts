@@ -35,9 +35,17 @@ function escapeHtml(text: string): string {
  * The idempotency marker for an evidence note: a content hash of the text, so
  * re-running with the SAME evidence is a no-op (dedup) while DIFFERENT evidence
  * appends a new comment — an append-only, deduplicated evidence trail.
+ *
+ * The hash is zero-padded to a FIXED 16 hex chars and wrapped in `[…]`, and the
+ * SAME bracketed string is what `ensureComment` substring-searches for. Both are
+ * load-bearing: `ensureComment` uses `includes()`, so an unpadded/unbracketed
+ * marker (`…:89cc78`) would be a prefix of a longer one (`…:89cc78afe0…`) and
+ * falsely report "exists", silently dropping distinct evidence. The closing `]`
+ * plus fixed width make a false prefix match impossible (matches the importer's
+ * `comment:` marker convention).
  */
 export function evidenceMarker(evidence: string): string {
-	return `planestories:evidence:${Bun.hash(evidence.trim()).toString(16)}`;
+	return `[planestories:evidence:${Bun.hash(evidence.trim()).toString(16).padStart(16, "0")}]`;
 }
 
 export interface SetSummary {
@@ -61,6 +69,9 @@ export async function setWorkItems(client: PlaneClient, options: SetOptions): Pr
 		throw new ConfigError(
 			"set requires at least one of --status, --priority, --assignee, or --evidence.",
 		);
+	}
+	if (options.evidence !== undefined && options.evidence.trim() === "") {
+		throw new ConfigError("--evidence note is empty.");
 	}
 
 	const resolver = new Resolver(client);
@@ -110,7 +121,7 @@ export async function setWorkItems(client: PlaneClient, options: SetOptions): Pr
 			const result: SetResult = { identifier, action: "updated" };
 			if (options.evidence) {
 				const marker = evidenceMarker(options.evidence);
-				const html = `<p>${escapeHtml(options.evidence.trim())} <sub>[${marker}]</sub></p>`;
+				const html = `<p>${escapeHtml(options.evidence.trim())} <sub>${marker}</sub></p>`;
 				result.evidence = await ensureComment(client, project.id, id, marker, html);
 			}
 			results.push(result);

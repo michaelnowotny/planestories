@@ -25,7 +25,9 @@ function handleError(error: unknown): never {
 export function registerSetCommand(program: Command) {
 	program
 		.command("set")
-		.description("Update status/priority/assignee on existing work items by identifier")
+		.description(
+			"Update status/priority/assignee on existing work items by identifier, and/or append an --evidence note",
+		)
 		.argument("<identifiers...>", "Work item identifiers, e.g. BLOOM-12")
 		.option("-c, --config <path>", "Config file path")
 		.option("--context <name>", "Select a named context from multi-context config")
