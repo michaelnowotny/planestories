@@ -47,17 +47,25 @@ plane_identifier:
 plane_url:
 priority: high                 # urgent | high | medium | low | none
 labels: [Feature]              # skipped with a warning if absent (see --create-labels)
-estimate: 3
+estimate: 3                    # story points -> Plane's integer `point`
 assignee: someone@example.com  # resolved by email to a project member
 status: Backlog                # must match a state name in the project
 ```
 
 <description in markdown — rendered to HTML in Plane>
 
+**Effort:** 2.5 dev-days       # developer-days (decimals ok); body line is source of truth
+
 ### Acceptance Criteria
 - [ ] concrete, testable criterion
 - [ ] another one
 ```
+
+**Developer-day effort.** Plane's `point` is integer-only (verified), so decimal effort can't ride on it.
+Write `**Effort:** N.n dev-days` as a body line (before the criteria); it lives in the description and
+round-trips faithfully. `effort_days:` in the YAML block is accepted as an alternative input — planestories
+materializes the body line and `export` re-emits it. `estimate` (story points) is kept separate and
+untouched.
 
 A single file can hold many stories (each `## ` heading is one). Frontmatter sets the
 default project; per-story overrides are not needed for the project in v1. Start from

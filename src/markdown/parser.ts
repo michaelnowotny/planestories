@@ -1,6 +1,13 @@
 import matter from "gray-matter";
 import { ParseError } from "../errors.ts";
 import type { FileFrontmatter, ParsedFile, PlanePriority, StoryKind, UserStory } from "../types.ts";
+import {
+	hasAnyEffortMention,
+	injectEffortLine,
+	parseEffortDays,
+	parseYamlEffort,
+} from "./directives.ts";
+import { htmlToMarkdown, markdownToHtml } from "./html.ts";
 
 const VALID_KINDS: ReadonlySet<string> = new Set(["story", "criterion", "epic"]);
 
@@ -134,6 +141,37 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 	const kind = normalizeKind(metadata.kind);
 	const comment = extractStringOrNull(metadata.comment);
 
+	// Developer-day effort. The `**Effort:** N dev-days` narrative line is the source
+	// of truth (it round-trips through the description). A YAML `effort_days:` is input
+	// sugar: when the body has NO effort mention at all, materialize one so it is
+	// stored + hashed the same way. Guards that keep round-trip idempotent:
+	//  - a recognized narrative line wins (skip the YAML path);
+	//  - if the body mentions effort anywhere (e.g. an unrecognized after-AC line) we
+	//    do NOT inject, so we never create a duplicate/orphan;
+	//  - `parseYamlEffort` rejects anything that can't be faithfully rendered; and
+	//  - we accept the injection only if it actually re-parses to the same value, so a
+	//    pathological body (unclosed fence, etc.) can never leave an orphan line.
+	let effortDays = parseEffortDays(body);
+	if (effortDays === null && !hasAnyEffortMention(body)) {
+		const yamlEffort = parseYamlEffort(metadata.effort_days);
+		if (yamlEffort !== null) {
+			const injected = injectEffortLine(body, yamlEffort);
+			// Accept the injection only if the value survives in BOTH the raw injected
+			// body AND its canonical (board-stored) form. The canonical check rejects a
+			// line that would be orphaned once the HTML round-trip normalizes the AC
+			// heading (e.g. Setext -> ATX), so we decline to inject (-> null, lint flags
+			// "missing effort") rather than materialize an orphan after the criteria.
+			const canonicalInjected = htmlToMarkdown(markdownToHtml(injected));
+			if (
+				parseEffortDays(injected) === yamlEffort &&
+				parseEffortDays(canonicalInjected) === yamlEffort
+			) {
+				body = injected;
+				effortDays = yamlEffort;
+			}
+		}
+	}
+
 	return {
 		title,
 		planeId,
@@ -143,6 +181,7 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 		priority,
 		labels,
 		estimate,
+		effortDays,
 		assignee,
 		status,
 		body,

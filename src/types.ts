@@ -33,6 +33,14 @@ export interface UserStory {
 	labels: string[];
 	/** Story point estimate */
 	estimate: number | null;
+	/**
+	 * Developer-day effort (partial days allowed, e.g. 2.5). Distinct from
+	 * `estimate` (integer story points → Plane `point`). Parsed from the
+	 * `**Effort:** N dev-days` body line (its authoritative home, which round-trips
+	 * through the Plane description) or materialized there from a YAML `effort_days:`
+	 * input. Null when unset. Derived from the body — do not hash separately.
+	 */
+	effortDays: number | null;
 	/** Assignee email or display name */
 	assignee: string | null;
 	/** State name (e.g., "Backlog", "Todo", "In Progress", "Done") */

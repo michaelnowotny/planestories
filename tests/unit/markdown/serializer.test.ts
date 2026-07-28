@@ -12,6 +12,7 @@ function makeStory(overrides: Partial<UserStory> = {}): UserStory {
 		priority: null,
 		labels: [],
 		estimate: null,
+		effortDays: null,
 		assignee: null,
 		status: null,
 		body: "User should be able to log in.\n\n### Acceptance Criteria\n\n- [ ] Login works",

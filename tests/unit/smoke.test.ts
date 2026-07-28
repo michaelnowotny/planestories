@@ -17,6 +17,7 @@ describe("smoke test", () => {
 			priority: null,
 			labels: [],
 			estimate: null,
+			effortDays: null,
 			assignee: null,
 			status: null,
 			body: "Test body",

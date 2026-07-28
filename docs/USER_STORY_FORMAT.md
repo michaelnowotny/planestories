@@ -57,7 +57,8 @@ Fenced YAML block (` ```yaml ` ... ` ``` `) immediately after the H2 heading. Al
 | `plane_hash`       | string   | Content hash of the last sync. Auto-managed — do not hand-edit. Lets a re-import skip a story whose content is unchanged (use `--force` to override). |
 | `priority`         | string   | `urgent`, `high`, `medium`, `low`, `none` (legacy Linear integers `0–4` are also accepted) |
 | `labels`           | string[] | Label names (resolved within the project). Merged with `defaultLabels` from config. Missing labels are skipped unless `--create-labels`. |
-| `estimate`         | number   | Story points.                                                         |
+| `estimate`         | number   | Story points → Plane's integer `point` field. Separate from `effort_days`. |
+| `effort_days`      | number   | Developer-day effort, decimals allowed (`0.5`, `2.5`, `8`). Input sugar for the `**Effort:**` body line (see below) — on export it is re-emitted as that line, not as YAML. |
 | `assignee`         | string   | Email or display name (resolved to a project member).                 |
 | `status`           | string   | State name: `Backlog`, `Todo`, `In Progress`, `Done`, etc. (resolved within the project) |
 | `parent`           | string   | Nest under an existing work item by identifier (e.g. `DATA-12`) — e.g. an epic in another file. |
@@ -70,7 +71,10 @@ Everything after the metadata block until the next `## ` or end-of-file. Standar
 
 ## Acceptance criteria
 
-Convention: use an `### Acceptance Criteria` heading with a checkbox list. This section is part of the body and is included in the work item description.
+Convention: use an `### Acceptance Criteria` heading (ATX, `#`-prefixed) with a checkbox list. This
+section is part of the body and is included in the work item description. Stick to the ATX form —
+non-standard heading forms (Setext underlines, headings hidden in HTML comments) do not round-trip
+cleanly through Plane's HTML storage; see [KNOWN_LIMITATIONS.md](./KNOWN_LIMITATIONS.md).
 
 ```markdown
 ### Acceptance Criteria
@@ -78,6 +82,20 @@ Convention: use an `### Acceptance Criteria` heading with a checkbox list. This 
 - [ ] Criterion one
 - [ ] Criterion two
 ```
+
+## Body-line conventions
+
+Some structured metadata is written as a **bold-label body line** rather than in the YAML block —
+human-readable in the description and first-class to planestories:
+
+| Body line | Meaning |
+|---|---|
+| `**Effort:** 2.5 dev-days` | Developer-day effort (decimals allowed). This line is the source of truth and lives in the description, so it round-trips faithfully (Plane's `point` field is integer-only — verified — so it cannot carry `2.5`). |
+
+Put the `**Effort:**` line in the narrative (before `### Acceptance Criteria`) so it stays on the parent
+work item under `--sync-criteria`. You may instead set `effort_days:` in the YAML block; when there is no
+body line, planestories materializes one, and `export` always re-emits the body line (not the YAML field).
+If both are present the body line wins.
 
 ## Minimal example
 

@@ -1,4 +1,5 @@
 import { buildAcceptanceCriteria, joinBody, splitBody } from "../markdown/criteria.ts";
+import { parseEffortDays } from "../markdown/directives.ts";
 import type { PlaneClient } from "../plane/client.ts";
 import type { FetchedWorkItem } from "../plane/issues.ts";
 import type { UserStory } from "../types.ts";
@@ -59,6 +60,8 @@ export function boardItemToStory(
 		priority: item.priority ?? null,
 		labels: item.labels,
 		estimate: item.estimate ?? null,
+		// Effort lives in the description body line, which survives the board round-trip.
+		effortDays: parseEffortDays(body),
 		assignee: item.assigneeEmail ?? item.assigneeDisplayName ?? null,
 		status: item.stateName ?? null,
 		body,
