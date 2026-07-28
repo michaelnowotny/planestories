@@ -1,7 +1,19 @@
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { ConfigError } from "../errors.ts";
 import type { LintRule } from "../lint/rules.ts";
+
+/** True if a filesystem entry exists at `p` — including a DANGLING symlink (lstat
+ *  doesn't follow the link), so a broken config symlink is surfaced, not skipped. */
+function entryExists(p: string): boolean {
+	try {
+		lstatSync(p);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 /** The lint conventions a repo can pin so CI/authoring need no per-invocation flags. */
 export interface RepoLintConfig {
@@ -45,7 +57,9 @@ export function findRepoConfigPath(startDir: string): string | null {
 	let dir = startDir;
 	while (true) {
 		const candidate = join(dir, REPO_CONFIG_FILENAME);
-		if (existsSync(candidate)) {
+		// lstat-based: a dangling `.planestories.yml` symlink is FOUND here, then
+		// fails loudly on read in loadRepoConfig rather than being silently skipped.
+		if (entryExists(candidate)) {
 			return candidate;
 		}
 		// A directory containing `.git` is the repo root — don't search above it.
@@ -71,13 +85,22 @@ export async function loadRepoConfig(cwd: string = process.cwd()): Promise<RepoC
 	if (!path) {
 		return {};
 	}
-	const text = await Bun.file(path).text();
+	let text: string;
+	try {
+		text = await Bun.file(path).text();
+	} catch (error) {
+		// e.g. a dangling symlink — surface it, never silently ignore.
+		throw new ConfigError(
+			`${path}: cannot read repo config: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 
 	let parsed: unknown;
 	try {
-		// A real YAML parser (built into Bun) — NOT frontmatter framing, which would
-		// mis-handle a leading or mid-file `---` and silently drop the config.
-		parsed = Bun.YAML.parse(text);
+		// The `yaml` package (works on any Bun/Node) — NOT Bun.YAML (absent on older
+		// Bun) and NOT frontmatter framing. It THROWS on a duplicate mapping key and
+		// on multiple `---` documents, so neither can silently bypass validation.
+		parsed = parseYaml(text);
 	} catch (error) {
 		throw new ConfigError(
 			`${path} is not valid YAML: ${error instanceof Error ? error.message : String(error)}`,
@@ -88,12 +111,11 @@ export async function loadRepoConfig(cwd: string = process.cwd()): Promise<RepoC
 	if (parsed === null || parsed === undefined) {
 		return {};
 	}
-	// Anything that isn't a single top-level mapping is malformed — reject loudly.
-	// (An array here means a top-level list OR multiple `---`-separated documents.)
+	// Anything that isn't a top-level mapping is malformed — reject loudly.
 	if (typeof parsed !== "object" || Array.isArray(parsed)) {
 		throw new ConfigError(
-			`${path}: expected a single YAML mapping at the top level (a "lint:" section), got ${
-				Array.isArray(parsed) ? "a list / multiple documents" : typeof parsed
+			`${path}: expected a YAML mapping at the top level (a "lint:" section), got ${
+				Array.isArray(parsed) ? "a list" : typeof parsed
 			}.`,
 		);
 	}

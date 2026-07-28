@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -117,6 +117,20 @@ describe("loadRepoConfig / findRepoConfigPath", () => {
 	test("an empty / comment-only file is a legitimately empty config", async () => {
 		writeFileSync(join(tmpDir, REPO_CONFIG_FILENAME), "# just a comment\n");
 		expect(await loadRepoConfig(tmpDir)).toEqual({});
+	});
+
+	test("a DUPLICATE mapping key fails loudly (never keeps the last value silently)", async () => {
+		writeFileSync(
+			join(tmpDir, REPO_CONFIG_FILENAME),
+			"lint:\n  strictness: loud\n  strictness: warn\n",
+		);
+		await expect(loadRepoConfig(tmpDir)).rejects.toBeInstanceOf(ConfigError);
+	});
+
+	test("a DANGLING config symlink fails loudly, not silently skipped", async () => {
+		symlinkSync(join(tmpDir, "does-not-exist.yml"), join(tmpDir, REPO_CONFIG_FILENAME));
+		expect(findRepoConfigPath(tmpDir)).toBe(join(tmpDir, REPO_CONFIG_FILENAME));
+		await expect(loadRepoConfig(tmpDir)).rejects.toBeInstanceOf(ConfigError);
 	});
 
 	test("discovery finds a config INSIDE the repo (at the .git root or above cwd)", async () => {
