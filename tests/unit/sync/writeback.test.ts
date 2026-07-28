@@ -6,17 +6,17 @@ import { applyCheckboxStates, reverseSyncCriteria } from "../../../src/sync/writ
 import type { ResolvedConfig } from "../../../src/types.ts";
 import { type FakeData, makeFakeClient } from "../../helpers/fake-plane-client.ts";
 
-/** Build a desired-state map: title -> (position -> checked). */
+/** Build a desired-state map: H2 ordinal -> (criterion position -> checked). */
 function states(
-	entries: Record<string, Record<number, boolean>>,
-): Map<string, Map<number, boolean>> {
-	const out = new Map<string, Map<number, boolean>>();
-	for (const [title, byPos] of Object.entries(entries)) {
+	entries: Record<number, Record<number, boolean>>,
+): Map<number, Map<number, boolean>> {
+	const out = new Map<number, Map<number, boolean>>();
+	for (const [ordinal, byPos] of Object.entries(entries)) {
 		const inner = new Map<number, boolean>();
 		for (const [pos, checked] of Object.entries(byPos)) {
 			inner.set(Number(pos), checked);
 		}
-		out.set(title, inner);
+		out.set(Number(ordinal), inner);
 	}
 	return out;
 }
@@ -37,7 +37,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 
 		const { content: out, changes } = applyCheckboxStates(
 			content,
-			states({ "Log in": { 0: true, 1: false } }),
+			states({ 0: { 0: true, 1: false } }),
 		);
 
 		expect(out).toContain("- [x] enters email");
@@ -49,7 +49,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 
 	test("unticks a box the board reports not-completed", () => {
 		const content = ["## S", "", "### Acceptance Criteria", "- [x] done thing", ""].join("\n");
-		const { content: out, changes } = applyCheckboxStates(content, states({ S: { 0: false } }));
+		const { content: out, changes } = applyCheckboxStates(content, states({ 0: { 0: false } }));
 		expect(out).toContain("- [ ] done thing");
 		expect(changes).toHaveLength(1);
 		expect(changes[0]).toMatchObject({ position: 0, from: true, to: false });
@@ -59,7 +59,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 		const content = ["## S", "", "### Acceptance Criteria", "- [x] a", "- [ ] b", ""].join("\n");
 		const { content: out, changes } = applyCheckboxStates(
 			content,
-			states({ S: { 0: true, 1: false } }),
+			states({ 0: { 0: true, 1: false } }),
 		);
 		expect(out).toBe(content);
 		expect(changes).toHaveLength(0);
@@ -75,7 +75,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 			"- [ ] real criterion",
 			"",
 		].join("\n");
-		const { content: out } = applyCheckboxStates(content, states({ S: { 0: true } }));
+		const { content: out } = applyCheckboxStates(content, states({ 0: { 0: true } }));
 		expect(out).toContain("- [ ] a narrative todo (not a criterion)"); // untouched
 		expect(out).toContain("- [x] real criterion");
 	});
@@ -88,7 +88,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 			"- [ ] `foo.stories.md` passes **planestories** validation",
 			"",
 		].join("\n");
-		const { content: out } = applyCheckboxStates(content, states({ S: { 0: true } }));
+		const { content: out } = applyCheckboxStates(content, states({ 0: { 0: true } }));
 		expect(out).toContain("- [x] `foo.stories.md` passes **planestories** validation");
 	});
 
@@ -105,7 +105,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 		// Only positions 0 and 2 known (criterion 1 was removed on the board).
 		const { content: out, changes } = applyCheckboxStates(
 			content,
-			states({ S: { 0: true, 2: true } }),
+			states({ 0: { 0: true, 2: true } }),
 		);
 		expect(out).toContain("- [x] a");
 		expect(out).toContain("- [ ] b"); // untouched
@@ -113,7 +113,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 		expect(changes).toHaveLength(2);
 	});
 
-	test("keys by H2 title across multiple stories", () => {
+	test("keys by H2 ordinal across multiple stories", () => {
 		const content = [
 			"## First",
 			"",
@@ -128,10 +128,46 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 		].join("\n");
 		const { content: out } = applyCheckboxStates(
 			content,
-			states({ First: { 0: true }, Second: { 0: false } }),
+			states({ 0: { 0: true }, 1: { 0: false } }),
 		);
 		expect(out).toContain("- [x] one");
 		expect(out).toContain("- [ ] two");
+	});
+
+	test("duplicate H2 titles do NOT cross-contaminate — only the targeted ordinal changes", () => {
+		// Two "## S": ordinal 0 is targeted, ordinal 1 (e.g. an unlinked twin) is NOT.
+		const content = [
+			"## S",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] linked one",
+			"",
+			"## S",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] unlinked twin",
+			"",
+		].join("\n");
+		const { content: out, changes } = applyCheckboxStates(content, states({ 0: { 0: true } }));
+		expect(out).toContain("- [x] linked one");
+		expect(out).toContain("- [ ] unlinked twin"); // second "## S" untouched
+		expect(changes).toHaveLength(1);
+	});
+
+	test("skips a leading frontmatter block so ordinal 0 is the first real story", () => {
+		const content = [
+			"---",
+			"project: Data Platform",
+			"---",
+			"",
+			"## Only story",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] real",
+			"",
+		].join("\n");
+		const { content: out } = applyCheckboxStates(content, states({ 0: { 0: true } }));
+		expect(out).toContain("- [x] real");
 	});
 
 	test("recognizes a Setext acceptance-criteria heading", () => {
@@ -143,7 +179,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 			"- [ ] setext criterion",
 			"",
 		].join("\n");
-		const { content: out, changes } = applyCheckboxStates(content, states({ S: { 0: true } }));
+		const { content: out, changes } = applyCheckboxStates(content, states({ 0: { 0: true } }));
 		expect(out).toContain("- [x] setext criterion");
 		expect(changes).toHaveLength(1);
 	});
@@ -166,7 +202,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 			"- [ ] real",
 			"",
 		].join("\n");
-		const { content: out, changes } = applyCheckboxStates(content, states({ S: { 0: true } }));
+		const { content: out, changes } = applyCheckboxStates(content, states({ 0: { 0: true } }));
 		expect(out).toContain("- [ ] decoy before yaml"); // untouched
 		expect(out).toContain("- [x] real");
 		expect(changes).toHaveLength(1);
@@ -185,7 +221,7 @@ describe("applyCheckboxStates (pure in-place reverse-sync)", () => {
 			"",
 		].join("\n");
 		// Position 1 would be the Notes checkbox; it must NOT be affected.
-		const { content: out } = applyCheckboxStates(content, states({ S: { 0: true, 1: true } }));
+		const { content: out } = applyCheckboxStates(content, states({ 0: { 0: true, 1: true } }));
 		expect(out).toContain("- [x] real");
 		expect(out).toContain("- [ ] not a criterion");
 	});
@@ -323,6 +359,69 @@ describe("reverseSyncCriteria (board→file wrapper)", () => {
 
 		expect(report.totalChanges).toBe(0);
 		expect(report.files[0]?.missingOnBoard).toContain("DATA-12");
+	});
+
+	test("fails closed on duplicate ::acN — box unchanged + a warning (stale renamed criteria)", async () => {
+		// A title rename can leave `<old-slug>::ac0` alongside a fresh `<new-slug>::ac0`
+		// under the same parent — both map to position 0. The box must be left as-is.
+		const board: FakeData = {
+			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{
+						id: "wi-parent",
+						sequence_id: 12,
+						name: "Build thing",
+						external_source: "planestories",
+						external_id: "new-slug",
+						state: { id: "s", name: "In Progress", group: "started" },
+					},
+					{
+						id: "wi-old",
+						sequence_id: 13,
+						name: "stale",
+						parent: "wi-parent",
+						external_source: "planestories",
+						external_id: "old-slug::ac0",
+						state: { id: "s2", name: "Done", group: "completed" },
+					},
+					{
+						id: "wi-new",
+						sequence_id: 14,
+						name: "fresh",
+						parent: "wi-parent",
+						external_source: "planestories",
+						external_id: "new-slug::ac0",
+						state: { id: "s3", name: "Backlog", group: "backlog" },
+					},
+				],
+			},
+		};
+		const filePath = join(tmpDir, "s.stories.md");
+		const content = [
+			"---",
+			"project: Data Platform",
+			"---",
+			"",
+			"## Build thing",
+			"",
+			"```yaml",
+			"plane_id: wi-parent",
+			"plane_identifier: DATA-12",
+			"```",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] the one criterion",
+			"",
+		].join("\n");
+		writeFileSync(filePath, content);
+		const { client } = makeFakeClient(board);
+
+		const report = await reverseSyncCriteria(client, { config, files: [filePath], apply: true });
+
+		expect(report.totalChanges).toBe(0);
+		expect(report.files[0]?.warnings.join(" ")).toContain("::ac0");
+		expect(readFileSync(filePath, "utf8")).toContain("- [ ] the one criterion"); // unchanged
 	});
 
 	test("a blank plane_id counts as unlinked, not a stale link", async () => {

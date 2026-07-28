@@ -72,7 +72,7 @@ extra work-item update, after which it is stable. The reconciler never creates t
 Avoid referencing an identifier that will only be assigned during the same run (the same guidance as the
 dry-run limitation above).
 
-## `groom --write-back` matches criteria by position, and stories by H2 title
+## `groom --write-back` matches criteria by position, and stories by H2 ordinal
 
 The in-place checkbox reverse-sync maps a criterion sub-item to a file checkbox by the `::ac<n>`
 **positional index** — the Nth acceptance-criteria checkbox in the file corresponds to the child whose
@@ -81,9 +81,19 @@ importer created them (the normal case). If you REORDER criteria in the file wit
 board's `::ac<n>` numbering no longer matches the file order), write-back can tick the wrong box. Re-import
 after reordering criteria so the board renumbers them, then write-back.
 
-Write-back also locates a story within a file by its **H2 title** (the same mechanism as id write-back).
-Two stories with the identical `## Title` in one file would collide; keep titles unique per file (the
-`lint` duplicate-identifier / duplicate-title checks and `groom`'s duplicate-title report both flag this).
+Write-back locates a story within a file by its **H2 ordinal** (its position among the file's `## `
+headings, after any leading frontmatter) — NOT by title — so two stories with the identical `## Title`
+do NOT cross-contaminate: each H2 is addressed independently, and an unlinked twin is genuinely left
+alone. The one alignment assumption is that write-back and the parser count H2 headings identically;
+both split naively on lines starting with `## `, so a `## ` line inside a fenced code block in the
+narrative would be counted by both (consistently) — avoid literal `## ` at the start of a line inside
+prose if you can.
+
+If a parent has two criterion sub-items with the SAME `::ac<n>` index (which can happen after a title
+rename: the importer derives the criterion external-id prefix from the title slug, so a renamed story
+gets fresh `<new-slug>::acN` children while the stale `<old-slug>::acN` children may remain attached),
+that position is **ambiguous** — write-back leaves those boxes unchanged and prints a warning rather
+than guessing. Clean up the stale children (or re-import) to resolve it.
 
 Cancelled criterion sub-items are treated as **not** completed (only `stateGroup === "completed"` ticks a
 box) — a cancelled acceptance criterion is not a passed one.

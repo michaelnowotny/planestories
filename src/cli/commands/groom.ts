@@ -85,7 +85,11 @@ function printWriteBack(report: WriteBackReport): void {
 	}
 
 	for (const file of report.files) {
-		if (file.changes.length === 0 && file.missingOnBoard.length === 0) {
+		if (
+			file.changes.length === 0 &&
+			file.missingOnBoard.length === 0 &&
+			file.warnings.length === 0
+		) {
 			continue;
 		}
 		console.log(
@@ -100,6 +104,9 @@ function printWriteBack(report: WriteBackReport): void {
 					`${change.identifier ?? change.title} #${change.position}`,
 				)} ${change.text} ${chalk.dim(`(${verb})`)}`,
 			);
+		}
+		for (const warning of file.warnings) {
+			console.log(chalk.yellow(`    ! ${warning}`));
 		}
 		for (const missing of file.missingOnBoard) {
 			console.log(

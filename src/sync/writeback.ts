@@ -32,11 +32,18 @@ export interface CheckboxChange {
 
 /**
  * Apply desired checkbox states to a file's acceptance-criteria checklists IN
- * PLACE. `statesByTitle` maps an H2 story title to a sparse map of
- * (0-based criterion position -> desired checked state). Only positions present
- * in the map are touched; a gap (e.g. a criterion removed on the board) leaves
- * that box exactly as authored. Everything outside the AC checklists — narrative,
- * text, ordering, YAML — is preserved byte-for-byte.
+ * PLACE. `statesByStory` maps a story's **0-based H2 ordinal** (its position among
+ * the file's `## ` headings, after any leading frontmatter) to a sparse map of
+ * (0-based criterion position -> desired checked state). Keying by ordinal — NOT by
+ * title — means two stories that share an H2 title never cross-contaminate: each H2
+ * is addressed independently, so an unlinked duplicate-title story is genuinely left
+ * alone. Only positions present in a story's map are touched; a gap (e.g. a criterion
+ * removed on the board) leaves that box exactly as authored. Everything outside the
+ * AC checklists — narrative, text, ordering, YAML — is preserved byte-for-byte.
+ *
+ * The ordinal numbering matches `parseMarkdownFile`'s story order (both skip a leading
+ * frontmatter block, then count `## ` headings in document order), so the caller can
+ * key by each parsed story's index.
  *
  * This is the pure, offline heart of the reverse-sync: it does NOT rebuild the
  * criterion text from the board (unlike `export --sync-criteria`), so hand-authored
@@ -45,15 +52,17 @@ export interface CheckboxChange {
  */
 export function applyCheckboxStates(
 	content: string,
-	statesByTitle: Map<string, Map<number, boolean>>,
-	identifiersByTitle?: Map<string, string | null>,
+	statesByStory: Map<number, Map<number, boolean>>,
+	identifiersByStory?: Map<number, string | null>,
 ): { content: string; changes: CheckboxChange[] } {
 	const lines = content.split("\n");
 	const changes: CheckboxChange[] = [];
 
-	// Story ranges by H2 boundary.
+	// H2 boundaries, skipping a leading frontmatter block so ordinals align with
+	// parseMarkdownFile (which strips frontmatter before splitting on `## `).
+	const bodyStart = bodyStartLine(lines);
 	const boundaries: number[] = [];
-	for (let i = 0; i < lines.length; i++) {
+	for (let i = bodyStart; i < lines.length; i++) {
 		if ((lines[i] as string).startsWith("## ")) {
 			boundaries.push(i);
 		}
@@ -62,8 +71,9 @@ export function applyCheckboxStates(
 	for (let b = 0; b < boundaries.length; b++) {
 		const start = boundaries[b] as number;
 		const end = b + 1 < boundaries.length ? (boundaries[b + 1] as number) : lines.length;
+		const ordinal = b; // this H2's position matches the caller's parsed-story index
 		const title = (lines[start] as string).replace(/^## /, "").trim();
-		const desired = statesByTitle.get(title);
+		const desired = statesByStory.get(ordinal);
 		if (!desired) {
 			continue;
 		}
@@ -98,7 +108,7 @@ export function applyCheckboxStates(
 						lines[abs] = rewritten;
 						changes.push({
 							title,
-							identifier: identifiersByTitle?.get(title) ?? null,
+							identifier: identifiersByStory?.get(ordinal) ?? null,
 							position: pos,
 							text: checkboxText(rel) ?? "",
 							from: current,
@@ -112,6 +122,23 @@ export function applyCheckboxStates(
 	}
 
 	return { content: lines.join("\n"), changes };
+}
+
+/**
+ * Line index at which the document body begins, skipping a leading YAML
+ * frontmatter block (`---` … `---`) exactly as gray-matter does. Returns 0 when
+ * there is no leading frontmatter (or the opening `---` is never closed).
+ */
+function bodyStartLine(lines: string[]): number {
+	if ((lines[0] ?? "").trim() !== "---") {
+		return 0;
+	}
+	for (let i = 1; i < lines.length; i++) {
+		if ((lines[i] as string).trim() === "---") {
+			return i + 1;
+		}
+	}
+	return 0;
 }
 
 /**
@@ -155,6 +182,8 @@ export interface WriteBackFileResult {
 	unlinkedStories: number;
 	/** Linked stories whose board item wasn't found (stale link / wrong project). */
 	missingOnBoard: string[];
+	/** Non-fatal warnings (e.g. ambiguous duplicate `::ac<n>` criteria left unchanged). */
+	warnings: string[];
 }
 
 export interface WriteBackReport {
@@ -201,6 +230,7 @@ export async function reverseSyncCriteria(
 		linkedStories: number;
 		unlinkedStories: number;
 		missingOnBoard: string[];
+		warnings: string[];
 	}
 	const pending: Pending[] = [];
 
@@ -208,13 +238,20 @@ export async function reverseSyncCriteria(
 		const original = await Bun.file(filePath).text();
 		const parsed = parseMarkdownFile(original, filePath);
 
-		const statesByTitle = new Map<string, Map<number, boolean>>();
-		const identifiersByTitle = new Map<string, string | null>();
+		// Keyed by 0-based H2 ordinal (position among parsed stories), NOT title, so
+		// two same-title stories can never cross-contaminate. The index MUST advance
+		// for EVERY parsed story (including skipped ones) to stay aligned with the H2
+		// ordinal applyCheckboxStates counts.
+		const statesByStory = new Map<number, Map<number, boolean>>();
+		const identifiersByStory = new Map<number, string | null>();
 		let linkedStories = 0;
 		let unlinkedStories = 0;
 		const missingOnBoard: string[] = [];
+		const warnings: string[] = [];
 
+		let storyIndex = -1;
 		for (const story of parsed.stories) {
+			storyIndex++;
 			if (story.kind === "criterion") {
 				continue; // criterion sub-items aren't parents of criteria
 			}
@@ -224,7 +261,7 @@ export async function reverseSyncCriteria(
 			}
 			const planeId = story.planeId.trim();
 			linkedStories++;
-			identifiersByTitle.set(story.title, story.planeIdentifier ?? null);
+			identifiersByStory.set(storyIndex, story.planeIdentifier ?? null);
 
 			const projectName = story.project ?? options.project ?? options.config.defaultProject;
 			if (!projectName) {
@@ -247,17 +284,41 @@ export async function reverseSyncCriteria(
 				continue;
 			}
 
+			// Fail closed on ambiguous `::ac<n>`: after a title rename the importer can
+			// leave stale `<old-slug>::acN` children alongside fresh `<new-slug>::acN`
+			// ones under the same parent (both planestories) — same position index. We
+			// must NOT pick one arbitrarily, so any colliding position is left unchanged.
+			const counts = new Map<number, number>();
+			for (const child of children) {
+				const idx = criterionIndex(child);
+				counts.set(idx, (counts.get(idx) ?? 0) + 1);
+			}
 			const desired = new Map<number, boolean>();
 			for (const child of children) {
-				desired.set(criterionIndex(child), child.stateGroup === "completed");
+				const idx = criterionIndex(child);
+				if ((counts.get(idx) ?? 0) > 1) {
+					continue; // ambiguous — skip this position
+				}
+				desired.set(idx, child.stateGroup === "completed");
 			}
-			statesByTitle.set(story.title, desired);
+			const ambiguous = [...counts.entries()].filter(([, c]) => c > 1).map(([idx]) => idx);
+			if (ambiguous.length > 0) {
+				warnings.push(
+					`${story.planeIdentifier ?? story.title}: duplicate criterion index(es) ${ambiguous
+						.sort((a, b) => a - b)
+						.map((i) => `::ac${i}`)
+						.join(", ")} on the board (stale renamed criteria?) — those boxes were left unchanged`,
+				);
+			}
+			if (desired.size > 0) {
+				statesByStory.set(storyIndex, desired);
+			}
 		}
 
 		const { content: updated, changes } = applyCheckboxStates(
 			original,
-			statesByTitle,
-			identifiersByTitle,
+			statesByStory,
+			identifiersByStory,
 		);
 		pending.push({
 			filePath,
@@ -267,6 +328,7 @@ export async function reverseSyncCriteria(
 			linkedStories,
 			unlinkedStories,
 			missingOnBoard,
+			warnings,
 		});
 	}
 
@@ -285,6 +347,7 @@ export async function reverseSyncCriteria(
 			linkedStories: p.linkedStories,
 			unlinkedStories: p.unlinkedStories,
 			missingOnBoard: p.missingOnBoard,
+			warnings: p.warnings,
 		});
 	}
 
