@@ -1,11 +1,12 @@
 import chalk from "chalk";
 import type { Command } from "commander";
-import { ParseError } from "../../errors.ts";
+import { loadRepoConfig } from "../../config/repo_config.ts";
+import { ConfigError, ParseError } from "../../errors.ts";
 import { type LintReport, lintFiles } from "../../lint/linter.ts";
 import type { LintFinding } from "../../lint/rules.ts";
 
 function handleError(error: unknown): never {
-	if (error instanceof ParseError) {
+	if (error instanceof ConfigError || error instanceof ParseError) {
 		console.error(chalk.red(`${error.name}: ${error.message}`));
 	} else if (error instanceof Error) {
 		console.error(chalk.red(`Error: ${error.message}`));
@@ -47,13 +48,22 @@ export function registerLintCommand(program: Command): void {
 	program
 		.command("lint")
 		.description(
-			"Offline structural and convention checks (strict by default; use --warn-only to downgrade)",
+			"Offline structural and convention checks (strict by default; use --warn-only to downgrade). Reads .planestories.yml for repo lint conventions.",
 		)
 		.argument("<files...>", "Markdown story file paths")
 		.option("--warn-only", "Downgrade all violations to warnings and always exit 0", false)
 		.action(async (files: string[], options) => {
 			try {
-				const report = await lintFiles(files, { warnOnly: Boolean(options.warnOnly) });
+				// Repo conventions (.planestories.yml, discovered upward). The --warn-only
+				// flag always wins; otherwise `lint.strictness: warn` sets warn mode.
+				const repo = await loadRepoConfig();
+				const warnOnly = Boolean(options.warnOnly) || repo.lint?.strictness === "warn";
+				const disabledRules = repo.lint?.disable;
+				if (disabledRules && disabledRules.length > 0) {
+					// Never silently drop coverage — say which rules the repo disabled.
+					console.log(chalk.dim(`  (.planestories.yml disables: ${disabledRules.join(", ")})`));
+				}
+				const report = await lintFiles(files, { warnOnly, disabledRules });
 				printLintReport(report);
 				if (report.exitCode !== 0) {
 					process.exit(1);

@@ -1,8 +1,10 @@
 import { parseMarkdownFile } from "../markdown/parser.ts";
-import { type LintFinding, type LintStory, runLintRules } from "./rules.ts";
+import { type LintFinding, type LintRule, type LintStory, runLintRules } from "./rules.ts";
 
 export interface LintOptions {
 	warnOnly?: boolean;
+	/** Rule names to skip (from `.planestories.yml` `lint.disable`). */
+	disabledRules?: readonly LintRule[];
 }
 
 export interface LintReport {
@@ -25,6 +27,10 @@ export async function lintFiles(
 		parsed.stories.map((story) => ({ filePath: parsed.filePath, story })),
 	);
 	let findings = runLintRules(stories);
+	if (options.disabledRules && options.disabledRules.length > 0) {
+		const disabled = new Set(options.disabledRules);
+		findings = findings.filter((finding) => !disabled.has(finding.rule));
+	}
 	if (options.warnOnly) {
 		findings = findings.map((finding) => ({ ...finding, severity: "warning" }));
 	}

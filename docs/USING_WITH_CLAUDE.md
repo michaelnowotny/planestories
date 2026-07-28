@@ -136,6 +136,15 @@ bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
 #   reference (warning — may exist on the board); duplicate identifier; orphan
 #   criterion; parent not an epic.
 #   Complements doctor (board-side) and /rate-userstories (LLM), does not duplicate them.
+#
+#   Repo conventions: drop a .planestories.yml at your repo root (discovered upward
+#   from cwd) so CI/authoring need no flags — a present-but-invalid file fails loudly:
+#     lint:
+#       strictness: warn        # default lint mode (error = fail on findings, the default)
+#       disable:                # rules this repo doesn't enforce yet
+#         - missing-effort
+#   The --warn-only flag always wins over strictness; disabled rules are printed, never
+#   silently dropped.
 
 # Doctor: read-only CI check; exits non-zero on findings (board rot). Checks orphaned/
 # parentless criterion sub-items, duplicate titles, and DANGLING dependency relations

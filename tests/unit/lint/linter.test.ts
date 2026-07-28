@@ -34,6 +34,21 @@ function rules(report: Awaited<ReturnType<typeof lintFiles>>): LintRule[] {
 	return report.findings.map((finding) => finding.rule);
 }
 
+describe("disabledRules (from .planestories.yml lint.disable)", () => {
+	test("a disabled rule produces no finding", async () => {
+		const file = writeMarkdown(
+			"missing-effort.md",
+			story("Needs effort", ["plane_identifier: APP-1"], `${CRITERIA}`),
+		);
+		// Without disabling, missing-effort fires.
+		expect(rules(await lintFiles([file]))).toContain("missing-effort");
+		// Disabled -> no finding, clean exit.
+		const report = await lintFiles([file], { disabledRules: ["missing-effort"] });
+		expect(rules(report)).not.toContain("missing-effort");
+		expect(report.exitCode).toBe(0);
+	});
+});
+
 describe("lint rules", () => {
 	test("missing-acceptance-criteria", async () => {
 		const file = writeMarkdown(

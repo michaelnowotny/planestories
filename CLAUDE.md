@@ -133,8 +133,13 @@ zero-dependency artifact. Ref: `docs/ATLAS.md`; code in `src/atlas/` + `src/cli/
 - **`doctor` dependency-graph checks** (`src/sync/graph_check.ts`) — board-side DANGLING relation
   detection (a blocked_by/blocks/relates_to whose target isn't in the project) folded into `doctor`'s
   findings/exit. Cycles are NOT checked board-side (Plane backstops them; lint checks them file-side).
-- Still pending: `.planestories.yml` repo config; structured evidence log; then the atlas
-  dependency-graph overhaul (needs the user's layout decisions).
+- **`.planestories.yml` repo conventions** (`src/config/repo_config.ts`) — a repo-local, committed,
+  non-secret conventions file (DISTINCT from the JSON credentials/context config), discovered upward from
+  cwd. v1: `lint.strictness` (warn|error default mode) + `lint.disable` (rule ids to skip). `lint` reads
+  it; `--warn-only` always wins; disabled rules are printed (never silently dropped); a present-but-invalid
+  file fails loudly. Consumed in `src/lint/linter.ts` (`disabledRules`).
+- Still pending: structured evidence log; then the **atlas dependency-graph overhaul** — user decisions
+  CONFIRMED: force-directed/organic layout, show ALL nodes (see `docs/handoff-2026-07-28.md`).
 
 The load-bearing gotchas, alternatives-not-chosen, and Plane-API findings are in
 **`docs/DESIGN_DECISIONS_tier1.md`** — READ IT before touching effort/relations/lint. Verified Plane-API
