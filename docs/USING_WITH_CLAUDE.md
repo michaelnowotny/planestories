@@ -148,9 +148,9 @@ bun run src/cli/index.ts atlas --project "My Project" -o atlas.html        # fro
 # Packet: emit a self-contained implementable brief for a coding agent from a board
 # ticket — description, acceptance criteria (board state), dependencies WITH their
 # current status, effort, parent epic, planning refs, + a machine-readable YAML header.
-# An epic emits itself + every child's brief and sums children dev-days. Read-only.
+# An epic emits itself + every DESCENDANT's brief (nested epics included) and sums descendant dev-days. Read-only.
 bun run src/cli/index.ts packet DATA-123                     # to stdout (pipe to an agent)
-bun run src/cli/index.ts packet DATA-1 -o epic-packet.md     # an epic + all children, to a file
+bun run src/cli/index.ts packet DATA-1 -o epic-packet.md     # an epic + its whole subtree, to a file
 
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects

@@ -26,7 +26,7 @@ export function registerPacketCommand(program: Command) {
 	program
 		.command("packet")
 		.description(
-			"Emit a self-contained implementable brief for a coding agent from a board ticket (an epic emits itself + all children). Prints to stdout unless -o is given.",
+			"Emit a self-contained implementable brief for a coding agent from a board ticket (an epic emits itself + every descendant, nested epics included). Prints to stdout unless -o is given.",
 		)
 		.argument("<identifier>", "Plane work-item identifier (e.g. DATA-123)")
 		.option("-c, --config <path>", "Config file path")

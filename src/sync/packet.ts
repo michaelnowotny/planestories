@@ -1,6 +1,6 @@
 import { ConfigError } from "../errors.ts";
 import { type AcceptanceCriterion, splitBody } from "../markdown/criteria.ts";
-import { parseEffortDays } from "../markdown/directives.ts";
+import { formatDevDays, parseEffortDays } from "../markdown/directives.ts";
 import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import { type FetchedWorkItem, fetchProjectIndex, type ProjectIndex } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
@@ -8,13 +8,26 @@ import type { ResolvedConfig } from "../types.ts";
 import { mapWithConcurrency } from "../utils/concurrency.ts";
 import { criterionIndex, isCriterionChild } from "./board-story.ts";
 
+/**
+ * State groups that count as "closed" for dependency sequencing — a dependency in
+ * one of these no longer gates work. Mirrors groomer's COMPLETED_GROUPS: a
+ * `cancelled` prereq is resolved (won't ever complete), not pending.
+ */
+const DONE_GROUPS = new Set(["completed", "cancelled"]);
+
+function isDone(item: FetchedWorkItem): boolean {
+	return DONE_GROUPS.has(item.stateGroup ?? "");
+}
+
 /** A dependency edge resolved to a human identifier + its current board status. */
 export interface DependencyRef {
 	identifier: string;
 	title: string;
 	status: string | null;
-	/** True when the referenced item is in a completed state group. */
+	/** True when the referenced item is in a closed (completed/cancelled) state group. */
 	done: boolean;
+	/** True when the relation's target could not be resolved in this project index. */
+	unresolved?: boolean;
 }
 
 /** One story's implementable brief. */
@@ -22,8 +35,10 @@ export interface PacketStory {
 	identifier: string;
 	title: string;
 	status: string | null;
-	/** True when this item itself is in a completed state group. */
+	/** True when this item itself is in a closed (completed/cancelled) state group. */
 	done: boolean;
+	/** True when this item parents non-criterion children (it is itself an epic). */
+	isEpic: boolean;
 	effortDays: number | null;
 	parent: { identifier: string; title: string } | null;
 	narrative: string;
@@ -39,7 +54,10 @@ export interface PacketStory {
 export interface Packet {
 	kind: "epic" | "story";
 	root: PacketStory;
-	/** For an epic, its non-criterion children (each a full brief). Empty for a story. */
+	/**
+	 * For an epic, ALL descendant non-criterion items (sub-epics AND their stories),
+	 * in tree order — each a full brief. Empty for a story.
+	 */
 	children: PacketStory[];
 }
 
@@ -47,6 +65,32 @@ const PLANNING_REF = /planning\/[A-Za-z0-9._/-]+/g;
 
 function isEpic(item: FetchedWorkItem, index: ProjectIndex): boolean {
 	return (index.childrenByParent.get(item.id) ?? []).some((c) => !isCriterionChild(c));
+}
+
+/**
+ * All non-criterion descendants of `root` (sub-epics AND their stories), in tree
+ * order (each parent immediately before its children; siblings by sequence id).
+ * Excludes `root` itself. A `visited` guard makes it safe against a malformed
+ * parent cycle.
+ */
+function collectDescendants(root: FetchedWorkItem, index: ProjectIndex): FetchedWorkItem[] {
+	const out: FetchedWorkItem[] = [];
+	const visited = new Set<string>([root.id]);
+	const walk = (parent: FetchedWorkItem): void => {
+		const kids = (index.childrenByParent.get(parent.id) ?? [])
+			.filter((c) => !isCriterionChild(c))
+			.sort((a, b) => a.sequenceId - b.sequenceId);
+		for (const kid of kids) {
+			if (visited.has(kid.id)) {
+				continue;
+			}
+			visited.add(kid.id);
+			out.push(kid);
+			walk(kid);
+		}
+	};
+	walk(root);
+	return out;
 }
 
 /** Reconstruct a story's acceptance criteria — from criterion sub-items if present, else inline. */
@@ -75,7 +119,7 @@ function dependencyRefs(
 	index: ProjectIndex,
 	projectIdentifier: string,
 ): DependencyRef[] {
-	return ids
+	const resolved = ids
 		.flatMap((id) => {
 			const it = index.byId.get(id);
 			if (!it) {
@@ -86,13 +130,29 @@ function dependencyRefs(
 					identifier: `${projectIdentifier}-${it.sequenceId}`,
 					title: it.name,
 					status: it.stateName ?? null,
-					done: it.stateGroup === "completed",
+					done: isDone(it),
 					sequenceId: it.sequenceId,
 				},
 			];
 		})
 		.sort((a, b) => a.sequenceId - b.sequenceId)
 		.map(({ sequenceId: _seq, ...ref }) => ref);
+
+	// A relation whose target isn't in this project index (cross-project, deleted,
+	// or absent from the list payload) is SURFACED, never silently dropped — hiding
+	// a real blocker from an agent brief is worse than a noisy note.
+	const unresolved: DependencyRef[] = ids
+		.filter((id) => !index.byId.get(id))
+		.sort()
+		.map((id) => ({
+			identifier: "(unresolved)",
+			title: `not in project ${projectIdentifier} (${id.slice(0, 8)}…)`,
+			status: null,
+			done: false,
+			unresolved: true,
+		}));
+
+	return [...resolved, ...unresolved];
 }
 
 /**
@@ -114,7 +174,8 @@ export function buildPacketStory(
 		identifier: `${projectIdentifier}-${item.sequenceId}`,
 		title: item.name,
 		status: item.stateName ?? null,
-		done: item.stateGroup === "completed",
+		done: isDone(item),
+		isEpic: isEpic(item, index),
 		effortDays: parseEffortDays(item.description ?? ""),
 		parent: parent
 			? { identifier: `${projectIdentifier}-${parent.sequenceId}`, title: parent.name }
@@ -136,13 +197,23 @@ function renderCriteria(criteria: AcceptanceCriterion[]): string[] {
 	return criteria.map((c) => `- [${c.checked ? "x" : " "}] ${c.text}`);
 }
 
-function renderDeps(refs: DependencyRef[]): string[] {
+/**
+ * Render a dependency list. `flagNotDone` is true ONLY for the "Blocked by" set —
+ * a hard ordering constraint — so an unfinished prereq gets a `⚠ not done` marker.
+ * `blocks`/`relates_to` are not ordering gates, so they carry no such warning (an
+ * agent must not read a related open item as a hard stop). An unresolved edge is
+ * always flagged so a hidden blocker can't slip through.
+ */
+function renderDeps(refs: DependencyRef[], flagNotDone: boolean): string[] {
 	if (refs.length === 0) {
 		return ["- _(none)_"];
 	}
 	return refs.map((r) => {
+		if (r.unresolved) {
+			return `- ${r.identifier} — ${r.title} ⚠ unresolved`;
+		}
 		const status = r.status ? ` [${r.status}]` : "";
-		const flag = r.done ? "" : " ⚠ not done";
+		const flag = flagNotDone && !r.done ? " ⚠ not done" : "";
 		return `- ${r.identifier} — ${r.title}${status}${flag}`;
 	});
 }
@@ -172,13 +243,13 @@ function renderStory(story: PacketStory, headingLevel: number): string[] {
 	lines.push(`${h}# Dependencies`);
 	lines.push("");
 	lines.push("**Blocked by** (must be done first):");
-	lines.push(...renderDeps(story.blockedBy));
+	lines.push(...renderDeps(story.blockedBy, true));
 	lines.push("");
 	lines.push("**Blocks:**");
-	lines.push(...renderDeps(story.blocks));
+	lines.push(...renderDeps(story.blocks, false));
 	lines.push("");
 	lines.push("**Related:**");
-	lines.push(...renderDeps(story.relatesTo));
+	lines.push(...renderDeps(story.relatesTo, false));
 	lines.push("");
 	if (story.planningRefs.length > 0) {
 		lines.push(`${h}# Planning references`);
@@ -188,6 +259,11 @@ function renderStory(story: PacketStory, headingLevel: number): string[] {
 	}
 	lines.push(`_Source: ${story.url}_`);
 	return lines;
+}
+
+/** The resolved (real) identifiers of a dependency set, for the machine-readable header. */
+function resolvedIds(refs: DependencyRef[]): string[] {
+	return refs.filter((r) => !r.unresolved).map((r) => r.identifier);
 }
 
 /** Render a packet to a self-contained markdown brief with a machine-readable header. */
@@ -201,14 +277,21 @@ export function renderPacketMarkdown(packet: Packet): string {
 		`status: ${JSON.stringify(root.status ?? "unknown")}`,
 		`effort_days: ${root.effortDays === null ? "null" : root.effortDays}`,
 		root.parent ? `parent: ${root.parent.identifier}` : "parent: null",
-		`blocked_by: [${root.blockedBy.map((d) => d.identifier).join(", ")}]`,
-		`blocks: [${root.blocks.map((d) => d.identifier).join(", ")}]`,
-		`relates_to: [${root.relatesTo.map((d) => d.identifier).join(", ")}]`,
+		// Machine-readable id lists carry only RESOLVED identifiers (an "(unresolved)"
+		// placeholder isn't a valid id); the unresolved edges still show in the human
+		// Dependencies section with a ⚠ marker.
+		`blocked_by: [${resolvedIds(root.blockedBy).join(", ")}]`,
+		`blocks: [${resolvedIds(root.blocks).join(", ")}]`,
+		`relates_to: [${resolvedIds(root.relatesTo).join(", ")}]`,
 	];
 	if (packet.kind === "epic") {
 		header.push(`children: [${packet.children.map((c) => c.identifier).join(", ")}]`);
-		const total = packet.children.reduce((sum, c) => sum + (c.effortDays ?? 0), 0);
-		header.push(`children_effort_days: ${total}`);
+		// Sum only non-epic descendants' effort (epics carry no work of their own) and
+		// format via formatDevDays so 0.1 + 0.2 renders "0.3", not "0.30000000000000004".
+		const total = packet.children
+			.filter((c) => !c.isEpic)
+			.reduce((sum, c) => sum + (c.effortDays ?? 0), 0);
+		header.push(`children_effort_days: ${formatDevDays(total)}`);
 	}
 	header.push(`url: ${root.url}`);
 	header.push("generated_by: planestories");
@@ -241,7 +324,7 @@ export interface PacketOptions {
  * Build a self-contained implementable brief for a coding agent from a board
  * ticket. For a story: its description, acceptance criteria (board state),
  * dependencies WITH their current status, effort, and parent epic. For an epic
- * (an item that parents non-criterion children): the epic + every child's brief.
+ * (an item that parents non-criterion children): the epic + every descendant's brief (nested epics included).
  * Read-only.
  */
 export async function generatePacket(
@@ -266,11 +349,9 @@ export async function generatePacket(
 	}
 
 	const epic = isEpic(target, index);
-	const children = epic
-		? (index.childrenByParent.get(target.id) ?? [])
-				.filter((c) => !isCriterionChild(c))
-				.sort((a, b) => a.sequenceId - b.sequenceId)
-		: [];
+	// ALL descendant non-criterion items in tree order (DFS), so nested epics'
+	// grandchildren are included — a packet for an epic is the whole subtree.
+	const children = epic ? collectDescendants(target, index) : [];
 
 	// One relations fetch per item in the packet (root + children), bounded.
 	const itemsNeedingRelations = [target, ...children];

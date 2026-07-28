@@ -49,7 +49,7 @@ owns **state/completion**. Import pushes content file→board and only when it a
   `fetchProjectIndex` → resolve target by identifier → fetch relations for root+children, bounded) +
   pure `buildPacketStory`/`renderPacketMarkdown`. Emits a self-contained implementable brief (machine-
   readable YAML header + description + AC with board state + dependencies WITH current status + effort +
-  parent epic + planning refs). An epic emits itself + every child's brief and sums children dev-days.
+  parent epic + planning refs). An epic emits itself + every DESCENDANT's brief (nested epics included) and sums descendant dev-days.
   Read-only; stdout or `-o`.
 - `src/markdown/directives.ts` — body-line "directive" conventions (`**Effort:**`, `**Depends on:**`,
   `**Blocks:**`). Effort detection runs on the CANONICAL form `htmlToMarkdown(markdownToHtml(splitBody(

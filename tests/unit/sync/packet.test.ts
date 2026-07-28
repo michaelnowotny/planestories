@@ -152,6 +152,78 @@ describe("buildPacketStory + renderPacketMarkdown (pure)", () => {
 			{ text: "second", checked: false },
 		]);
 	});
+
+	test("a cancelled blocker counts as done (no ⚠ not done)", () => {
+		const blocker = item({
+			id: "wi-40",
+			sequenceId: 40,
+			name: "Old approach",
+			stateName: "Cancelled",
+			stateGroup: "cancelled",
+		});
+		const target = item({ id: "wi-50", sequenceId: 50, name: "T" });
+		const index = indexOf([blocker, target], "DATA");
+		const story = buildPacketStory(
+			client,
+			target,
+			index,
+			"p",
+			"DATA",
+			relations({ blocked_by: ["wi-40"] }),
+		);
+		expect(story.blockedBy[0]).toMatchObject({ identifier: "DATA-40", done: true });
+		const md = renderPacketMarkdown({ kind: "story", root: story, children: [] });
+		expect(md).toContain("DATA-40 — Old approach [Cancelled]");
+		expect(md).not.toContain("⚠ not done");
+	});
+
+	test("blocks / relates_to open items are NOT flagged as ⚠ not done", () => {
+		const downstream = item({
+			id: "wi-60",
+			sequenceId: 60,
+			name: "Downstream",
+			stateName: "Backlog",
+			stateGroup: "backlog",
+		});
+		const sibling = item({
+			id: "wi-70",
+			sequenceId: 70,
+			name: "Sibling",
+			stateName: "Backlog",
+			stateGroup: "backlog",
+		});
+		const target = item({ id: "wi-50", sequenceId: 50, name: "T" });
+		const index = indexOf([downstream, sibling, target], "DATA");
+		const story = buildPacketStory(
+			client,
+			target,
+			index,
+			"p",
+			"DATA",
+			relations({ blocking: ["wi-60"], relates_to: ["wi-70"] }),
+		);
+		const md = renderPacketMarkdown({ kind: "story", root: story, children: [] });
+		expect(md).toContain("DATA-60 — Downstream [Backlog]");
+		expect(md).toContain("DATA-70 — Sibling [Backlog]");
+		expect(md).not.toContain("⚠ not done"); // only "Blocked by" carries that flag
+	});
+
+	test("an unresolved relation UUID is surfaced (not dropped) and kept out of the header id list", () => {
+		const target = item({ id: "wi-50", sequenceId: 50, name: "T" });
+		const index = indexOf([target], "DATA");
+		const story = buildPacketStory(
+			client,
+			target,
+			index,
+			"p",
+			"DATA",
+			relations({ blocked_by: ["11112222-3333-4444-5555-666677778888"] }),
+		);
+		expect(story.blockedBy[0]).toMatchObject({ unresolved: true });
+		const md = renderPacketMarkdown({ kind: "story", root: story, children: [] });
+		expect(md).toContain("⚠ unresolved");
+		expect(md).toContain("blocked_by: []"); // the unresolved uuid is not a valid header id
+	});
 });
 
 const PROJECT_UUID = "aaaaaaaa-1111-2222-3333-444444444444";
@@ -225,5 +297,65 @@ describe("generatePacket (board wrapper)", () => {
 		await expect(generatePacket(client, { config, identifier: "DATA-999" })).rejects.toBeInstanceOf(
 			ConfigError,
 		);
+	});
+
+	test("children_effort_days is cleanly formatted (no float noise)", async () => {
+		const board: FakeData = {
+			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{
+						id: "e",
+						sequence_id: 1,
+						name: "Epic",
+						state: { id: "s", name: "In Progress", group: "started" },
+					},
+					{
+						id: "a",
+						sequence_id: 2,
+						name: "A",
+						parent: "e",
+						description_html: "<p><strong>Effort:</strong> 0.1 dev-days</p>",
+						state: { id: "s2", name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "b",
+						sequence_id: 3,
+						name: "B",
+						parent: "e",
+						description_html: "<p><strong>Effort:</strong> 0.2 dev-days</p>",
+						state: { id: "s3", name: "Backlog", group: "backlog" },
+					},
+				],
+			},
+		};
+		const { client } = makeFakeClient(board);
+		const { markdown } = await generatePacket(client, { config, identifier: "DATA-1" });
+		expect(markdown).toContain("children_effort_days: 0.3");
+		expect(markdown).not.toContain("0.30000");
+	});
+
+	test("a nested epic includes grandchildren (the whole subtree)", async () => {
+		const started = { id: "s", name: "In Progress", group: "started" };
+		const backlog = { id: "s2", name: "Backlog", group: "backlog" };
+		const board: FakeData = {
+			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{ id: "A", sequence_id: 1, name: "Epic A", state: started },
+					{ id: "B", sequence_id: 2, name: "Epic B", parent: "A", state: started },
+					{ id: "C", sequence_id: 3, name: "Story C", parent: "B", state: backlog },
+					{ id: "D", sequence_id: 4, name: "Story D", parent: "A", state: backlog },
+				],
+			},
+		};
+		const { client } = makeFakeClient(board);
+		const { markdown, packet } = await generatePacket(client, { config, identifier: "DATA-1" });
+		expect(packet.kind).toBe("epic");
+		const ids = packet.children.map((c) => c.identifier);
+		expect(ids).toContain("DATA-2"); // Epic B (sub-epic)
+		expect(ids).toContain("DATA-3"); // Story C (grandchild) — must not be omitted
+		expect(ids).toContain("DATA-4"); // Story D
+		expect(markdown).toContain("Story C");
 	});
 });
