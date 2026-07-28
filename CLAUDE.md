@@ -43,8 +43,14 @@ owns **state/completion**. Import pushes content file→board and only when it a
 - `src/markdown/` — `parser.ts`/`serializer.ts` (YAML keys incl. `plane_hash`), `writer.ts`
   (`writeBackIds`/`clearWriteBack`), `criteria.ts` (`splitBody`/checklist), `html.ts`
   (`markdownToHtml`/`htmlToMarkdown`).
-- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`groom`/`doctor`/`atlas`/`lint`.
+- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`groom`/`doctor`/`atlas`/`lint`/`packet`.
   `src/types.ts` is the type home.
+- `src/sync/packet.ts` — the **agent spec-packet** builder. `generatePacket` (board wrapper: resolve →
+  `fetchProjectIndex` → resolve target by identifier → fetch relations for root+children, bounded) +
+  pure `buildPacketStory`/`renderPacketMarkdown`. Emits a self-contained implementable brief (machine-
+  readable YAML header + description + AC with board state + dependencies WITH current status + effort +
+  parent epic + planning refs). An epic emits itself + every child's brief and sums children dev-days.
+  Read-only; stdout or `-o`.
 - `src/markdown/directives.ts` — body-line "directive" conventions (`**Effort:**`, `**Depends on:**`,
   `**Blocks:**`). Effort detection runs on the CANONICAL form `htmlToMarkdown(markdownToHtml(splitBody(
   body).narrative))` so `marked` (a real CommonMark engine) owns all code/heading parsing and detection
@@ -111,6 +117,15 @@ zero-dependency artifact. Ref: `docs/ATLAS.md`; code in `src/atlas/` + `src/cli/
 - **Relations** (`c1ad503`) — `blocked_by`/`blocks`/`relates_to` (+ `**Depends on:**`/`**Blocks:**`
   sugar) synced to real Plane relations. See `src/sync/relations.ts` reconciliation rules above.
 - **Lint** (`44108ad`) — `planestories lint <files…>`, offline CI gate, 10 rules, `--warn-only`.
+
+**Tier 2 (in progress, 2026-07-28):**
+- **AC checkbox reverse-sync** (`groom --write-back`, merged `4620542`) — in-place board→file checkbox
+  ticking, keyed by `plane_id` (see the `src/sync/writeback.ts` note above; survived a 5-round Grok+Codex
+  review, all edge cases fail closed).
+- **Agent spec-packet** (`packet`, `src/sync/packet.ts`) — see the architecture-map note above.
+- Still pending: epic rollup; then Tier 3 (`.planestories.yml`, evidence log, doctor graph checks); then
+  the atlas dependency-graph overhaul.
+
 The load-bearing gotchas, alternatives-not-chosen, and Plane-API findings are in
 **`docs/DESIGN_DECISIONS_tier1.md`** — READ IT before touching effort/relations/lint. Verified Plane-API
 facts: `point` integer-only; integer `point` persists with no estimate system; relations auto-mirror;

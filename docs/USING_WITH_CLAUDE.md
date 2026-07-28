@@ -123,6 +123,11 @@ bun run src/cli/index.ts export --project "My Project" -o exported.md
 bun run src/cli/index.ts groom --project "My Project"          # dry-run report
 bun run src/cli/index.ts groom --project "My Project" --yes    # apply (close sub-items)
 
+# Reverse-sync criterion done-state board -> file, in place (ticks/unticks - [x]).
+# --write-back is a focused file-only mode: it makes NO board writes.
+bun run src/cli/index.ts groom --write-back stories/*.md          # dry-run diff
+bun run src/cli/index.ts groom --write-back stories/*.md --yes    # write the boxes
+
 # Lint: offline mechanical pre-import check (no API); exits non-zero on violations.
 bun run src/cli/index.ts lint stories/*.md              # strict by default
 bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
@@ -139,6 +144,13 @@ bun run src/cli/index.ts doctor --project "My Project"
 # (epics -> stories -> acceptance criteria) with pan/zoom, filters, search + a quality overlay.
 bun run src/cli/index.ts atlas /path/to/stories.md -o atlas.html --open   # from a file (no creds)
 bun run src/cli/index.ts atlas --project "My Project" -o atlas.html        # from the live board
+
+# Packet: emit a self-contained implementable brief for a coding agent from a board
+# ticket — description, acceptance criteria (board state), dependencies WITH their
+# current status, effort, parent epic, planning refs, + a machine-readable YAML header.
+# An epic emits itself + every child's brief and sums children dev-days. Read-only.
+bun run src/cli/index.ts packet DATA-123                     # to stdout (pipe to an agent)
+bun run src/cli/index.ts packet DATA-1 -o epic-packet.md     # an epic + all children, to a file
 
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects
