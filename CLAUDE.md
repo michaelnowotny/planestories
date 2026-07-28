@@ -128,7 +128,12 @@ zero-dependency artifact. Ref: `docs/ATLAS.md`; code in `src/atlas/` + `src/cli/
   review, all edge cases fail closed).
 - **Agent spec-packet** (`packet`, `src/sync/packet.ts`) — see the architecture-map note above.
 - **Epic rollup** (`epic`, `src/sync/rollup.ts`) — see the architecture-map note above.
-- Still pending: Tier 3 (`.planestories.yml`, evidence log, doctor graph checks); then the atlas
+
+**Tier 3 (in progress):**
+- **`doctor` dependency-graph checks** (`src/sync/graph_check.ts`) — board-side DANGLING relation
+  detection (a blocked_by/blocks/relates_to whose target isn't in the project) folded into `doctor`'s
+  findings/exit. Cycles are NOT checked board-side (Plane backstops them; lint checks them file-side).
+- Still pending: `.planestories.yml` repo config; structured evidence log; then the atlas
   dependency-graph overhaul (needs the user's layout decisions).
 
 The load-bearing gotchas, alternatives-not-chosen, and Plane-API findings are in

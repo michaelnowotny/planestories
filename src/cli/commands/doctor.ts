@@ -3,6 +3,9 @@ import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { createPlaneClient } from "../../plane/client.ts";
+import { fetchProjectIndex } from "../../plane/issues.ts";
+import { Resolver } from "../../plane/resolvers.ts";
+import { checkDependencyGraph } from "../../sync/graph_check.ts";
 import { groom } from "../../sync/groomer.ts";
 
 function handleError(error: unknown): never {
@@ -44,10 +47,19 @@ export function registerDoctorCommand(program: Command) {
 				// Read-only: groom without apply is a pure analysis.
 				const report = await groom(client, { config, project: options.project });
 
+				// Board-side dependency-graph hygiene (dangling relations).
+				const resolver = new Resolver(client);
+				const project = await resolver.resolveProject(
+					options.project ?? config.defaultProject ?? report.project,
+				);
+				const index = await fetchProjectIndex(client, project.id, project.identifier);
+				const graph = await checkDependencyGraph(client, project.id, project.identifier, index);
+
 				const findings =
 					report.orphanedCriteria.length +
 					report.duplicateTitles.length +
-					report.parentlessCriteria.length;
+					report.parentlessCriteria.length +
+					graph.dangling.length;
 
 				console.log("");
 				console.log(chalk.bold(`Doctor ${report.project}`));
@@ -60,6 +72,7 @@ export function registerDoctorCommand(program: Command) {
 				console.log(
 					`  Parentless criterion sub-items:             ${report.parentlessCriteria.length}`,
 				);
+				console.log(`  Dangling relations (target missing):        ${graph.dangling.length}`);
 
 				for (const c of report.orphanedCriteria) {
 					console.log(
@@ -72,13 +85,14 @@ export function registerDoctorCommand(program: Command) {
 				for (const c of report.parentlessCriteria) {
 					console.log(chalk.yellow(`    parentless: ${c.identifier}`));
 				}
+				for (const d of graph.dangling) {
+					console.log(chalk.yellow(`    dangling: ${d.from} ${d.relation} -> ${d.targetId}`));
+				}
 
 				if (findings === 0) {
 					console.log(chalk.green("  Clean — no board rot found."));
 				} else {
-					console.log(
-						chalk.red(`  ${findings} finding(s). Run \`groom --yes\` to auto-close orphans.`),
-					);
+					console.log(chalk.red(`  ${findings} finding(s).`));
 					// Commander converts --no-fail-on-findings to failOnFindings: false.
 					if (options.failOnFindings !== false) {
 						process.exit(1);

@@ -137,7 +137,9 @@ bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
 #   criterion; parent not an epic.
 #   Complements doctor (board-side) and /rate-userstories (LLM), does not duplicate them.
 
-# Doctor: read-only CI check; exits non-zero on findings (board rot).
+# Doctor: read-only CI check; exits non-zero on findings (board rot). Checks orphaned/
+# parentless criterion sub-items, duplicate titles, and DANGLING dependency relations
+# (a blocked_by/blocks/relates_to whose target work item was deleted / left the project).
 bun run src/cli/index.ts doctor --project "My Project"
 
 # Atlas: render an interactive, self-contained offline HTML map of the story tree
