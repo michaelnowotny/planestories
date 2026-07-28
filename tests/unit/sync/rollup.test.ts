@@ -159,6 +159,24 @@ describe("rollupEpic", () => {
 		expect(rollup.blocking.map((c) => c.identifier)).toEqual(["DATA-4"]); // D blocks
 	});
 
+	test("a story blocked only by a DONE item is not listed as blocked (active filter)", async () => {
+		const { client } = makeFakeClient({
+			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{ id: "e", sequence_id: 1, name: "Epic", state: started },
+					{ id: "c", sequence_id: 2, name: "Story C", parent: "e", state: backlog },
+					{ id: "prereq", sequence_id: 3, name: "Finished prereq", parent: "e", state: done },
+				],
+			},
+			// C is blocked_by prereq, but prereq is DONE -> not an active blocker.
+			relations: { c: { blocked_by: ["prereq"] } },
+		});
+		const { rollup } = await rollupEpic(client, { config, identifier: "DATA-1" });
+		expect(rollup.blocked).toHaveLength(0); // the done blocker doesn't count
+		expect(rollup.blocking).toHaveLength(0);
+	});
+
 	test("a non-epic target is a clear error", async () => {
 		const { client } = makeFakeClient(
 			board([{ id: "solo", sequence_id: 9, name: "Lonely story", state: backlog }]),

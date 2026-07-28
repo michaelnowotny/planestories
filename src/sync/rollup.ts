@@ -41,9 +41,9 @@ export interface EpicRollup {
 	totalEffortDays: number;
 	/** Leaf stories with no effort estimate — makes totalEffortDays a lower bound. */
 	missingEffort: number;
-	/** Leaf stories that are blocked by something (have a blocked_by relation). */
+	/** Leaf stories that are ACTIVELY blocked (a blocker that isn't done/cancelled). */
 	blocked: RollupChildRef[];
-	/** Leaf stories that block something (have a blocking relation). */
+	/** Leaf stories that ACTIVELY block something (a blocked item that isn't done/cancelled). */
 	blocking: RollupChildRef[];
 }
 
@@ -111,10 +111,23 @@ export async function rollupEpic(
 	const completionPct = active > 0 ? (completed / active) * 100 : null;
 
 	const efforts = leaves.map((l) => parseEffortDays(l.description ?? ""));
-	const totalEffortDays = efforts.reduce<number>((sum, e) => sum + (e ?? 0), 0);
+	// Round off IEEE noise so the structured field matches the displayed value
+	// (0.1 + 0.2 -> 0.3 in the object too, not 0.30000000000000004).
+	const totalEffortDays = Number(
+		formatDevDays(efforts.reduce<number>((sum, e) => sum + (e ?? 0), 0)),
+	);
 	const missingEffort = efforts.filter((e) => e === null).length;
 
-	// Relations only for leaf stories, to find which are blocked / blocking. Bounded.
+	// A dependency that is itself closed (done/cancelled) or unresolvable-as-closed no
+	// longer gates work, so it doesn't make the story ACTIVELY blocked/blocking. An
+	// unresolved target is treated as active (conservative — we can't prove it's closed).
+	const isTargetActive = (ids: string[]): boolean =>
+		ids.some((id) => {
+			const it = index.byId.get(id);
+			return !it || !(it.stateGroup === COMPLETED_GROUP || it.stateGroup === CANCELLED_GROUP);
+		});
+
+	// Relations only for leaf stories, to find which are actively blocked / blocking. Bounded.
 	const relationPairs = await mapWithConcurrency(leaves, 6, async (leaf) => {
 		const relations = await client.getRelations(project.id, leaf.id);
 		return [leaf.id, relations] as const;
@@ -123,11 +136,16 @@ export async function rollupEpic(
 	const blocked: RollupChildRef[] = [];
 	const blocking: RollupChildRef[] = [];
 	for (const leaf of leaves) {
+		// A finished (done/cancelled) leaf is neither blocked nor blocking — it needs
+		// nothing and, being complete, no longer holds anything up.
+		if (leaf.stateGroup === COMPLETED_GROUP || leaf.stateGroup === CANCELLED_GROUP) {
+			continue;
+		}
 		const rel = relationsById.get(leaf.id);
-		if (rel && (rel.blocked_by ?? []).length > 0) {
+		if (rel && isTargetActive(rel.blocked_by ?? [])) {
 			blocked.push(childRef(leaf, project.identifier));
 		}
-		if (rel && (rel.blocking ?? []).length > 0) {
+		if (rel && isTargetActive(rel.blocking ?? [])) {
 			blocking.push(childRef(leaf, project.identifier));
 		}
 	}
@@ -156,7 +174,9 @@ export function renderRollup(r: EpicRollup): string {
 	const lines: string[] = [];
 	lines.push(`${r.identifier} — ${r.title}  [${r.status ?? "unknown"}]`);
 	lines.push("");
-	const pct = r.completionPct === null ? "n/a" : `${Math.round(r.completionPct)}%`;
+	// Floor, not round — never claim 100% while any active story is unfinished
+	// (Math.round(99.5) would read "100% complete").
+	const pct = r.completionPct === null ? "n/a" : `${Math.floor(r.completionPct)}%`;
 	lines.push(
 		`  Stories: ${r.leafTotal} (${r.completed} done${
 			r.cancelled > 0 ? `, ${r.cancelled} cancelled` : ""
