@@ -203,7 +203,9 @@ const REP=520, SPRING={parent:0.09,blocks:0.03,relates:0.02},
   REST={parent:30,blocks:110,relates:120}, GRAV=0.04, VDECAY=0.7, DECAY=0.012, AMIN=0.02;
 function tick(){
   const arr=NODES; const n=arr.length;
-  // repulsion (brute force; fine for a few thousand nodes)
+  // repulsion is O(n^2) per tick — fine into the low thousands of nodes (a few
+  // seconds of one-time settle on a ~700-node board; interactive after it cools).
+  // A Barnes-Hut approximation would be the next step for much larger graphs.
   for(let i=0;i<n;i++){const a=P.get(arr[i].id);
     for(let j=i+1;j<n;j++){const b=P.get(arr[j].id);
       let dx=a.x-b.x, dy=a.y-b.y, d2=dx*dx+dy*dy; if(d2<0.01){dx=(Math.random()-0.5);dy=(Math.random()-0.5);d2=dx*dx+dy*dy+0.01;}
@@ -219,7 +221,9 @@ function tick(){
   // gravity to origin + integrate
   for(const nd of arr){const p=P.get(nd.id);
     p.vx-=p.x*GRAV*alpha; p.vy-=p.y*GRAV*alpha;
-    if(p.pin)continue;
+    // A pinned (dragged) node holds position AND discards accumulated force, so
+    // releasing it doesn't fling it across the canvas.
+    if(p.pin){p.vx=0;p.vy=0;continue;}
     p.vx*=VDECAY; p.vy*=VDECAY; p.x+=p.vx; p.y+=p.vy;
   }
   alpha*=(1-DECAY);
@@ -435,6 +439,10 @@ el("theme").onclick=()=>{const r=document.documentElement;
   r.setAttribute("data-theme",cur==="dark"?"light":"dark");readColours();draw();};
 
 window.addEventListener("resize",resize);
+// The canvas is a flex child: opening/closing the details panel changes its width
+// WITHOUT a window resize. Observe the container so the bitmap always matches its
+// box (otherwise a stale bitmap gets stretched -> elliptical nodes + hit-test drift).
+if(window.ResizeObserver)new ResizeObserver(()=>resize()).observe(canvas);
 readColours();resize();buildFilters();
 // Settle the layout to (near) equilibrium, THEN fit once — fitting mid-motion
 // framed a sprawling, still-expanding cloud.
