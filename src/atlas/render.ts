@@ -215,8 +215,6 @@ for(const id of [...inDeps]){const p=parentOf.get(id);if(p)inDeps.add(p);}
 // A stable hue per epic so each cluster reads as its own soft-tinted region.
 const epicHue=new Map();
 {let i=0;for(const n of NODES){if(n.kind==="epic"){epicHue.set(n.id,(i*137.508)%360);i++;}}}
-function hueOf(n){ if(n.kind==="epic")return epicHue.get(n.id);
-  const p=parentOf.get(n.id); return p!==undefined&&epicHue.has(p)?epicHue.get(p):210; }
 
 // --- Layout state -------------------------------------------------------------
 const P=new Map();
@@ -386,7 +384,7 @@ window.addEventListener("mouseup",()=>{ if(!drag)return;
   if(drag.node){P.get(drag.node.id).pin=false; if(!drag.moved)select(drag.node.id);}
   else if(!drag.moved&&state.selected){state.selected=null;renderPanel();draw();}
   drag=null;canvas.classList.remove("grabbing");});
-canvas.addEventListener("mouseleave",hideTip);
+canvas.addEventListener("mouseleave",()=>{hideTip();if(state.hover){state.hover=null;draw();}});
 canvas.addEventListener("wheel",e=>{e.preventDefault();const m=relMouse(e);
   const f=e.deltaY<0?1.12:0.893,ns=Math.min(4.5,Math.max(0.12,state.view.scale*f));
   state.view.x=m.x-(m.x-state.view.x)*(ns/state.view.scale);
