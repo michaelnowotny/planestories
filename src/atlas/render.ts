@@ -264,7 +264,8 @@ function matches(n){
   if(state.flaggedOnly&&!(n.quality&&!n.quality.ok))return false;
   if(state.q){const h=(n.title+" "+(n.identifier||"")).toLowerCase();if(!h.includes(state.q))return false;}
   return true;}
-function focusId(){return state.hover||state.selected;}
+function focusId(){const f=state.hover||state.selected;
+  if(f){const n=byId.get(f);if(n&&!visible(n))return null;} return f;} // a hidden focus dims nothing
 function dimmed(n){ if(!matches(n))return true;
   const f=focusId(); if(f&&f!==n.id&&!adj.get(f).has(n.id))return true; return false;}
 
@@ -376,7 +377,12 @@ window.addEventListener("mousemove",e=>{
   if(drag){ if(drag.pan){state.view.x=drag.vx+(e.clientX-drag.x);state.view.y=drag.vy+(e.clientY-drag.y);drag.moved=true;draw();}
     else{const m=relMouse(e),w=toWorld(m.x,m.y),p=P.get(drag.node.id);p.x=w.x;p.y=w.y;p.vx=0;p.vy=0;drag.moved=true;reheat(0.3);}
     return; }
-  const m=relMouse(e),n=nodeAt(m.x,m.y),id=n?n.id:null;
+  // mousemove is on window (so a drag continues outside the canvas); for HOVER,
+  // ignore movement that isn't over the canvas (e.g. over the panel/header).
+  const m=relMouse(e);
+  if(m.x<0||m.y<0||m.x>canvas.clientWidth||m.y>canvas.clientHeight){
+    hideTip(); if(state.hover){state.hover=null;draw();} return; }
+  const n=nodeAt(m.x,m.y),id=n?n.id:null;
   if(id!==state.hover){state.hover=id;canvas.style.cursor=id?"pointer":"grab";draw();}
   if(n)showTip(n,e); else hideTip();
 });
@@ -460,7 +466,10 @@ function row(k,v){const r=rowEl(k);r.appendChild(document.createTextNode(v));ret
 
 // --- Filters ------------------------------------------------------------------
 function buildFilters(){const f=el("filters");f.replaceChildren();
-  if(GRAPH.counts.edges){const c=chip("◆ Dependencies only",()=>{state.depsOnly=!state.depsOnly;fit();buildFilters();},state.depsOnly);
+  if(GRAPH.counts.edges){const c=chip("◆ Dependencies only",()=>{state.depsOnly=!state.depsOnly;
+      // If the toggle hides the selected node, drop the selection + close the panel.
+      if(state.selected){const sn=byId.get(state.selected);if(sn&&!visible(sn)){state.selected=null;renderPanel();}}
+      fit();buildFilters();},state.depsOnly);
     c.classList.add("dep");f.appendChild(c);}
   for(const gname of GROUPS){if(!GRAPH.statuses.length&&gname==="unknown")continue;
     const c=chip(gname,()=>{tog(state.statusOn,gname);draw();buildFilters();},state.statusOn.has(gname));
