@@ -4,6 +4,7 @@ import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { createPlaneClient } from "../../plane/client.ts";
 import { type GroomReport, groom } from "../../sync/groomer.ts";
+import { reverseSyncCriteria, type WriteBackReport } from "../../sync/writeback.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -70,18 +71,62 @@ function printReport(report: GroomReport, applied: boolean): void {
 	}
 }
 
+function printWriteBack(report: WriteBackReport): void {
+	console.log("");
+	console.log(
+		chalk.bold(
+			`Reverse-sync acceptance criteria${report.applied ? "" : " — dry run (no changes)"}`,
+		),
+	);
+
+	if (report.totalChanges === 0) {
+		console.log(chalk.gray("  All checkboxes already match the board."));
+	}
+
+	for (const file of report.files) {
+		if (file.changes.length === 0 && file.missingOnBoard.length === 0) {
+			continue;
+		}
+		console.log(
+			`  ${chalk.cyan(file.filePath)} (${file.linkedStories} linked, ${file.unlinkedStories} unlinked)`,
+		);
+		for (const change of file.changes) {
+			const arrow = `[${change.from ? "x" : " "}] → [${change.to ? "x" : " "}]`;
+			const verb = report.applied ? "ticked" : "would tick";
+			console.log(
+				`    ${report.applied ? chalk.green(arrow) : chalk.yellow(arrow)} ${chalk.dim(
+					`${change.identifier ?? change.title} #${change.position}`,
+				)} ${change.text} ${chalk.dim(`(${verb})`)}`,
+			);
+		}
+		for (const missing of file.missingOnBoard) {
+			console.log(
+				chalk.yellow(`    ! ${missing} is linked but not found on the board (stale link?)`),
+			);
+		}
+	}
+
+	if (!report.applied && report.totalChanges > 0) {
+		console.log(chalk.dim("  Re-run with --yes to write these boxes to the file(s)."));
+	}
+}
+
 export function registerGroomCommand(program: Command) {
 	program
 		.command("groom")
 		.description(
-			"Reconcile a project: close orphaned criterion sub-items; report duplicate-title and parentless items",
+			"Reconcile a project: close orphaned criterion sub-items; report duplicate-title and parentless items. With --write-back, reverse-sync criterion done-state board→file.",
 		)
 		.option("-c, --config <path>", "Config file path")
 		.option("--context <name>", "Select a named context from multi-context config")
 		.option("-p, --project <name>", "Project to groom (required if no defaultProject)")
 		.option(
+			"--write-back <files...>",
+			"Reverse-sync acceptance-criteria checkbox state board→file, in place (ticks/unticks - [x] to match each criterion sub-item's board status)",
+		)
+		.option(
 			"-y, --yes",
-			"Apply changes (close sub-items); without it, only the report is shown",
+			"Apply changes (close sub-items and/or write checkbox state); without it, only the report is shown",
 			false,
 		)
 		.action(async (options) => {
@@ -94,13 +139,31 @@ export function registerGroomCommand(program: Command) {
 					maxRetries: config.maxRetries,
 				});
 
-				const report = await groom(client, {
-					config,
-					project: options.project,
-					apply: options.yes,
-				});
+				const writeBackFiles: string[] = options.writeBack ?? [];
 
-				printReport(report, Boolean(options.yes));
+				// Board-side reconcile (close orphaned sub-items, report duplicates/parentless).
+				// Skipped only when the caller asked ONLY for write-back and no project is
+				// resolvable — so `groom --write-back f.md` works from file frontmatter alone.
+				const projectResolvable = Boolean(options.project ?? config.defaultProject);
+				if (projectResolvable || writeBackFiles.length === 0) {
+					const report = await groom(client, {
+						config,
+						project: options.project,
+						apply: options.yes,
+					});
+					printReport(report, Boolean(options.yes));
+				}
+
+				// File-side reverse-sync (the other half of the reconcile loop).
+				if (writeBackFiles.length > 0) {
+					const writeBack = await reverseSyncCriteria(client, {
+						config,
+						files: writeBackFiles,
+						project: options.project,
+						apply: options.yes,
+					});
+					printWriteBack(writeBack);
+				}
 			} catch (error) {
 				handleError(error);
 			}

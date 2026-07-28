@@ -195,7 +195,19 @@ project.
   `--sync-criteria` — the checklist), so cosmetic markdown reflow won't trigger a write.
   Pass `--force` to re-import regardless. (An out-of-band edit made in the Plane UI while
   the file is untouched is intentionally NOT detected here — that half of the reconcile
-  loop belongs to the forthcoming `groom` reverse-sync.)
+  loop is served by `groom --write-back` below.)
+- **`groom --write-back <files…>`** — the reverse half of the loop: pull each criterion
+  sub-item's board **completion** back into the file's `- [x]`/`- [ ]` boxes, **in place**.
+  For every story in the file that has a `plane_id`, its criterion children are matched to
+  the file's acceptance-criteria checkboxes by the `::ac<n>` positional index and the box is
+  ticked (`stateGroup === "completed"`) or unticked to match the board. It preserves the
+  authored criterion TEXT, narrative, ordering, and YAML (unlike `export --sync-criteria`,
+  which regenerates the whole file from the board). Dry-run by default — it prints a
+  per-criterion `[ ] → [x]` diff; pass `--yes` to write. Idempotent: a file already matching
+  the board makes no change. A story with no `plane_id` is skipped (counted as `unlinked`);
+  a stale link (board item gone) is flagged, not fatal. The project is resolved per story
+  (`project:` frontmatter → `--project` → `defaultProject`). This can run alongside the
+  normal board-side groom — together they are the full reconcile loop.
 
 ## Caveats
 

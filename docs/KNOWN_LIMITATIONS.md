@@ -71,3 +71,19 @@ the story now has its identifier, the self-reference is stripped, and the hash d
 extra work-item update, after which it is stable. The reconciler never creates the self-edge either way.
 Avoid referencing an identifier that will only be assigned during the same run (the same guidance as the
 dry-run limitation above).
+
+## `groom --write-back` matches criteria by position, and stories by H2 title
+
+The in-place checkbox reverse-sync maps a criterion sub-item to a file checkbox by the `::ac<n>`
+**positional index** — the Nth acceptance-criteria checkbox in the file corresponds to the child whose
+external id ends `::ac<n>`. This is exact as long as the file's criteria are in the same order the
+importer created them (the normal case). If you REORDER criteria in the file without re-importing (so the
+board's `::ac<n>` numbering no longer matches the file order), write-back can tick the wrong box. Re-import
+after reordering criteria so the board renumbers them, then write-back.
+
+Write-back also locates a story within a file by its **H2 title** (the same mechanism as id write-back).
+Two stories with the identical `## Title` in one file would collide; keep titles unique per file (the
+`lint` duplicate-identifier / duplicate-title checks and `groom`'s duplicate-title report both flag this).
+
+Cancelled criterion sub-items are treated as **not** completed (only `stateGroup === "completed"` ticks a
+box) — a cancelled acceptance criterion is not a passed one.

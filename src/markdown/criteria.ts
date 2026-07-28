@@ -19,7 +19,15 @@ export interface SplitBody {
  * inconsistently under `--sync-criteria`.
  */
 export const AC_HEADING = /^#{1,6}\s+acceptance criteria\s*#*\s*$/i;
-const CHECKBOX = /^\s*[-*]\s+\[([ xX])\]\s+(.*)$/;
+/**
+ * A single checklist line, split into (prefix)(mark)(rest) so the mark can be
+ * rewritten in place while preserving the exact bullet/indentation/text. This is
+ * the ONE source of truth for what counts as a criterion checkbox — `splitBody`
+ * (which numbers criteria for the `::ac<n>` sub-item ids) and the write-back
+ * reverse-sync BOTH derive from it, so a checkbox's position can never drift
+ * between the two.
+ */
+export const CHECKBOX_LINE = /^(\s*[-*]\s+)\[([ xX])\](\s+.*)$/;
 const ANY_HEADING = /^#{1,6}\s+/;
 const AC_TEXT = /^acceptance criteria$/i;
 const SETEXT_UNDERLINE = /^(?:=+|-+)$/;
@@ -73,9 +81,9 @@ export function splitBody(body: string): SplitBody {
 		if (ANY_HEADING.test(line.trim())) {
 			break; // next section
 		}
-		const match = line.match(CHECKBOX);
+		const match = line.match(CHECKBOX_LINE);
 		if (match) {
-			criteria.push({ checked: match[1]?.toLowerCase() === "x", text: (match[2] ?? "").trim() });
+			criteria.push({ checked: match[2]?.toLowerCase() === "x", text: (match[3] ?? "").trim() });
 		}
 	}
 
@@ -95,6 +103,46 @@ export function buildAcceptanceCriteria(criteria: AcceptanceCriterion[]): string
 		lines.push(`- [${c.checked ? "x" : " "}] ${c.text}`);
 	}
 	return lines.join("\n");
+}
+
+/**
+ * If `line` is a checklist line, return it with its `[ ]`/`[x]` mark set to the
+ * desired state (preserving the exact prefix and text); otherwise return null.
+ * Used by the write-back reverse-sync to flip a box without rewriting the line.
+ */
+export function setCheckboxMark(line: string, checked: boolean): string | null {
+	const match = line.match(CHECKBOX_LINE);
+	if (!match) {
+		return null;
+	}
+	return `${match[1]}[${checked ? "x" : " "}]${match[3]}`;
+}
+
+/** Whether a checklist line's mark is currently checked (`[x]`). Null if not a checkbox. */
+export function checkboxState(line: string): boolean | null {
+	const match = line.match(CHECKBOX_LINE);
+	if (!match) {
+		return null;
+	}
+	return match[2]?.toLowerCase() === "x";
+}
+
+/** The trimmed text of a checklist line, or null if not a checkbox. */
+export function checkboxText(line: string): string | null {
+	const match = line.match(CHECKBOX_LINE);
+	if (!match) {
+		return null;
+	}
+	return (match[3] ?? "").trim();
+}
+
+/**
+ * Whether a line is an ATX heading (`#`..`######`). This is the same section
+ * boundary `splitBody` uses to stop collecting criteria, exported so the
+ * write-back reverse-sync stops at the exact same place.
+ */
+export function isHeadingLine(line: string): boolean {
+	return ANY_HEADING.test(line.trim());
 }
 
 /** Join a narrative and a (possibly empty) acceptance-criteria block. */

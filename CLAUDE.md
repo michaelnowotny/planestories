@@ -84,8 +84,12 @@ duplicates/parentless — the cascade closes ONLY criterion children, NEVER stor
 epic) · **7** cross-file `parent`, `import --strict` guard, `comment:` evidence notes, `doctor`
 (CI wrapper, non-zero on findings). Groom/doctor live in `src/sync/groomer.ts` +
 `src/cli/commands/{groom,doctor}.ts`; comments go through `ensureComment` (marker-idempotent) on
-the client's `listWorkItemComments`/`createWorkItemComment`. Reverse-sync (board→file checkbox
-ticking) is the one deferred piece (decision #4).
+the client's `listWorkItemComments`/`createWorkItemComment`. **Reverse-sync (board→file checkbox
+ticking, decision #4) now SHIPPED** as `groom --write-back <files…>` — see `src/sync/writeback.ts`
+(pure `applyCheckboxStates` core + `reverseSyncCriteria` board wrapper). It ticks/unticks a story's
+`- [x]`/`- [ ]` boxes to match each criterion sub-item's board `stateGroup`, matched by the `::ac<n>`
+positional index, IN PLACE (preserves authored text/ordering — unlike `export --sync-criteria`, which
+regenerates the whole file). Dry-run by default; `--yes` writes.
 
 Also since v0.2.0: **`export` emits `kind: epic`** for any item that parents a non-criterion child
 (so exported files self-annotate the hierarchy), and the **`/rate-userstories` skill is epic-aware**
