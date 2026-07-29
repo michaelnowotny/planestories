@@ -41,8 +41,17 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
   <div class="stats" id="stats"></div>
   <div class="actions">
     <input id="search" type="search" placeholder="Search title or ID…" autocomplete="off" />
-    <button id="fit" title="Fit to view">Fit</button>
-    <button id="reheat" title="Re-run the layout">Reheat</button>
+    <label class="colorby" title="Color nodes by">
+      <span>Color</span>
+      <select id="colorby">
+        <option value="status">Status</option>
+        <option value="cluster">Cluster</option>
+        <option value="label">Label</option>
+      </select>
+    </label>
+    <button id="fit" title="Fit to view (F)">Fit</button>
+    <button id="reheat" title="Re-run the layout (R)">Reheat</button>
+    <button id="png" title="Export the current view as a PNG">PNG</button>
     <button id="theme" title="Toggle light / dark" aria-label="Toggle theme">◐</button>
   </div>
 </header>
@@ -50,6 +59,7 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
 <main>
   <div class="canvas" id="canvas">
     <canvas id="graph"></canvas>
+    <canvas id="minimap" title="Minimap — click or drag to navigate"></canvas>
     <div class="tooltip" id="tooltip" hidden></div>
     <div class="legend" id="legend"></div>
     <div class="settling" id="settling" hidden><span class="spin"></span> arranging…</div>
@@ -58,7 +68,7 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
   <aside class="panel" id="panel" hidden></aside>
 </main>
 <footer class="foot">
-  planestories atlas · inspired by Project Atlas (linearstories, Ijonas Kisselbach) · drag nodes · drag background to pan · scroll to zoom
+  planestories atlas · inspired by Project Atlas (linearstories, Ijonas Kisselbach) · drag nodes · scroll to zoom · keys: F fit · R reheat · D deps-only · / search · Esc clear
 </footer>
 <script>
 const GRAPH = ${data};
@@ -119,6 +129,12 @@ body{margin:0;background:var(--bg);color:var(--ink);
 .actions input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}
 .actions button{cursor:pointer}
 .actions button:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--card))}
+.colorby{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);
+  border:1px solid var(--card-line);background:var(--card);border-radius:9px;padding:0 4px 0 10px}
+.colorby select{font:inherit;border:none;background:transparent;color:var(--ink);padding:6px 4px;cursor:pointer;outline:none}
+#minimap{position:absolute;right:14px;top:14px;width:190px;height:130px;border:1px solid var(--line);
+  border-radius:10px;background:color-mix(in srgb,var(--panel) 80%,transparent);box-shadow:var(--shadow);
+  cursor:pointer;backdrop-filter:blur(4px)}
 .filters{display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);z-index:2}
 .chip{font-size:12px;border:1px solid var(--card-line);background:var(--card);color:var(--muted);
   border-radius:999px;padding:3px 11px;cursor:pointer;user-select:none;display:inline-flex;gap:6px;align-items:center;
@@ -189,6 +205,7 @@ const SCRIPT = `
 const GROUPS=["backlog","unstarted","started","completed","cancelled","unknown"];
 const el=id=>document.getElementById(id);
 const cv=el("graph"), canvas=el("canvas"), ctx=cv.getContext("2d"), tip=el("tooltip");
+const mini=el("minimap"), mctx=mini.getContext("2d");
 
 // --- Flatten the tree into nodes + parent/dependency edges --------------------
 const NODES=[], byId=new Map();
@@ -215,6 +232,9 @@ for(const id of [...inDeps]){const p=parentOf.get(id);if(p)inDeps.add(p);}
 // A stable hue per epic so each cluster reads as its own soft-tinted region.
 const epicHue=new Map();
 {let i=0;for(const n of NODES){if(n.kind==="epic"){epicHue.set(n.id,(i*137.508)%360);i++;}}}
+// A stable hue per label (for the "Color: Label" mode).
+const labelHue=new Map();
+{const ls=[...GRAPH.labels].sort();ls.forEach((l,i)=>labelHue.set(l,(i*137.508+40)%360));}
 
 // --- Layout state -------------------------------------------------------------
 const P=new Map();
@@ -223,7 +243,7 @@ const P=new Map();
     P.set(n.id,{x:Math.cos(a)*r,y:Math.sin(a)*r,vx:0,vy:0,r:n.kind==="epic"?11:6,pin:false}); i++;}
 })();
 const state={statusOn:new Set(),labelOn:new Set(),flaggedOnly:false,depsOnly:false,q:"",
-  selected:null,hover:null,view:{x:0,y:0,scale:1}};
+  colorBy:"status",selected:null,hover:null,view:{x:0,y:0,scale:1}};
 let alpha=1;
 
 // --- Force simulation ---------------------------------------------------------
@@ -254,7 +274,13 @@ function readColours(){const cs=getComputedStyle(document.documentElement);const
     accent:g("--accent"),edge:g("--edge"),blocks:g("--blocks"),relates:g("--relates"),flag:g("--flag"),pill:g("--pill"),
     backlog:g("--g-backlog"),unstarted:g("--g-unstarted"),started:g("--g-started"),completed:g("--g-completed"),
     cancelled:g("--g-cancelled"),unknown:g("--g-unknown")};}
-function nodeColour(n){return COL[n.statusGroup]||COL.unknown;}
+function nodeColour(n){
+  if(state.colorBy==="cluster"){const h=n.kind==="epic"?epicHue.get(n.id):(epicHue.has(parentOf.get(n.id))?epicHue.get(parentOf.get(n.id)):null);
+    return h==null?COL.unknown:"hsl("+h+",62%,52%)";}
+  if(state.colorBy==="label"){ if(!n.labels.length)return COL.unknown;
+    const h=labelHue.get(n.labels[0]); return h==null?COL.unknown:"hsl("+h+",60%,52%)";}
+  return COL[n.statusGroup]||COL.unknown;}
+function labelColour(l){const h=labelHue.get(l);return h==null?"var(--g-unknown)":"hsl("+h+",60%,52%)";}
 
 // --- Visibility / focus -------------------------------------------------------
 function visible(n){return !(state.depsOnly&&!inDeps.has(n.id));}
@@ -293,7 +319,8 @@ function drawHull(members,hue){
 
 // --- Drawing ------------------------------------------------------------------
 let dpr=1;
-function resize(){dpr=window.devicePixelRatio||1;cv.width=canvas.clientWidth*dpr;cv.height=canvas.clientHeight*dpr;draw();}
+function resize(){dpr=window.devicePixelRatio||1;cv.width=canvas.clientWidth*dpr;cv.height=canvas.clientHeight*dpr;
+  mini.width=mini.clientWidth*dpr;mini.height=mini.clientHeight*dpr;draw();}
 function T(){const v=state.view;ctx.setTransform(v.scale*dpr,0,0,v.scale*dpr,v.x*dpr,v.y*dpr);}
 function clip(s,n){return s.length>n?s.slice(0,n-1)+"…":s;}
 
@@ -343,7 +370,41 @@ function draw(){
   }
   ctx.globalAlpha=1;
   el("empty").hidden=NODES.some(n=>visible(n)&&matches(n));
+  drawMinimap();
 }
+// Bounds of the currently-visible nodes (world space), padded.
+function worldBounds(){let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9,any=false;
+  for(const n of NODES){if(!visible(n))continue;any=true;const p=P.get(n.id);
+    mnx=Math.min(mnx,p.x);mny=Math.min(mny,p.y);mxx=Math.max(mxx,p.x);mxy=Math.max(mxy,p.y);}
+  if(!any)return null; const pad=40; return{mnx:mnx-pad,mny:mny-pad,mxx:mxx+pad,mxy:mxy+pad};}
+let miniT=null;
+function drawMinimap(){
+  mctx.setTransform(dpr,0,0,dpr,0,0);mctx.clearRect(0,0,mini.width,mini.height);
+  const W=mini.clientWidth,H=mini.clientHeight,b=worldBounds();
+  if(!b){miniT=null;return;}
+  const gw=b.mxx-b.mnx,gh=b.mxy-b.mny; const s=Math.min(W/gw,H/gh)*0.9;
+  const ox=(W-gw*s)/2-b.mnx*s, oy=(H-gh*s)/2-b.mny*s;
+  miniT={s,ox,oy};
+  const wx=x=>x*s+ox, wy=y=>y*s+oy;
+  // nodes as tiny dots
+  for(const n of NODES){if(!visible(n))continue;const p=P.get(n.id);
+    mctx.beginPath();mctx.arc(wx(p.x),wy(p.y),n.kind==="epic"?2:1.3,0,6.283);
+    mctx.fillStyle=nodeColour(n);mctx.globalAlpha=.85;mctx.fill();}
+  mctx.globalAlpha=1;
+  // current viewport rectangle
+  const v=state.view,vw=canvas.clientWidth,vh=canvas.clientHeight;
+  const x0=(-v.x)/v.scale, y0=(-v.y)/v.scale, x1=(vw-v.x)/v.scale, y1=(vh-v.y)/v.scale;
+  mctx.strokeStyle=COL.accent;mctx.lineWidth=1.3;
+  mctx.strokeRect(wx(x0),wy(y0),(x1-x0)*s,(y1-y0)*s);
+}
+// Pan the main view so a minimap point maps to the viewport centre.
+function miniPan(e){ if(!miniT)return; const r=mini.getBoundingClientRect();
+  const wx=(e.clientX-r.left-miniT.ox)/miniT.s, wy=(e.clientY-r.top-miniT.oy)/miniT.s;
+  const v=state.view; v.x=canvas.clientWidth/2-wx*v.scale; v.y=canvas.clientHeight/2-wy*v.scale; draw();}
+let miniDrag=false;
+mini.addEventListener("mousedown",e=>{e.stopPropagation();miniDrag=true;miniPan(e);});
+window.addEventListener("mousemove",e=>{if(miniDrag)miniPan(e);});
+window.addEventListener("mouseup",()=>{miniDrag=false;});
 function arrow(cx,cy,b,tr){ // arrowhead pointing into target b, tangent from control point
   let dx=b.x-cx,dy=b.y-cy,d=Math.hypot(dx,dy)||1;dx/=d;dy/=d;
   const tx=b.x-dx*(tr+2),ty=b.y-dy*(tr+2),s=6;
@@ -374,6 +435,7 @@ canvas.addEventListener("mousedown",e=>{const m=relMouse(e),n=nodeAt(m.x,m.y);
   else drag={pan:true,x:e.clientX,y:e.clientY,vx:state.view.x,vy:state.view.y,moved:false};
   canvas.classList.add("grabbing");hideTip();});
 window.addEventListener("mousemove",e=>{
+  if(miniDrag)return; // minimap is driving the view; skip hover
   if(drag){ if(drag.pan){state.view.x=drag.vx+(e.clientX-drag.x);state.view.y=drag.vy+(e.clientY-drag.y);drag.moved=true;draw();}
     else{const m=relMouse(e),w=toWorld(m.x,m.y),p=P.get(drag.node.id);p.x=w.x;p.y=w.y;p.vx=0;p.vy=0;drag.moved=true;reheat(0.3);}
     return; }
@@ -474,7 +536,9 @@ function buildFilters(){const f=el("filters");f.replaceChildren();
   for(const gname of GROUPS){if(!GRAPH.statuses.length&&gname==="unknown")continue;
     const c=chip(gname,()=>{tog(state.statusOn,gname);draw();buildFilters();},state.statusOn.has(gname));
     const sw=document.createElement("span");sw.className="sw";sw.style.background="var(--g-"+gname+")";c.prepend(sw);f.appendChild(c);}
-  for(const l of GRAPH.labels){f.appendChild(chip(l,()=>{tog(state.labelOn,l);draw();buildFilters();},state.labelOn.has(l)));}
+  for(const l of GRAPH.labels){const c=chip(l,()=>{tog(state.labelOn,l);draw();buildFilters();},state.labelOn.has(l));
+    if(state.colorBy==="label"){const sw=document.createElement("span");sw.className="sw";sw.style.background=labelColour(l);c.prepend(sw);}
+    f.appendChild(c);}
   if(GRAPH.counts.flagged){const c=chip("⚠ "+GRAPH.counts.flagged+" flagged",()=>{state.flaggedOnly=!state.flaggedOnly;draw();buildFilters();},state.flaggedOnly);
     c.classList.add("flag");f.appendChild(c);}
 }
@@ -507,9 +571,38 @@ el("stats").innerHTML=
 el("search").addEventListener("input",e=>{state.q=e.target.value.trim().toLowerCase();draw();});
 el("fit").onclick=fit;
 el("reheat").onclick=()=>{reheat(0.9);};
+el("colorby").addEventListener("change",e=>{state.colorBy=e.target.value;buildFilters();draw();});
+el("png").onclick=exportPng;
 el("theme").onclick=()=>{const r=document.documentElement;
   const cur=r.getAttribute("data-theme")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");
   r.setAttribute("data-theme",cur==="dark"?"light":"dark");readColours();draw();};
+
+// --- Export the current view to a PNG -----------------------------------------
+function exportPng(){
+  const scale=2, w=canvas.clientWidth*scale, h=canvas.clientHeight*scale;
+  const out=document.createElement("canvas");out.width=w;out.height=h;const o=out.getContext("2d");
+  // opaque background (the on-screen canvas is transparent over a CSS gradient)
+  const bg=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()||"#ffffff";
+  o.fillStyle=bg;o.fillRect(0,0,w,h);
+  o.drawImage(cv,0,0,w,h); // cv is already rendered at devicePixelRatio; scale to the export size
+  const url=out.toDataURL("image/png");
+  const a=document.createElement("a");
+  a.href=url;a.download=(GRAPH.project||"atlas").replace(/[^a-z0-9]+/gi,"-").toLowerCase()+"-atlas.png";
+  document.body.appendChild(a);a.click();a.remove();
+}
+
+// --- Keyboard shortcuts -------------------------------------------------------
+window.addEventListener("keydown",e=>{
+  if(e.target&&/^(input|select|textarea)$/i.test(e.target.tagName))return; // don't hijack typing
+  const k=e.key.toLowerCase();
+  if(k==="f"){fit();}
+  else if(k==="r"){reheat(0.9);}
+  else if(k==="d"&&GRAPH.counts.edges){state.depsOnly=!state.depsOnly;
+    if(state.selected){const sn=byId.get(state.selected);if(sn&&!visible(sn)){state.selected=null;renderPanel();}}
+    fit();buildFilters();}
+  else if(k==="/"){e.preventDefault();el("search").focus();}
+  else if(k==="escape"){if(state.selected){state.selected=null;renderPanel();draw();}else{el("search").value="";state.q="";draw();}}
+});
 
 window.addEventListener("resize",resize);
 // The canvas is a flex child: opening/closing the details panel changes its width
