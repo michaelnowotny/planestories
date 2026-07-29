@@ -397,12 +397,19 @@ function drawMinimap(){
   mctx.strokeStyle=COL.accent;mctx.lineWidth=1.3;
   mctx.strokeRect(wx(x0),wy(y0),(x1-x0)*s,(y1-y0)*s);
 }
+// Is the pointer over the minimap? (it sits inside .canvas, so main-canvas hit
+// testing must skip it — else a hover under the minimap dims a node.)
+function overMini(e){const r=mini.getBoundingClientRect();
+  return e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;}
 // Pan the main view so a minimap point maps to the viewport centre.
+// getBoundingClientRect is the BORDER box; drawMinimap draws in the CONTENT box,
+// so subtract the border (clientLeft/clientTop) or the 1px border magnifies the offset.
 function miniPan(e){ if(!miniT)return; const r=mini.getBoundingClientRect();
-  const wx=(e.clientX-r.left-miniT.ox)/miniT.s, wy=(e.clientY-r.top-miniT.oy)/miniT.s;
+  const wx=(e.clientX-r.left-mini.clientLeft-miniT.ox)/miniT.s, wy=(e.clientY-r.top-mini.clientTop-miniT.oy)/miniT.s;
   const v=state.view; v.x=canvas.clientWidth/2-wx*v.scale; v.y=canvas.clientHeight/2-wy*v.scale; draw();}
 let miniDrag=false;
-mini.addEventListener("mousedown",e=>{e.stopPropagation();miniDrag=true;miniPan(e);});
+mini.addEventListener("mousedown",e=>{e.stopPropagation();miniDrag=true;
+  hideTip();if(state.hover)state.hover=null;miniPan(e);}); // miniPan's draw() clears the stale hover
 window.addEventListener("mousemove",e=>{if(miniDrag)miniPan(e);});
 window.addEventListener("mouseup",()=>{miniDrag=false;});
 function arrow(cx,cy,b,tr){ // arrowhead pointing into target b, tangent from control point
@@ -442,7 +449,7 @@ window.addEventListener("mousemove",e=>{
   // mousemove is on window (so a drag continues outside the canvas); for HOVER,
   // ignore movement that isn't over the canvas (e.g. over the panel/header).
   const m=relMouse(e);
-  if(m.x<0||m.y<0||m.x>canvas.clientWidth||m.y>canvas.clientHeight){
+  if(overMini(e)||m.x<0||m.y<0||m.x>canvas.clientWidth||m.y>canvas.clientHeight){
     hideTip(); if(state.hover){state.hover=null;draw();} return; }
   const n=nodeAt(m.x,m.y),id=n?n.id:null;
   if(id!==state.hover){state.hover=id;canvas.style.cursor=id?"pointer":"grab";draw();}
@@ -579,29 +586,44 @@ el("theme").onclick=()=>{const r=document.documentElement;
 
 // --- Export the current view to a PNG -----------------------------------------
 function exportPng(){
-  const scale=2, w=canvas.clientWidth*scale, h=canvas.clientHeight*scale;
-  const out=document.createElement("canvas");out.width=w;out.height=h;const o=out.getContext("2d");
-  // opaque background (the on-screen canvas is transparent over a CSS gradient)
-  const bg=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()||"#ffffff";
-  o.fillStyle=bg;o.fillRect(0,0,w,h);
-  o.drawImage(cv,0,0,w,h); // cv is already rendered at devicePixelRatio; scale to the export size
-  const url=out.toDataURL("image/png");
-  const a=document.createElement("a");
-  a.href=url;a.download=(GRAPH.project||"atlas").replace(/[^a-z0-9]+/gi,"-").toLowerCase()+"-atlas.png";
-  document.body.appendChild(a);a.click();a.remove();
+  // Cap the export at ~8 MP: a 4K viewport at 2x is ~33 MP (~130 MiB) and can make
+  // context allocation or the synchronous toDataURL() fail/freeze. Shrink scale to fit.
+  const CAP=8000000, cw=canvas.clientWidth, ch=canvas.clientHeight;
+  let scale=2; if(cw*ch*scale*scale>CAP)scale=Math.max(1,Math.sqrt(CAP/(cw*ch)));
+  const w=Math.max(1,Math.round(cw*scale)), h=Math.max(1,Math.round(ch*scale));
+  try{
+    const out=document.createElement("canvas");out.width=w;out.height=h;
+    const o=out.getContext("2d"); if(!o)throw new Error("no 2d context");
+    // opaque background (the on-screen canvas is transparent over a CSS gradient)
+    const bg=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim()||"#ffffff";
+    o.fillStyle=bg;o.fillRect(0,0,w,h);
+    o.drawImage(cv,0,0,w,h); // cv is already rendered at devicePixelRatio; scale to the export size
+    const url=out.toDataURL("image/png");
+    const a=document.createElement("a");
+    a.href=url;a.download=(GRAPH.project||"atlas").replace(/[^a-z0-9]+/gi,"-").toLowerCase()+"-atlas.png";
+    document.body.appendChild(a);a.click();a.remove();
+  }catch(err){alert("PNG export failed (view too large) — try zooming out or a smaller window.\\n"+err);}
 }
 
 // --- Keyboard shortcuts -------------------------------------------------------
 window.addEventListener("keydown",e=>{
-  if(e.target&&/^(input|select|textarea)$/i.test(e.target.tagName))return; // don't hijack typing
+  if(e.metaKey||e.ctrlKey||e.altKey)return; // never shadow browser shortcuts (Cmd/Ctrl+F/R/D…)
   const k=e.key.toLowerCase();
+  const typing=e.target&&/^(input|select|textarea)$/i.test(e.target.tagName);
+  // Escape works even while typing: it clears + blurs the search field.
+  if(k==="escape"){
+    if(typing){el("search").value="";state.q="";e.target.blur();draw();return;}
+    if(state.selected){state.selected=null;renderPanel();draw();}
+    else{el("search").value="";state.q="";draw();}
+    return;
+  }
+  if(typing)return; // other single-key shortcuts must not hijack typing
   if(k==="f"){fit();}
   else if(k==="r"){reheat(0.9);}
   else if(k==="d"&&GRAPH.counts.edges){state.depsOnly=!state.depsOnly;
     if(state.selected){const sn=byId.get(state.selected);if(sn&&!visible(sn)){state.selected=null;renderPanel();}}
     fit();buildFilters();}
   else if(k==="/"){e.preventDefault();el("search").focus();}
-  else if(k==="escape"){if(state.selected){state.selected=null;renderPanel();draw();}else{el("search").value="";state.q="";draw();}}
 });
 
 window.addEventListener("resize",resize);
