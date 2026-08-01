@@ -18,28 +18,27 @@ import TurndownService from "turndown";
 const taskListMarked = new Marked({
 	renderer: {
 		listitem(item) {
+			// Render the item's tokens as BLOCK content (top=true). This wraps simple
+			// text in a <p> — exactly the TipTap taskItem shape — AND renders nested
+			// lists / multi-paragraph items correctly. (parseInline would throw
+			// "Token with list type was not found" on any nested block list — a real
+			// import crash for tight nested bullets; DATA regression, Grok BLOCK 1.)
+			const content = this.parser.parse(item.tokens, true);
 			if (item.task) {
-				// item.tokens is the content WITHOUT the `[ ]` marker (marked strips it
-				// into item.task/item.checked). Loose items already produce block HTML;
-				// tight items produce inline HTML we wrap in a <p> (TipTap taskItem shape).
-				const content = item.loose
-					? this.parser.parse(item.tokens, true)
-					: `<p>${this.parser.parseInline(item.tokens)}</p>`;
 				const checked = item.checked ? "true" : "false";
 				return `<li class="todo-list-item" data-type="taskItem" data-checked="${checked}">${content}</li>\n`;
 			}
-			const content = item.loose
-				? this.parser.parse(item.tokens, item.loose)
-				: this.parser.parseInline(item.tokens);
 			return `<li>${content}</li>\n`;
 		},
 		list(token) {
 			if (token.ordered) {
 				const startAttr =
 					typeof token.start === "number" && token.start !== 1 ? ` start="${token.start}"` : "";
+				// Ordered lists are never TipTap task-lists — render items as PLAIN so a
+				// stray `1. [ ]` doesn't become a `taskItem` inside an <ol> (Codex note).
 				let items = "";
 				for (const item of token.items) {
-					items += this.listitem(item);
+					items += `<li>${this.parser.parse(item.tokens, true)}</li>\n`;
 				}
 				return `<ol${startAttr}>\n${items}</ol>\n`;
 			}
@@ -86,11 +85,6 @@ export function markdownToHtml(markdown: string): string {
 		return "";
 	}
 	return taskListMarked.parse(trimmed, { async: false }) as string;
-}
-
-/** Does this stored `description_html` already contain a TipTap task-list? */
-export function hasDescriptionChecklist(html: string | undefined | null): boolean {
-	return typeof html === "string" && html.includes('data-type="taskList"');
 }
 
 /** Minimal DOM-ish node shape exposed by Turndown's bundled parser. */

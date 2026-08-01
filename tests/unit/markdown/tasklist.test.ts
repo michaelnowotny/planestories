@@ -25,9 +25,22 @@ describe("markdownToHtml → TipTap task-list", () => {
 		// the checkbox items must be in a taskList, the plain bullet in a normal <ul>
 		expect(html).toContain('data-type="taskList"');
 		expect(html).toContain('data-type="taskItem"');
-		// the plain bullet is NOT a task item
-		expect(html).toMatch(/<li>[^<]*a plain bullet/);
+		// the plain bullet is a PLAIN <li> (no taskItem attrs)
+		expect(html).toContain("<li><p>a plain bullet</p>");
+		expect(html).not.toMatch(/data-type="taskItem"[^>]*><p>a plain bullet/);
 		expect(html).not.toContain("<input");
+	});
+
+	test("renders nested lists without crashing (import regression)", () => {
+		// parseInline would throw 'Token with list type was not found' on a nested
+		// block list inside a tight item — a real import crash. Block rendering wraps
+		// simple content in <p> and renders the nested list.
+		const taskNested = markdownToHtml("- [ ] outer\n  - nested plain");
+		expect(taskNested).toContain('data-type="taskItem"');
+		expect(taskNested).toContain("<p>outer</p>");
+		expect(taskNested).toContain("nested plain");
+		// A purely plain nested list also must not throw.
+		expect(() => markdownToHtml("- outer\n  - nested")).not.toThrow();
 	});
 
 	test("preserves inline markup (code + link) inside a criterion", () => {
@@ -150,6 +163,19 @@ describe("spliceAcceptanceCriteria preserves prefix and suffix", () => {
 		expect(out).toContain("Just narrative.");
 		expect(out).toContain("### Acceptance Criteria");
 		expect(out).toContain("- [ ] only");
+	});
+
+	test("keeps trailing non-heading content after the checklist (Effort/Depends, no heading)", () => {
+		// The data-loss path the next-ATX-heading suffix alone missed: lines after the
+		// checklist with NO intervening heading.
+		const body =
+			"Pre\n\n### Acceptance Criteria\n\n- [ ] old\n\n**Effort:** 2.5 dev-days\n**Depends on:** X-1";
+		const out = spliceAcceptanceCriteria(body, [crit("new", true)]);
+		expect(out).toContain("Pre");
+		expect(out).toContain("- [x] new");
+		expect(out).not.toContain("- [ ] old");
+		expect(out).toContain("**Effort:** 2.5 dev-days");
+		expect(out).toContain("**Depends on:** X-1");
 	});
 
 	test("empty criteria drops the AC block but keeps prefix + suffix", () => {

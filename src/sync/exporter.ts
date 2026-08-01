@@ -11,6 +11,7 @@ import {
 	boardItemToStory,
 	descriptionHasCriteria,
 	isCriterionChild,
+	isOwnedCriterionChild,
 	resolveStoryRelationIdentifiers,
 } from "./board-story.ts";
 
@@ -84,7 +85,7 @@ export async function exportStories(
 	// `--sync-criteria` board) still needs its criteria reconstructed from these.
 	const criterionChildren = new Map<string, FetchedWorkItem[]>();
 	for (const item of items) {
-		if (isCriterionChild(item) && item.parent) {
+		if (isOwnedCriterionChild(item) && item.parent) {
 			const list = criterionChildren.get(item.parent) ?? [];
 			list.push(item);
 			criterionChildren.set(item.parent, list);
@@ -95,10 +96,11 @@ export async function exportStories(
 	let filtered = filterWorkItems(items, filterInput, project.identifier).sort(
 		(a, b) => a.sequenceId - b.sequenceId,
 	);
-	// UNCONDITIONALLY exclude owned criterion children from the top-level story list
+	// UNCONDITIONALLY exclude OWNED criterion children from the top-level story list
 	// (Codex #8): once migration closes them they must never export as standalone
-	// stories, and in the default model they are never their own story.
-	filtered = filtered.filter((item) => !isCriterionChild(item));
+	// stories, and in the default model they are never their own story. Ownership-
+	// scoped so another integration's `…::ac<n>` item is NOT dropped (Codex P1).
+	filtered = filtered.filter((item) => !isOwnedCriterionChild(item));
 	// Hide archived items (label convention) unless explicitly included.
 	if (!options.includeArchived) {
 		filtered = filtered.filter(

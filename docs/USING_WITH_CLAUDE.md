@@ -124,14 +124,14 @@ bun run src/cli/index.ts export --project "My Project" -o exported.md
 #   in the Plane UI then re-exporting yields `- [x]` — this is the board->file reverse sync.
 
 # Migrate legacy `::ac<n>` criterion sub-items -> a task-list in the parent description, then close
-# the children. Idempotent; dry-run by default. THIS is how you collapse a board that used
-# --sync-criteria (on the DATA board that was 71% of all work items).
+# the children (BOARD-ONLY). Idempotent; dry-run by default. THIS is how you collapse a board that
+# used --sync-criteria (on the DATA board that was 71% of all work items).
 bun run src/cli/index.ts migrate-criteria --project "My Project"                    # dry-run report
 bun run src/cli/index.ts migrate-criteria --project "My Project" --yes              # apply
-#   --files stories/*.md   reconcile the linked files' checkbox state FIRST (so a later import can't
-#                          revert the migration); without it, re-`export` before importing
-#   --limit N              migrate at most N parents this run (rate-limit batching)
+#   --limit N   migrate at most N parents this run (rate-limit batching; --limit advances across runs)
 # A duplicate `::ac<n>` index (stale rename) is reported + skipped, never guessed.
+# Safe sequence:  migrate-criteria --yes  ->  export (regenerates files from the migrated board)  ->
+# import (a warm no-op). Importing a STALE pre-migration file first would overwrite the migrated board.
 
 # Groom a project: close orphaned criterion sub-items (parent Done), report rot.
 bun run src/cli/index.ts groom --project "My Project"          # dry-run report

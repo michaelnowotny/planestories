@@ -1,6 +1,6 @@
+import { EXTERNAL_SOURCE } from "../constants.ts";
 import { spliceAcceptanceCriteria, splitBody } from "../markdown/criteria.ts";
 import { normalizeRelationIdentifiers, parseEffortDays } from "../markdown/directives.ts";
-import { hasDescriptionChecklist } from "../markdown/html.ts";
 import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import type { FetchedWorkItem, ProjectIndex } from "../plane/issues.ts";
 import type { UserStory } from "../types.ts";
@@ -11,20 +11,26 @@ export function isCriterionChild(item: FetchedWorkItem): boolean {
 	return Boolean(item.parent && item.externalId && /::ac\d+$/.test(item.externalId));
 }
 
+/** A criterion child that planestories OWNS — so folding/excluding it never drops
+ * another integration's item that merely ends in `::ac<n>` (Codex P1). */
+export function isOwnedCriterionChild(item: FetchedWorkItem): boolean {
+	return isCriterionChild(item) && item.externalSource === EXTERNAL_SOURCE;
+}
+
 /**
  * The single precedence predicate (design §2): does this work item ALREADY carry
- * its acceptance criteria in its description? True when the raw `description_html`
- * is a TipTap task-list (default / migrated items) OR the converted markdown
- * already parses criteria (legacy default items whose description used GFM
- * `<input>` checkboxes). When true, the description is authoritative and any
- * legacy `::ac<n>` children are IGNORED (migrate closes but never deletes them,
- * so "no children" is the wrong fence — the description checklist is).
+ * its acceptance criteria in its description? Scoped to the **acceptance-criteria
+ * section** — `splitBody` collects checkboxes only under `### Acceptance Criteria`,
+ * so a TipTap AC task-list (default / migrated items; the writer always emits the
+ * heading before the list) and a legacy GFM `<input>` AC block both parse as
+ * criteria, while an UNRELATED task-list in the narrative does NOT (Codex P1:
+ * keying off "any `data-type=taskList` in the HTML" false-fenced a legacy parent
+ * whose narrative merely contained a checkbox, hiding its real `::ac<n>` children).
+ * When true the description is authoritative and legacy `::ac<n>` children are
+ * IGNORED (migrate closes but never deletes them, so "no children" is wrong).
  */
 export function descriptionHasCriteria(item: FetchedWorkItem): boolean {
-	return (
-		hasDescriptionChecklist(item.descriptionHtml) ||
-		splitBody(item.description ?? "").criteria.length > 0
-	);
+	return splitBody(item.description ?? "").criteria.length > 0;
 }
 
 /** Positional index of a criterion child from its `::ac<n>` external id. */

@@ -10,9 +10,12 @@ import {
 } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ResolvedConfig } from "../types.ts";
-import { criterionIndex, descriptionHasCriteria, isCriterionChild } from "./board-story.ts";
-import { EXTERNAL_SOURCE } from "./importer.ts";
-import { reverseSyncCriteria, type WriteBackReport } from "./writeback.ts";
+import {
+	criterionIndex,
+	descriptionHasCriteria,
+	isCriterionChild,
+	isOwnedCriterionChild,
+} from "./board-story.ts";
 
 /** Marker embedded in the migration close-comment so re-runs don't post duplicates. */
 export const MIGRATE_CLOSE_MARKER = "[planestories:criteria-migrated-to-description]";
@@ -23,8 +26,6 @@ const CLOSED_GROUPS = new Set(["completed", "cancelled"]);
 export interface MigrateOptions {
 	config: ResolvedConfig;
 	project?: string;
-	/** Story files to reconcile (checkbox state board→file) BEFORE closing children. */
-	files?: string[];
 	/** Apply changes. Without this, migrate is a read-only report (dry-run). */
 	apply?: boolean;
 	/** Max parents to migrate per run (rate-limit batching). 0/undefined = all. */
@@ -52,15 +53,13 @@ export interface MigrateReport {
 	childrenClosed: number;
 	/** Parents deferred past the --limit this run. */
 	deferred: number;
-	/** File reconciliation (checkbox state board→file), if --files was given. */
-	fileReport?: WriteBackReport;
 	applied: boolean;
 }
 
 /** The planestories-owned criterion children of a parent, by `::ac<n>` index. */
 function criterionChildrenOf(index: ProjectIndex, parentId: string): FetchedWorkItem[] {
 	return (index.childrenByParent.get(parentId) ?? [])
-		.filter((c) => isCriterionChild(c) && c.externalSource === EXTERNAL_SOURCE)
+		.filter(isOwnedCriterionChild)
 		.sort((a, b) => criterionIndex(a) - criterionIndex(b));
 }
 
@@ -123,16 +122,23 @@ export function checkCriteriaMigration(
  * TipTap task-list, then close the now-redundant children — collapsing the board
  * from "one work item per criterion" to "criteria as checkboxes in the parent".
  *
- * Ordering is clobber-safe (design §4.6): FILE reconciliation first (via the
- * existing board→file reverse-sync, so linked story files carry the children's
- * current checked state and a later import cannot revert it), THEN the board
- * description, THEN close the children. A crash between steps leaves a re-runnable
- * state — the "already migrated" test is "the description already has a task-list"
- * (NOT "no children", since children are closed but never deleted), so a second
- * run is a no-op.
+ * **Board-only.** For each un-migrated parent it folds children→description (a
+ * `spliceAcceptanceCriteria` that preserves prefix + suffix; text from the full
+ * child.description; checked = child completed-state), THEN closes the open
+ * children. It does NOT touch story files — reconciling files is `export`'s job
+ * (which, post-branch, reconstructs criteria description-first with the correct
+ * count/text/state via the same splice). The safe operator sequence is therefore
+ * `migrate-criteria --yes` → `export` (regenerates files from the migrated board)
+ * → `import` (a warm no-op). Doing a bespoke file splice inside migrate was
+ * rejected: the only reusable primitive (reverseSyncCriteria) merely flips
+ * existing checkbox marks by position and cannot reconcile a count/text
+ * divergence, so it could leave a stale file that later clobbers the board.
  *
- * Idempotent, dry-run by default. Conflicts (a duplicate `::ac<n>` index from a
- * stale rename) are reported and skipped, never guessed.
+ * Idempotent: the "already migrated" test is "the description AC section already
+ * has a checklist" (NOT "no children" — children are closed, never deleted). A
+ * fully-migrated parent leaves the candidate window so `--limit` always advances.
+ * Dry-run by default. A duplicate `::ac<n>` index (stale rename) is reported and
+ * skipped, never guessed.
  */
 export async function migrateCriteria(
 	client: PlaneClient,
@@ -147,28 +153,28 @@ export async function migrateCriteria(
 	}
 	const project = await resolver.resolveProject(projectName);
 
-	// STEP 1 (clobber-safe): reconcile linked story files with the children's board
-	// state FIRST, so the file — which a later import treats as authoritative — carries
-	// the states we're about to fold, and cannot revert them. Read-only in dry-run.
-	let fileReport: WriteBackReport | undefined;
-	if (options.files && options.files.length > 0) {
-		fileReport = await reverseSyncCriteria(client, {
-			config: options.config,
-			files: options.files,
-			project: options.project,
-			apply: options.apply,
-		});
-	}
-
 	const index = await fetchProjectIndex(client, project.id, project.identifier);
 	const ident = (item: FetchedWorkItem): string => `${project.identifier}-${item.sequenceId}`;
 	const isOpen = (item: FetchedWorkItem): boolean =>
 		!item.stateGroup || !CLOSED_GROUPS.has(item.stateGroup);
 
-	// Candidate parents: any item that has planestories `::ac<n>` children (a parent
-	// is never itself a criterion child). Deterministic order for stable --limit batching.
+	// Candidate parents = items that still NEED work: un-migrated (fold needed) OR
+	// migrated-but-with-open-children (dual, close needed). A FULLY-migrated parent
+	// (description checklist + all children closed) is excluded from the --limit
+	// window — closed children are retained, so including it would pin the window on
+	// already-done parents and `--limit` would never advance (Grok BLOCK 2).
+	// Deterministic order for stable batching.
 	const parents = index.items
-		.filter((item) => !isCriterionChild(item) && criterionChildrenOf(index, item.id).length > 0)
+		.filter((item) => {
+			if (isCriterionChild(item)) {
+				return false;
+			}
+			const children = criterionChildrenOf(index, item.id);
+			if (children.length === 0) {
+				return false;
+			}
+			return descriptionHasCriteria(item) ? children.some(isOpen) : true;
+		})
 		.sort((a, b) => a.sequenceId - b.sequenceId);
 
 	const limit = options.limit && options.limit > 0 ? options.limit : parents.length;
@@ -266,7 +272,6 @@ export async function migrateCriteria(
 		criteriaFolded,
 		childrenClosed,
 		deferred,
-		fileReport,
 		applied: Boolean(options.apply),
 	};
 }

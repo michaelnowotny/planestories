@@ -26,27 +26,13 @@ function printReport(report: MigrateReport): void {
 	console.log("");
 	console.log(chalk.bold(`Migrate criteria → description task-lists · ${report.project}${dry}`));
 
-	if (report.fileReport) {
-		const changed = report.fileReport.totalChanges;
-		console.log(
-			chalk.cyan(
-				`  Files: ${changed} checkbox state(s) ${report.applied ? "written" : "would be written"} board→file (reverse-sync).`,
-			),
-		);
-		for (const file of report.fileReport.files) {
-			for (const warning of file.warnings) {
-				console.log(chalk.yellow(`    ! ${file.filePath}: ${warning}`));
-			}
-		}
-	} else {
-		console.log(
-			chalk.dim(
-				"  No --files given: board-only migration. Linked story files keep their old checkbox\n" +
-					"  state — re-`export` (or re-run with --files) before importing, or an import will\n" +
-					"  overwrite the migrated board states.",
-			),
-		);
-	}
+	console.log(
+		chalk.dim(
+			"  Board-only. After applying, run `export` to regenerate the linked story files from the\n" +
+				"  migrated board (they now carry the folded criteria + states), THEN import (a warm\n" +
+				"  no-op). Importing a stale pre-migration file first would overwrite the migrated board.",
+		),
+	);
 
 	const verb = report.applied ? "Migrated" : "Would migrate";
 	if (report.migrated.length === 0) {
@@ -107,10 +93,6 @@ export function registerMigrateCriteriaCommand(program: Command) {
 		.option("-c, --config <path>", "Config file path")
 		.option("--context <name>", "Select a named context from multi-context config")
 		.option("-p, --project <name>", "Project to migrate (required if no defaultProject)")
-		.option(
-			"--files <files...>",
-			"Story file(s) to reconcile (writes each criterion's board state into the file's checkboxes BEFORE closing children, so a later import can't revert the migration)",
-		)
 		.option("--limit <n>", "Max parents to migrate this run (rate-limit batching)", (v) =>
 			Number(v),
 		)
@@ -127,7 +109,6 @@ export function registerMigrateCriteriaCommand(program: Command) {
 				const report = await migrateCriteria(client, {
 					config,
 					project: options.project,
-					files: options.files,
 					limit: options.limit,
 					apply: options.yes,
 				});

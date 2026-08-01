@@ -47,10 +47,6 @@ export interface FetchedWorkItem {
 	name: string;
 	/** Description as markdown (converted from Plane's description_html). */
 	description: string | undefined;
-	/** Raw Plane `description_html` (retained so the criteria-representation fence
-	 * can test for a TipTap task-list precisely — see `descriptionHasCriteria`).
-	 * Always set by `normalizeFetched`; optional so hand-built test items may omit it. */
-	descriptionHtml?: string | undefined;
 	priority: PlanePriority | undefined;
 	estimate: number | undefined;
 	stateName: string | undefined;
@@ -304,7 +300,6 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 		sequenceId: item.sequence_id as number,
 		name: item.name as string,
 		description: htmlToMarkdown(item.description_html as string | undefined) || undefined,
-		descriptionHtml: (item.description_html as string) || undefined,
 		priority,
 		estimate,
 		stateName,

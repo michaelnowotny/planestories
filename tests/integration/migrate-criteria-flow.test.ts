@@ -4,8 +4,10 @@ import { checkCriteriaMigration, migrateCriteria } from "../../src/sync/migrate.
 import type { ResolvedConfig } from "../../src/types.ts";
 import { type FakeData, makeFakeClient } from "../helpers/fake-plane-client.ts";
 
+// A migrated description: the writer always emits the `### Acceptance Criteria`
+// heading before the task-list, so the AC-section-scoped fence recognizes it.
 const TASKLIST_HTML =
-	'<p>n</p><ul class="todo-list" data-type="taskList"><li data-type="taskItem" data-checked="false"><p>c</p></li></ul>';
+	'<p>n</p><h3>Acceptance Criteria</h3><ul class="todo-list" data-type="taskList"><li data-type="taskItem" data-checked="false"><p>c</p></li></ul>';
 
 const PROJECT = "proj-1";
 
@@ -106,8 +108,10 @@ describe("migrateCriteria", () => {
 		const second = await migrateCriteria(fake.client, { config, project: "Proj", apply: true });
 		expect(second.migrated).toHaveLength(0);
 		expect(second.criteriaFolded).toBe(0);
-		expect(second.alreadyMigrated).toHaveLength(1);
-		expect(second.childrenClosed).toBe(0); // both children already closed
+		// Fully migrated (checklist + all children closed) → excluded from the window
+		// entirely, so it isn't even reported as alreadyMigrated (keeps --limit advancing).
+		expect(second.alreadyMigrated).toHaveLength(0);
+		expect(second.childrenClosed).toBe(0);
 		// No parent re-write on the second run.
 		expect(fake.updatedItems.length).toBe(writesAfterFirst);
 	});
@@ -238,6 +242,53 @@ describe("migrateCriteria", () => {
 		expect(report.migrated).toHaveLength(1);
 		expect(report.deferred).toBe(1);
 		expect(report.migrated[0]?.identifier).toBe("ENG-1"); // lowest sequence first
+	});
+
+	test("--limit ADVANCES across runs (fully-migrated parents leave the window)", async () => {
+		const items: NonNullable<FakeData["workItems"]>[string] = [];
+		for (let n = 1; n <= 3; n++) {
+			items.push({
+				id: `p${n}`,
+				sequence_id: n * 2 - 1,
+				name: `P${n}`,
+				description_html: "<p>n</p>",
+				state: { group: "backlog" },
+			});
+			items.push({
+				id: `p${n}c`,
+				sequence_id: n * 2,
+				name: "c",
+				parent: `p${n}`,
+				external_id: `p${n}::ac0`,
+				external_source: "planestories",
+				state: { group: "backlog" },
+			});
+		}
+		const fake = makeFakeClient({
+			projects: [{ id: PROJECT, name: "Proj", identifier: "ENG" }],
+			states: {
+				[PROJECT]: [
+					{ id: "done", name: "Done", group: "completed" },
+					{ id: "backlog", name: "Backlog", group: "backlog" },
+				],
+			},
+			workItems: { [PROJECT]: items },
+		});
+
+		const seen: string[] = [];
+		for (let run = 0; run < 3; run++) {
+			const r = await migrateCriteria(fake.client, {
+				config,
+				project: "Proj",
+				apply: true,
+				limit: 1,
+			});
+			for (const p of r.migrated) {
+				seen.push(p.identifier);
+			}
+		}
+		// Each run migrates the NEXT parent — not the same one stuck at the front.
+		expect(seen).toEqual(["ENG-1", "ENG-3", "ENG-5"]);
 	});
 });
 

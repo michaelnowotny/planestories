@@ -115,11 +115,46 @@ export function splitBody(body: string): SplitBody {
  * authoring via `CHECKBOX_LINE`.
  */
 export function spliceAcceptanceCriteria(body: string, criteria: AcceptanceCriterion[]): string {
-	const { narrative, suffix } = splitBody(body);
+	const lines = body.split("\n");
+	const headingIndex = acHeadingIndex(lines);
 	const block = buildAcceptanceCriteria(criteria);
-	return [narrative, block, suffix]
-		.map((part) => part.trim())
-		.filter((part) => part.length > 0)
+
+	if (headingIndex === -1) {
+		// No acceptance-criteria section: append the new block after the whole body.
+		return [body.trim(), block]
+			.map((p) => p.trim())
+			.filter((p) => p.length > 0)
+			.join("\n\n");
+	}
+
+	const prefix = lines.slice(0, headingIndex).join("\n").trim();
+	// acHeadingIndex points at the heading TEXT line; for a Setext heading skip its
+	// underline (the line after) too.
+	const isAtx = AC_HEADING.test((lines[headingIndex] ?? "").trim());
+	let i = headingIndex + 1 + (isAtx ? 0 : 1);
+
+	// Within the AC section, checkbox lines are the (replaced) criteria; any OTHER
+	// non-blank line (e.g. `**Effort:**` / `**Depends on:**` placed right after the
+	// checklist with no intervening heading) must be PRESERVED, not dropped
+	// (Grok #4 — a real data-loss path the next-ATX-heading suffix alone missed).
+	const extras: string[] = [];
+	let suffixStart = lines.length;
+	for (; i < lines.length; i++) {
+		const line = lines[i] as string;
+		if (ANY_HEADING.test(line.trim())) {
+			suffixStart = i;
+			break;
+		}
+		if (CHECKBOX_LINE.test(line) || line.trim() === "") {
+			continue;
+		}
+		extras.push(line);
+	}
+	const suffix = lines.slice(suffixStart).join("\n").trim();
+
+	return [prefix, block, extras.join("\n").trim(), suffix]
+		.map((p) => p.trim())
+		.filter((p) => p.length > 0)
 		.join("\n\n");
 }
 

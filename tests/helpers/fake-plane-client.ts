@@ -162,7 +162,21 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			}
 			createdItems.push({ projectId, body });
 			sequence += 1;
-			const item = { id: `wi-${sequence}`, sequence_id: sequence, ...body };
+			const item: Record<string, unknown> = {
+				id: `wi-${sequence}`,
+				sequence_id: sequence,
+				...body,
+			};
+			// Fidelity: resolve a `state: <stateId>` to the expanded {name,group} object
+			// (as real Plane returns), so a later list/normalizeFetched sees the group —
+			// same as updateWorkItem (an import-created completed child must read back
+			// with its group, not an undefined "still open").
+			if (typeof item.state === "string") {
+				const resolved = data.states?.[projectId]?.find((s) => s.id === item.state);
+				if (resolved) {
+					item.state = { id: resolved.id, name: resolved.name, group: resolved.group };
+				}
+			}
 			if (!data.workItems) data.workItems = {};
 			const projectItems = data.workItems[projectId] ?? [];
 			projectItems.push(item);

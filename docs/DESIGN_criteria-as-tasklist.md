@@ -119,7 +119,15 @@ Add to `markdown/criteria.ts`:
   `child.description || child.name`, §3) — and that rebuild uses the §4.3 splice so the suffix is
   preserved.
 
-### 4.6 `migrate-criteria` command (idempotent, dry-run default, crash-safe, file+board)
+### 4.6 `migrate-criteria` command (idempotent, dry-run default, BOARD-ONLY)
+> **Implementation note (post code-review):** migrate is **board-only** — it folds children→description
+> and closes children, but does NOT write story files. The only reusable file primitive
+> (`reverseSyncCriteria`) merely flips existing checkbox marks by position and cannot reconcile a
+> count/text divergence, so a bespoke file step risked leaving a stale file that later clobbers the
+> board (Codex P0). File reconciliation is `export`'s job (now correct: description-first + splice).
+> The safe operator sequence is **`migrate-criteria --yes` → `export` → `import` (warm no-op)**. The
+> `--files` flag and the file-first ordering described below were REMOVED in favour of this.
+
 For each parent that has `::ac<n>` children (external_source `planestories`):
 1. **Eligibility via a durable predicate** (Grok F9, Codex #1/#2): a parent is **already migrated** iff
    its board description contains a task-list (`data-type="taskList"`). Migrated parents are excluded

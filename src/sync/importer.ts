@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { EXTERNAL_SOURCE } from "../constants.ts";
 import { type AcceptanceCriterion, splitBody } from "../markdown/criteria.ts";
 import { findNonStoryHeadings, parseMarkdownFile } from "../markdown/parser.ts";
 import { type WriteBackUpdate, writeBackIds } from "../markdown/writer.ts";
@@ -29,8 +30,9 @@ import { hashStoryPayload } from "./story-hash.ts";
 /** Lazily fetch (and memoize) a project's work-item index — one list per project per run. */
 type IndexProvider = (projectId: string, projectIdentifier: string) => Promise<ProjectIndex>;
 
-/** Identifies work items this tool created, used for idempotent re-imports. */
-export const EXTERNAL_SOURCE = "planestories";
+/** Re-exported from constants so existing `import { EXTERNAL_SOURCE } from "./importer.ts"`
+ * call sites keep working (the canonical definition lives in ../constants.ts). */
+export { EXTERNAL_SOURCE };
 
 export interface ImportOptions {
 	files: string[];
