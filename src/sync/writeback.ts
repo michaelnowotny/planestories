@@ -12,7 +12,7 @@ import type { PlaneClient } from "../plane/client.ts";
 import { type FetchedWorkItem, fetchProjectIndex, type ProjectIndex } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ResolvedConfig } from "../types.ts";
-import { criterionIndex, isCriterionChild } from "./board-story.ts";
+import { criterionIndex, descriptionHasCriteria, isCriterionChild } from "./board-story.ts";
 import { EXTERNAL_SOURCE } from "./importer.ts";
 
 /** A single checkbox flipped by the reverse-sync. */
@@ -311,6 +311,17 @@ export async function reverseSyncCriteria(
 			const parent = index.byId.get(planeId);
 			if (!parent) {
 				missingOnBoard.push(story.planeIdentifier ?? story.title);
+				continue;
+			}
+
+			// Legacy-gate (design §4.7, Codex #9): if the parent's criteria are
+			// description-native (migrated to a task-list), its `::ac<n>` children are
+			// administratively completed — reverse-syncing from them would wrongly tick
+			// every file box. Board→file for description-native criteria is `export`.
+			// Register an empty desired set (no changes) but keep file-level ambiguity
+			// checks running for this story.
+			if (descriptionHasCriteria(parent)) {
+				statesByPlaneId.set(planeId, new Map());
 				continue;
 			}
 

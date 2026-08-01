@@ -7,6 +7,7 @@ import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
 import { checkDependencyGraph } from "../../sync/graph_check.ts";
 import { groom } from "../../sync/groomer.ts";
+import { checkCriteriaMigration } from "../../sync/migrate.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -55,11 +56,17 @@ export function registerDoctorCommand(program: Command) {
 				const index = await fetchProjectIndex(client, project.id, project.identifier);
 				const graph = await checkDependencyGraph(client, project.id, project.identifier, index);
 
+				// Criteria-representation drift (legacy ::ac<n> children vs the
+				// description task-list model). Points the operator at `migrate-criteria`.
+				const criteria = checkCriteriaMigration(index, project.identifier);
+
 				const findings =
 					report.orphanedCriteria.length +
 					report.duplicateTitles.length +
 					report.parentlessCriteria.length +
-					graph.dangling.length;
+					graph.dangling.length +
+					criteria.unmigrated.length +
+					criteria.dual.length;
 
 				console.log("");
 				console.log(chalk.bold(`Doctor ${report.project}`));
@@ -73,6 +80,23 @@ export function registerDoctorCommand(program: Command) {
 					`  Parentless criterion sub-items:             ${report.parentlessCriteria.length}`,
 				);
 				console.log(`  Dangling relations (target missing):        ${graph.dangling.length}`);
+				console.log(
+					`  Unmigrated criteria (::ac children, no list): ${criteria.unmigrated.length}`,
+				);
+				console.log(`  Dual criteria (list + open ::ac children):    ${criteria.dual.length}`);
+
+				for (const c of criteria.unmigrated) {
+					console.log(
+						chalk.yellow(`    unmigrated: ${c.identifier} "${c.title}" — run migrate-criteria`),
+					);
+				}
+				for (const c of criteria.dual) {
+					console.log(
+						chalk.yellow(
+							`    dual-representation: ${c.identifier} "${c.title}" (${c.openChildren} open ::ac child(ren)) — run migrate-criteria`,
+						),
+					);
+				}
 
 				for (const c of report.orphanedCriteria) {
 					console.log(

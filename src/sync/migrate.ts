@@ -64,6 +64,60 @@ function criterionChildrenOf(index: ProjectIndex, parentId: string): FetchedWork
 		.sort((a, b) => criterionIndex(a) - criterionIndex(b));
 }
 
+export interface CriteriaDriftRef {
+	identifier: string;
+	title: string;
+	openChildren: number;
+}
+
+export interface CriteriaMigrationDrift {
+	/** Parents with `::ac<n>` children but NO description checklist — need migration. */
+	unmigrated: CriteriaDriftRef[];
+	/** Parents that have a description checklist AND still-open `::ac<n>` children —
+	 * a half-migrated / dual-representation state needing a `migrate-criteria` cleanup. */
+	dual: CriteriaDriftRef[];
+}
+
+/**
+ * Read-only detection (for `doctor`) of criteria-representation drift, using the
+ * §2 precedence fence: a parent is "migrated" iff its description has a task-list.
+ * Flags BOTH the unmigrated case (children but no checklist) AND the dual case
+ * (checklist plus leftover open children) — the latter is missed by a
+ * "children-but-no-checklist" check alone (Codex #9).
+ */
+export function checkCriteriaMigration(
+	index: ProjectIndex,
+	projectIdentifier: string,
+): CriteriaMigrationDrift {
+	const unmigrated: CriteriaDriftRef[] = [];
+	const dual: CriteriaDriftRef[] = [];
+	for (const item of index.items) {
+		if (isCriterionChild(item)) {
+			continue;
+		}
+		const children = criterionChildrenOf(index, item.id);
+		if (children.length === 0) {
+			continue;
+		}
+		const openChildren = children.filter(
+			(c) => !c.stateGroup || !CLOSED_GROUPS.has(c.stateGroup),
+		).length;
+		const ref: CriteriaDriftRef = {
+			identifier: `${projectIdentifier}-${item.sequenceId}`,
+			title: item.name,
+			openChildren,
+		};
+		if (descriptionHasCriteria(item)) {
+			if (openChildren > 0) {
+				dual.push(ref);
+			}
+		} else {
+			unmigrated.push(ref);
+		}
+	}
+	return { unmigrated, dual };
+}
+
 /**
  * Fold legacy `::ac<n>` criterion sub-items into their parent's description as a
  * TipTap task-list, then close the now-redundant children — collapsing the board

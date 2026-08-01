@@ -193,7 +193,11 @@ export function registerImportCommand(program: Command) {
 		.option("-p, --project <name>", "Force all stories into this project (overrides frontmatter)")
 		.option("--create-labels", "Create labels that don't exist instead of skipping them", false)
 		.option("--source-label <name>", "Tag every created item with this label (auto-created)")
-		.option("--sync-criteria", "Sync each acceptance criterion to a Plane sub-item", false)
+		.option(
+			"--sync-criteria",
+			"DEPRECATED (legacy): create one Plane sub-item per acceptance criterion. The default now keeps criteria as a task-list in the parent description — prefer it, and `migrate-criteria` to fold existing sub-items.",
+			false,
+		)
 		.option("--force", "Re-import even when content is unchanged (bypass skip-unchanged)", false)
 		.option(
 			"--status-only",
@@ -224,6 +228,16 @@ export function registerImportCommand(program: Command) {
 		.option("--no-write-back", "Skip writing Plane IDs back to markdown")
 		.action(async (filePatterns: string[], options) => {
 			try {
+				if (options.syncCriteria) {
+					console.log(
+						chalk.yellow(
+							"⚠ --sync-criteria is DEPRECATED and creates one work item per criterion (the 71%-of-the-board problem).\n" +
+								"  The default keeps criteria as an interactive task-list in the parent description. Drop the flag to\n" +
+								"  use it, and run `planestories migrate-criteria` to fold existing sub-items. Re-minting on an already-\n" +
+								"  migrated board is flagged by `doctor` (dual-representation).",
+						),
+					);
+				}
 				// Resolve glob patterns to file paths
 				const files = await resolveGlobs(filePatterns);
 				if (files.length === 0) {

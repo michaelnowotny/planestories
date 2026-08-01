@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { migrateCriteria } from "../../src/sync/migrate.ts";
+import { fetchProjectIndex } from "../../src/plane/issues.ts";
+import { checkCriteriaMigration, migrateCriteria } from "../../src/sync/migrate.ts";
 import type { ResolvedConfig } from "../../src/types.ts";
 import { type FakeData, makeFakeClient } from "../helpers/fake-plane-client.ts";
+
+const TASKLIST_HTML =
+	'<p>n</p><ul class="todo-list" data-type="taskList"><li data-type="taskItem" data-checked="false"><p>c</p></li></ul>';
 
 const PROJECT = "proj-1";
 
@@ -234,5 +238,76 @@ describe("migrateCriteria", () => {
 		expect(report.migrated).toHaveLength(1);
 		expect(report.deferred).toBe(1);
 		expect(report.migrated[0]?.identifier).toBe("ENG-1"); // lowest sequence first
+	});
+});
+
+describe("checkCriteriaMigration (doctor drift)", () => {
+	test("flags an unmigrated parent (::ac children, no description checklist)", async () => {
+		const fake = makeFakeClient(boardData());
+		const index = await fetchProjectIndex(fake.client, PROJECT, "ENG");
+		const drift = checkCriteriaMigration(index, "ENG");
+		expect(drift.unmigrated.map((r) => r.identifier)).toEqual(["ENG-1"]);
+		expect(drift.dual).toHaveLength(0);
+	});
+
+	test("flags a dual parent (description checklist AND an open ::ac child)", async () => {
+		const fake = makeFakeClient({
+			projects: [{ id: PROJECT, name: "Proj", identifier: "ENG" }],
+			workItems: {
+				[PROJECT]: [
+					{
+						id: "parent",
+						sequence_id: 1,
+						name: "Parent",
+						description_html: TASKLIST_HTML,
+						state: { group: "backlog" },
+					},
+					{
+						id: "c0",
+						sequence_id: 2,
+						name: "c",
+						parent: "parent",
+						external_id: "parent::ac0",
+						external_source: "planestories",
+						state: { group: "backlog" }, // still OPEN
+					},
+				],
+			},
+		});
+		const index = await fetchProjectIndex(fake.client, PROJECT, "ENG");
+		const drift = checkCriteriaMigration(index, "ENG");
+		expect(drift.unmigrated).toHaveLength(0);
+		expect(drift.dual.map((r) => r.identifier)).toEqual(["ENG-1"]);
+		expect(drift.dual[0]?.openChildren).toBe(1);
+	});
+
+	test("a fully-migrated parent (checklist, all children closed) is clean", async () => {
+		const fake = makeFakeClient({
+			projects: [{ id: PROJECT, name: "Proj", identifier: "ENG" }],
+			workItems: {
+				[PROJECT]: [
+					{
+						id: "parent",
+						sequence_id: 1,
+						name: "Parent",
+						description_html: TASKLIST_HTML,
+						state: { group: "backlog" },
+					},
+					{
+						id: "c0",
+						sequence_id: 2,
+						name: "c",
+						parent: "parent",
+						external_id: "parent::ac0",
+						external_source: "planestories",
+						state: { group: "completed" }, // closed
+					},
+				],
+			},
+		});
+		const index = await fetchProjectIndex(fake.client, PROJECT, "ENG");
+		const drift = checkCriteriaMigration(index, "ENG");
+		expect(drift.unmigrated).toHaveLength(0);
+		expect(drift.dual).toHaveLength(0);
 	});
 });
