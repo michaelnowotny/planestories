@@ -181,7 +181,20 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			}
 			updatedItems.push({ projectId, workItemId, body });
 			const existing = data.workItems?.[projectId]?.find((item) => item.id === workItemId);
-			if (existing) Object.assign(existing, body);
+			if (existing) {
+				// Fidelity: Plane returns `state` as an EXPANDED object (name+group). A
+				// PATCH sends `state: <stateId>`; resolve it back to the object so a later
+				// list/normalizeFetched sees the new group (a raw id string would read back
+				// as an undefined stateGroup — i.e. "still open").
+				const patched = { ...body };
+				if (typeof patched.state === "string") {
+					const resolved = data.states?.[projectId]?.find((s) => s.id === patched.state);
+					if (resolved) {
+						patched.state = { id: resolved.id, name: resolved.name, group: resolved.group };
+					}
+				}
+				Object.assign(existing, patched);
+			}
 			return {
 				id: workItemId,
 				sequence_id: (existing?.sequence_id as number | undefined) ?? 7,
