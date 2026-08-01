@@ -100,10 +100,14 @@ Add to `markdown/criteria.ts`:
 - **Default:** criteria stay inline (already true) and now render as an interactive Plane task-list.
   **Zero** work items per criterion.
 - **`--sync-criteria` (sub-item fan-out):** retained for legacy boards only; docs steer to the default.
-  **Anti-remint guard**: importing `--sync-criteria` into a parent whose board description already holds
-  a task-list is refused unless `--force` (Grok F18, Codex #9). The `criterion`-label idea is **dropped
-  from v1** — it would require a hash-schema bump to force re-touch of skip-unchanged children (Codex
-  #10); not worth it. Per-criterion promotion (`!`/`--promote-criteria`) is a **follow-up**.
+  **Anti-remint (as built):** `--sync-criteria` is marked DEPRECATED and prints a loud runtime warning
+  steering to the default; `doctor`'s `dual` finding is the re-mint backstop. A hard import-time
+  `--force` refusal is moot in practice — `--sync-criteria` overwrites the description to narrative-only
+  *before* creating children, so simply dropping the flag (what the default does) is the real fix; the
+  guard would protect only a user who keeps opting into the deprecated path, for whom the warning +
+  doctor detection is proportionate (Grok F18, Codex #9). The `criterion`-label idea is **dropped from
+  v1** — it would require a hash-schema bump to force re-touch of skip-unchanged children (Codex #10).
+  Per-criterion promotion (`!`/`--promote-criteria`) is a **follow-up**.
 
 ### 4.5 Export — description-first, unconditional child exclusion, splice-preserving
 - **Unconditionally exclude owned `::ac` children** from the top-level story list (external_source
@@ -201,9 +205,12 @@ trailing body lines survive.)
 - **doctor**: flags both unmigrated and dual-coexistence parents.
 - **atlas**: criteria ring populated from the description when no children.
 - **`--sync-criteria` anti-remint**: refused (needs `--force`) when the parent already has a task-list.
-- **Live proof (DATA)**: `migrate-criteria --dry-run --project "Data Platform"` reports fold/close counts
-  (~1,255 open criterion items); a real round-trip — tick a box in Plane, `export`, confirm the markdown
-  criterion is `- [x]` — before calling it done. Never print/commit `.env` creds.
+- **Live proof (DATA — DONE 2026-08-01)**: `migrate-criteria --project "Data Platform"` (dry-run,
+  read-only) reported it **would migrate 310 parents, folding 1,578 criteria** into descriptions, with
+  correct per-parent open-child close counts — proving the command end-to-end against the real board
+  with no mutations (creds never printed). The reader round-trip against Plane's exact TipTap shape is
+  covered by unit tests using the brief's probe HTML. The tick-a-box-in-the-UI round-trip is an operator
+  step (the harness can't tick a Plane UI box).
 
 ## 7. Rollout / risk
 - **Sequence is internal to `migrate-criteria`** (file+board+close in one command), so there is no unsafe

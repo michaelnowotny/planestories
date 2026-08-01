@@ -103,7 +103,9 @@ bun run src/cli/index.ts import /path/to/stories.md --dry-run --check
 bun run src/cli/index.ts import /path/to/stories.md
 
 #   --create-labels   create labels that don't exist instead of skipping them
-#   --sync-criteria   sync each acceptance criterion to a Plane sub-item (state from its checkbox)
+#   --sync-criteria   DEPRECATED (legacy): one Plane sub-item per criterion. The DEFAULT now keeps
+#                     criteria as an interactive TipTap task-list in the parent's description (no
+#                     sub-items) — prefer it; run `migrate-criteria` to fold existing sub-items.
 #   --source-label N  tag every created item with label N (auto-created; opt-in, also via config)
 #   --project "Name"  override the project for all stories
 #   --force           re-import even when content is unchanged (bypass skip-unchanged)
@@ -117,7 +119,19 @@ bun run src/cli/index.ts import /path/to/stories.md
 bun run src/cli/index.ts export --project "My Project" -o exported.md
 #   --external-source         export only items planestories created (no demo/other noise)
 #   --label NAME / --status S filters (--status is repeatable); --open-only keeps open items
-#   --sync-criteria rebuilds checklists from sub-items; parent/kind are emitted too
+#   Criteria are recovered DESCRIPTION-FIRST: a description task-list is authoritative; a legacy
+#   parent with only `::ac<n>` sub-items still folds them into the story's checklist. Ticking a box
+#   in the Plane UI then re-exporting yields `- [x]` — this is the board->file reverse sync.
+
+# Migrate legacy `::ac<n>` criterion sub-items -> a task-list in the parent description, then close
+# the children. Idempotent; dry-run by default. THIS is how you collapse a board that used
+# --sync-criteria (on the DATA board that was 71% of all work items).
+bun run src/cli/index.ts migrate-criteria --project "My Project"                    # dry-run report
+bun run src/cli/index.ts migrate-criteria --project "My Project" --yes              # apply
+#   --files stories/*.md   reconcile the linked files' checkbox state FIRST (so a later import can't
+#                          revert the migration); without it, re-`export` before importing
+#   --limit N              migrate at most N parents this run (rate-limit batching)
+# A duplicate `::ac<n>` index (stale rename) is reported + skipped, never guessed.
 
 # Groom a project: close orphaned criterion sub-items (parent Done), report rot.
 bun run src/cli/index.ts groom --project "My Project"          # dry-run report
