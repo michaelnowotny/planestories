@@ -11,7 +11,7 @@ import { type FetchedWorkItem, fetchProjectIndex, type ProjectIndex } from "../p
 import { Resolver } from "../plane/resolvers.ts";
 import type { ResolvedConfig } from "../types.ts";
 import { mapWithConcurrency } from "../utils/concurrency.ts";
-import { criterionIndex, isCriterionChild } from "./board-story.ts";
+import { criterionIndex, descriptionHasCriteria, isCriterionChild } from "./board-story.ts";
 
 /**
  * State groups that count as "closed" for dependency sequencing — a dependency in
@@ -98,18 +98,25 @@ export function collectDescendants(root: FetchedWorkItem, index: ProjectIndex): 
 	return out;
 }
 
-/** Reconstruct a story's acceptance criteria — from criterion sub-items if present, else inline. */
+/**
+ * Reconstruct a story's acceptance criteria — description-first (design §2). When
+ * the item carries its criteria in the description, that is authoritative; only a
+ * legacy parent WITHOUT a description checklist falls back to its `::ac<n>`
+ * children (full child description, not the 255-truncated name). Keying off "has a
+ * description checklist" (not child count) matters because migrate closes but never
+ * deletes children — child-first would show every criterion checked post-migration.
+ */
 function criteriaForItem(item: FetchedWorkItem, index: ProjectIndex): AcceptanceCriterion[] {
-	const children = (index.childrenByParent.get(item.id) ?? [])
+	if (descriptionHasCriteria(item)) {
+		return splitBody(item.description ?? "").criteria;
+	}
+	return (index.childrenByParent.get(item.id) ?? [])
 		.filter(isCriterionChild)
-		.sort((a, b) => criterionIndex(a) - criterionIndex(b));
-	if (children.length > 0) {
-		return children.map((child) => ({
-			text: child.name,
+		.sort((a, b) => criterionIndex(a) - criterionIndex(b))
+		.map((child) => ({
+			text: (child.description?.trim() || child.name).trim(),
 			checked: child.stateGroup === "completed",
 		}));
-	}
-	return splitBody(item.description ?? "").criteria;
 }
 
 /**

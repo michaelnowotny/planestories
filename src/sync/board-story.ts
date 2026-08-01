@@ -1,5 +1,6 @@
-import { spliceAcceptanceCriteria } from "../markdown/criteria.ts";
+import { spliceAcceptanceCriteria, splitBody } from "../markdown/criteria.ts";
 import { normalizeRelationIdentifiers, parseEffortDays } from "../markdown/directives.ts";
+import { hasDescriptionChecklist } from "../markdown/html.ts";
 import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import type { FetchedWorkItem, ProjectIndex } from "../plane/issues.ts";
 import type { UserStory } from "../types.ts";
@@ -8,6 +9,22 @@ import { hashStoryPayload } from "./story-hash.ts";
 /** A criterion child has a parent and an external_id of the form `<parent>::ac<n>`. */
 export function isCriterionChild(item: FetchedWorkItem): boolean {
 	return Boolean(item.parent && item.externalId && /::ac\d+$/.test(item.externalId));
+}
+
+/**
+ * The single precedence predicate (design §2): does this work item ALREADY carry
+ * its acceptance criteria in its description? True when the raw `description_html`
+ * is a TipTap task-list (default / migrated items) OR the converted markdown
+ * already parses criteria (legacy default items whose description used GFM
+ * `<input>` checkboxes). When true, the description is authoritative and any
+ * legacy `::ac<n>` children are IGNORED (migrate closes but never deletes them,
+ * so "no children" is the wrong fence — the description checklist is).
+ */
+export function descriptionHasCriteria(item: FetchedWorkItem): boolean {
+	return (
+		hasDescriptionChecklist(item.descriptionHtml) ||
+		splitBody(item.description ?? "").criteria.length > 0
+	);
 }
 
 /** Positional index of a criterion child from its `::ac<n>` external id. */

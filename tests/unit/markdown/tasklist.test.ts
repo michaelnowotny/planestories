@@ -86,7 +86,7 @@ describe("htmlToMarkdown ← TipTap task-list", () => {
 		expect(md).toContain("[a link](https://x.test)");
 	});
 
-	test("treats only data-checked=\"true\" as checked (not other truthy forms)", () => {
+	test('treats only data-checked="true" as checked (not other truthy forms)', () => {
 		const html =
 			'<ul data-type="taskList"><li data-type="taskItem" data-checked="checked"><p>weird</p></li></ul>';
 		const md = htmlToMarkdown(html);
@@ -96,7 +96,8 @@ describe("htmlToMarkdown ← TipTap task-list", () => {
 
 describe("markdown → TipTap HTML → markdown round-trip identity", () => {
 	test("preserves mixed checked state and inline markup", () => {
-		const md = "### Acceptance Criteria\n\n- [ ] plain one\n- [x] with `code` and [l](https://x.test)";
+		const md =
+			"### Acceptance Criteria\n\n- [ ] plain one\n- [x] with `code` and [l](https://x.test)";
 		const round = htmlToMarkdown(markdownToHtml(md));
 		expect(round).toContain("### Acceptance Criteria");
 		expect(round).toContain("- [ ] plain one");

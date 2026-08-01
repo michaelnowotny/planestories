@@ -9,6 +9,7 @@ import type { ExportFilters, FileFrontmatter, ResolvedConfig } from "../types.ts
 import { mapWithConcurrency } from "../utils/concurrency.ts";
 import {
 	boardItemToStory,
+	descriptionHasCriteria,
 	isCriterionChild,
 	resolveStoryRelationIdentifiers,
 } from "./board-story.ts";
@@ -78,15 +79,15 @@ export async function exportStories(
 		filterInput.label = options.filters.label;
 	}
 
-	// Criterion sub-items grouped by parent (from the full, unfiltered set).
+	// Legacy criterion sub-items grouped by parent (from the full, unfiltered set).
+	// Built ALWAYS — a parent that lacks a description checklist (a legacy
+	// `--sync-criteria` board) still needs its criteria reconstructed from these.
 	const criterionChildren = new Map<string, FetchedWorkItem[]>();
-	if (options.syncCriteria) {
-		for (const item of items) {
-			if (isCriterionChild(item) && item.parent) {
-				const list = criterionChildren.get(item.parent) ?? [];
-				list.push(item);
-				criterionChildren.set(item.parent, list);
-			}
+	for (const item of items) {
+		if (isCriterionChild(item) && item.parent) {
+			const list = criterionChildren.get(item.parent) ?? [];
+			list.push(item);
+			criterionChildren.set(item.parent, list);
 		}
 	}
 
@@ -94,9 +95,10 @@ export async function exportStories(
 	let filtered = filterWorkItems(items, filterInput, project.identifier).sort(
 		(a, b) => a.sequenceId - b.sequenceId,
 	);
-	if (options.syncCriteria) {
-		filtered = filtered.filter((item) => !isCriterionChild(item));
-	}
+	// UNCONDITIONALLY exclude owned criterion children from the top-level story list
+	// (Codex #8): once migration closes them they must never export as standalone
+	// stories, and in the default model they are never their own story.
+	filtered = filtered.filter((item) => !isCriterionChild(item));
 	// Hide archived items (label convention) unless explicitly included.
 	if (!options.includeArchived) {
 		filtered = filtered.filter(
@@ -118,14 +120,20 @@ export async function exportStories(
 
 	const stories = await mapWithConcurrency(filtered, 6, async (item) => {
 		const relations = await client.getRelations(project.id, item.id);
+		// Description-first (design §2): when the item already carries its criteria in
+		// the description, that is authoritative — ignore any legacy children. Only a
+		// legacy parent WITHOUT a description checklist folds its `::ac<n>` children.
+		const children = descriptionHasCriteria(item) ? undefined : criterionChildren.get(item.id);
 		return boardItemToStory(
 			client,
 			item,
 			project.id,
 			project.identifier,
 			projectName,
-			Boolean(options.syncCriteria),
-			options.syncCriteria ? criterionChildren.get(item.id) : undefined,
+			// Criteria now live in the story body; hash as criteria-in-body so
+			// export->import round-trips warm against the default (non-sync) import.
+			false,
+			children,
 			parentIdentifier(item),
 			isEpic(item),
 			resolveStoryRelationIdentifiers(relations, index, project.identifier),

@@ -133,8 +133,7 @@ function buildTurndown(): TurndownService {
 			node.nodeName === "LI" &&
 			(node as unknown as TurndownNode).getAttribute?.("data-type") === "taskItem",
 		replacement: (content, node) => {
-			const checked =
-				(node as unknown as TurndownNode).getAttribute?.("data-checked") === "true";
+			const checked = (node as unknown as TurndownNode).getAttribute?.("data-checked") === "true";
 			const text = content
 				.replace(/^\n+/, "")
 				.replace(/\n+$/, "")

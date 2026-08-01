@@ -84,7 +84,7 @@ describe("export flow (end to end)", () => {
 		expect(story.body).toContain("- [ ] enters email");
 	});
 
-	test("emits kind + parent for a criterion child; omits kind for a plain story", async () => {
+	test("folds a legacy criterion child into its parent — never a standalone story", async () => {
 		const { client } = makeFakeClient({
 			projects: [{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" }],
 			workItems: {
@@ -103,19 +103,55 @@ describe("export flow (end to end)", () => {
 		});
 		const outputPath = join(tmpDir, "kind.md");
 
-		// Without --sync-criteria the child is a standalone story in the export.
+		// Owned `::ac<n>` children are UNCONDITIONALLY excluded (Codex #8): the parent
+		// (which has no description checklist) folds the child in as a criterion.
 		await exportStories(client, { config, filters: {}, outputPath });
 		const content = readFileSync(outputPath, "utf-8");
 
-		expect(content).toContain("kind: criterion");
-		expect(content).toContain("parent: ENG-10");
-		// The plain parent story does NOT get a noisy `kind: story` line.
-		const parentBlock = content.slice(
-			content.indexOf("## Parent story"),
-			content.indexOf("## a criterion"),
-		);
-		expect(parentBlock).not.toContain("kind:");
-		expect(parentBlock).not.toContain("parent:");
+		expect(content).not.toContain("kind: criterion");
+		expect(content).not.toContain("## a criterion");
+		// The parent story carries the folded criterion as its checklist.
+		expect(content).toContain("## Parent story");
+		expect(content).toContain("### Acceptance Criteria");
+		expect(content).toContain("- [ ] a criterion");
+	});
+
+	test("description-first: a migrated parent ignores its leftover completed children", async () => {
+		// A parent that already has a TipTap task-list in its description (an UNCHECKED
+		// criterion) AND a legacy `::ac0` child that migrate left behind in a COMPLETED
+		// state. Precedence (design §2) must take the description (unchecked), not the
+		// child (which would render as checked) — keying off the description checklist,
+		// not "has no children".
+		const { client } = makeFakeClient({
+			projects: [{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{
+						id: "p",
+						sequence_id: 10,
+						name: "Migrated story",
+						description_html:
+							'<p>Body.</p><h3>Acceptance Criteria</h3><ul class="todo-list" data-type="taskList"><li data-type="taskItem" data-checked="false"><p>the real criterion</p></li></ul>',
+						state: { name: "Backlog" },
+					},
+					{
+						id: "c",
+						sequence_id: 11,
+						name: "the real criterion",
+						parent: "p",
+						external_id: "migrated-story::ac0",
+						state: { name: "Done", group: "completed" },
+					},
+				],
+			},
+		});
+		const outputPath = join(tmpDir, "migrated.md");
+		await exportStories(client, { config, filters: {}, outputPath });
+		const content = readFileSync(outputPath, "utf-8");
+
+		expect(content).not.toContain("## the real criterion"); // child excluded
+		expect(content).toContain("- [ ] the real criterion"); // description state wins (unchecked)
+		expect(content).not.toContain("- [x] the real criterion"); // NOT the completed child's state
 	});
 
 	test("emits kind: epic for an item that parents a non-criterion child story", async () => {

@@ -2,7 +2,7 @@ import { splitBody } from "../markdown/criteria.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
 import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import type { ProjectIndex } from "../plane/issues.ts";
-import { criterionIndex, isCriterionChild } from "../sync/board-story.ts";
+import { criterionIndex, descriptionHasCriteria, isCriterionChild } from "../sync/board-story.ts";
 import type { UserStory } from "../types.ts";
 import { assessQuality, type QualityAssessment } from "./quality.ts";
 
@@ -322,10 +322,21 @@ export function buildAtlasFromBoard(
 		}
 
 		const children = index.childrenByParent.get(item.id) ?? [];
-		const criteria: AtlasCriterion[] = children
-			.filter(isCriterionChild)
-			.sort((a, b) => criterionIndex(a) - criterionIndex(b))
-			.map((c) => ({ text: c.name, checked: c.stateGroup === "completed" }));
+		// Description-first (design §2): a default/migrated item carries its criteria
+		// in the description task-list — read them from there. Only a legacy parent
+		// WITHOUT a description checklist falls back to its `::ac<n>` children (using
+		// the full child description, not the 255-truncated name). Keying off "has a
+		// description checklist" (not child count) is required because migrate closes
+		// but never deletes children.
+		const criteria: AtlasCriterion[] = descriptionHasCriteria(item)
+			? splitBody(item.description ?? "").criteria
+			: children
+					.filter(isCriterionChild)
+					.sort((a, b) => criterionIndex(a) - criterionIndex(b))
+					.map((c) => ({
+						text: (c.description?.trim() || c.name).trim(),
+						checked: c.stateGroup === "completed",
+					}));
 		const isEpic = children.some((c) => !isCriterionChild(c));
 
 		const nodeId = nextId("n");
