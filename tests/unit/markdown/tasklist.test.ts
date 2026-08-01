@@ -56,6 +56,19 @@ describe("markdownToHtml → TipTap task-list", () => {
 		expect(html).not.toContain("data-type=");
 	});
 
+	test("preserves an ordered task-list's marker (marked strips `1. [ ]`)", () => {
+		// TipTap has no ordered task-list, but the checkbox must not be silently
+		// dropped — re-inject the GFM marker as text so it round-trips.
+		const html = markdownToHtml("1. [ ] alpha\n2. [x] beta");
+		expect(html).toContain("<ol>");
+		expect(html).not.toContain("data-type=");
+		expect(html).toContain("[ ] alpha");
+		expect(html).toContain("[x] beta");
+		const round = htmlToMarkdown(html);
+		expect(round).toContain("1. [ ] alpha");
+		expect(round).toContain("2. [x] beta");
+	});
+
 	test("empty input stays empty", () => {
 		expect(markdownToHtml("   ")).toBe("");
 	});

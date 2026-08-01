@@ -158,32 +158,54 @@ export async function migrateCriteria(
 	const isOpen = (item: FetchedWorkItem): boolean =>
 		!item.stateGroup || !CLOSED_GROUPS.has(item.stateGroup);
 
-	// Candidate parents = items that still NEED work: un-migrated (fold needed) OR
-	// migrated-but-with-open-children (dual, close needed). A FULLY-migrated parent
-	// (description checklist + all children closed) is excluded from the --limit
-	// window — closed children are retained, so including it would pin the window on
-	// already-done parents and `--limit` would never advance (Grok BLOCK 2).
-	// Deterministic order for stable batching.
-	const parents = index.items
-		.filter((item) => {
-			if (isCriterionChild(item)) {
-				return false;
-			}
-			const children = criterionChildrenOf(index, item.id);
-			if (children.length === 0) {
-				return false;
-			}
-			return descriptionHasCriteria(item) ? children.some(isOpen) : true;
-		})
-		.sort((a, b) => a.sequenceId - b.sequenceId);
+	const hasDuplicateIndex = (children: FetchedWorkItem[]): boolean => {
+		const indices = children.map(criterionIndex);
+		return new Set(indices).size !== indices.length;
+	};
 
-	const limit = options.limit && options.limit > 0 ? options.limit : parents.length;
-	const selected = parents.slice(0, limit);
-	const deferred = parents.length - selected.length;
+	// Classify parents up front (deterministic order):
+	//  - CONFLICT: an un-migrated parent whose children have a duplicate `::ac<n>`
+	//    index (a stale rename). Reported EVERY run, but NEVER counted against
+	//    `--limit` and NEVER selected — otherwise a permanent conflict at the front
+	//    of the window would consume the limit slot forever and starve later valid
+	//    parents (Codex #2 / Grok residual).
+	//  - WORK: un-migrated non-conflict (fold needed) OR migrated-with-open-children
+	//    (dual, close needed). `--limit` applies to these.
+	//  - FULLY MIGRATED (checklist + no open children): skipped entirely, so the
+	//    window advances across runs (Grok BLOCK 2). Children are closed not deleted.
+	const conflicts: Array<{ identifier: string; title: string; reason: string }> = [];
+	const workParents: FetchedWorkItem[] = [];
+	for (const item of [...index.items].sort((a, b) => a.sequenceId - b.sequenceId)) {
+		if (isCriterionChild(item)) {
+			continue;
+		}
+		const children = criterionChildrenOf(index, item.id);
+		if (children.length === 0) {
+			continue;
+		}
+		if (descriptionHasCriteria(item)) {
+			if (children.some(isOpen)) {
+				workParents.push(item); // dual: close leftover open children
+			}
+			continue;
+		}
+		if (hasDuplicateIndex(children)) {
+			conflicts.push({
+				identifier: ident(item),
+				title: item.name,
+				reason: "duplicate ::ac<n> index among children (stale rename?)",
+			});
+			continue;
+		}
+		workParents.push(item);
+	}
+
+	const limit = options.limit && options.limit > 0 ? options.limit : workParents.length;
+	const selected = workParents.slice(0, limit);
+	const deferred = workParents.length - selected.length;
 
 	const migrated: MigrateParentRef[] = [];
 	const alreadyMigrated: MigrateParentRef[] = [];
-	const conflicts: Array<{ identifier: string; title: string; reason: string }> = [];
 	let criteriaFolded = 0;
 	let childrenClosed = 0;
 
@@ -231,18 +253,8 @@ export async function migrateCriteria(
 			continue;
 		}
 
-		// Conflict: two children claim the same `::ac<n>` index (a stale rename) — the
-		// same ambiguity writeback fails closed on. Report + skip; never guess a merge.
-		const indices = children.map(criterionIndex);
-		if (new Set(indices).size !== indices.length) {
-			conflicts.push({
-				identifier: ident(parent),
-				title: parent.name,
-				reason: "duplicate ::ac<n> index among children (stale rename?)",
-			});
-			continue;
-		}
-
+		// (Conflicts were already classified out above — every parent reaching here is
+		// un-migrated with unique `::ac<n>` indices.)
 		// Derive criteria from ALL children (captured before any close): full child
 		// description when the name was truncated at 255 chars, checked = completed.
 		const criteria = children.map((child) => ({

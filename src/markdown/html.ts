@@ -34,11 +34,21 @@ const taskListMarked = new Marked({
 			if (token.ordered) {
 				const startAttr =
 					typeof token.start === "number" && token.start !== 1 ? ` start="${token.start}"` : "";
-				// Ordered lists are never TipTap task-lists — render items as PLAIN so a
-				// stray `1. [ ]` doesn't become a `taskItem` inside an <ol> (Codex note).
+				// Ordered lists are never TipTap task-lists (taskList is a <ul>). Render
+				// items as PLAIN <li>, but if marked flagged an item as a task (it strips
+				// the `[ ]` into item.task/checked even for `1. [ ]`), re-inject the GFM
+				// marker as text so the checkbox ROUND-TRIPS instead of being silently
+				// dropped (Codex #9). Not interactive in Plane, but lossless.
 				let items = "";
 				for (const item of token.items) {
-					items += `<li>${this.parser.parse(item.tokens, true)}</li>\n`;
+					let content = this.parser.parse(item.tokens, true);
+					if (item.task) {
+						const marker = item.checked ? "[x] " : "[ ] ";
+						content = content.includes("<p>")
+							? content.replace("<p>", `<p>${marker}`)
+							: `${marker}${content}`;
+					}
+					items += `<li>${content}</li>\n`;
 				}
 				return `<ol${startAttr}>\n${items}</ol>\n`;
 			}
@@ -179,6 +189,12 @@ export function htmlToMarkdown(html: string | undefined | null): string {
 			// task-list items back to canonical "- [ ] text" / "- [x] text". (The
 			// TipTap rule already emits the canonical form.)
 			.replace(/^[-*]\s+(\[[ xX]\])\s+/gm, (_match, box: string) => `- ${box.toLowerCase()} `)
+			// Ordered task items round-trip as text ("1.  \[ \] alpha") — turndown pads
+			// the marker and escapes the brackets. Normalize back to "1. [ ] alpha".
+			.replace(
+				/^(\s*\d+)\.\s+\\?\[([ xX])\\?\]\s+/gm,
+				(_match, num: string, box: string) => `${num}. [${box.toLowerCase()}] `,
+			)
 			.trim()
 	);
 }

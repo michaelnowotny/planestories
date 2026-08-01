@@ -290,6 +290,98 @@ describe("migrateCriteria", () => {
 		// Each run migrates the NEXT parent — not the same one stuck at the front.
 		expect(seen).toEqual(["ENG-1", "ENG-3", "ENG-5"]);
 	});
+
+	test("a permanent conflict never blocks --limit progress", async () => {
+		const fake = makeFakeClient({
+			projects: [{ id: PROJECT, name: "Proj", identifier: "ENG" }],
+			states: {
+				[PROJECT]: [
+					{ id: "done", name: "Done", group: "completed" },
+					{ id: "backlog", name: "Backlog", group: "backlog" },
+				],
+			},
+			workItems: {
+				[PROJECT]: [
+					// ENG-1: a conflict (duplicate ::ac0 from a stale rename) at the FRONT.
+					{
+						id: "cf",
+						sequence_id: 1,
+						name: "Conflict",
+						description_html: "<p>n</p>",
+						state: { group: "backlog" },
+					},
+					{
+						id: "cf-a",
+						sequence_id: 2,
+						name: "a",
+						parent: "cf",
+						external_id: "cf::ac0",
+						external_source: "planestories",
+						state: { group: "backlog" },
+					},
+					{
+						id: "cf-b",
+						sequence_id: 3,
+						name: "b",
+						parent: "cf",
+						external_id: "renamed::ac0",
+						external_source: "planestories",
+						state: { group: "backlog" },
+					},
+					// ENG-4, ENG-6: valid parents that must still get migrated.
+					{
+						id: "v1",
+						sequence_id: 4,
+						name: "V1",
+						description_html: "<p>n</p>",
+						state: { group: "backlog" },
+					},
+					{
+						id: "v1c",
+						sequence_id: 5,
+						name: "c",
+						parent: "v1",
+						external_id: "v1::ac0",
+						external_source: "planestories",
+						state: { group: "backlog" },
+					},
+					{
+						id: "v2",
+						sequence_id: 6,
+						name: "V2",
+						description_html: "<p>n</p>",
+						state: { group: "backlog" },
+					},
+					{
+						id: "v2c",
+						sequence_id: 7,
+						name: "c",
+						parent: "v2",
+						external_id: "v2::ac0",
+						external_source: "planestories",
+						state: { group: "backlog" },
+					},
+				],
+			},
+		});
+
+		const migratedSeen: string[] = [];
+		for (let run = 0; run < 2; run++) {
+			const r = await migrateCriteria(fake.client, {
+				config,
+				project: "Proj",
+				apply: true,
+				limit: 1,
+			});
+			// The conflict is reported on EVERY run but never consumes the limit slot.
+			expect(r.conflicts.map((c) => c.identifier)).toEqual(["ENG-1"]);
+			for (const p of r.migrated) {
+				migratedSeen.push(p.identifier);
+			}
+		}
+		// Both valid parents migrated across the two runs — the conflict didn't starve them.
+		expect(migratedSeen).toEqual(["ENG-4", "ENG-6"]);
+	});
 });
 
 describe("checkCriteriaMigration (doctor drift)", () => {
