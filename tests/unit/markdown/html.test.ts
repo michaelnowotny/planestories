@@ -2,10 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { htmlToMarkdown, markdownToHtml } from "../../../src/markdown/html.ts";
 
 describe("markdownToHtml", () => {
-	test("renders task lists as checkbox inputs", () => {
+	test("renders task lists as a TipTap task-list (not GFM inputs)", () => {
+		// Plane's editor only renders an interactive checklist from the TipTap
+		// schema; GFM <input> checkboxes are inert. See tasklist.test.ts for the
+		// full writer contract.
 		const html = markdownToHtml("- [ ] todo\n- [x] done");
-		expect(html).toContain('type="checkbox"');
-		expect(html.toLowerCase()).toContain("checked");
+		expect(html).toContain('data-type="taskList"');
+		expect(html).toContain('data-checked="false"');
+		expect(html).toContain('data-checked="true"');
+		expect(html).not.toContain("<input");
 	});
 
 	test("returns empty string for blank input", () => {

@@ -1,4 +1,4 @@
-import { buildAcceptanceCriteria, joinBody, splitBody } from "../markdown/criteria.ts";
+import { spliceAcceptanceCriteria } from "../markdown/criteria.ts";
 import { normalizeRelationIdentifiers, parseEffortDays } from "../markdown/directives.ts";
 import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import type { FetchedWorkItem, ProjectIndex } from "../plane/issues.ts";
@@ -49,11 +49,14 @@ export function boardItemToStory(
 	if (children && children.length > 0) {
 		const sorted = [...children].sort((a, b) => criterionIndex(a) - criterionIndex(b));
 		const criteria = sorted.map((child) => ({
-			text: child.name,
+			// The full criterion text lives in the child DESCRIPTION when the name was
+			// truncated at 255 chars (criterionNameAndBody); fall back to the name.
+			text: (child.description?.trim() || child.name).trim(),
 			checked: child.stateGroup === "completed",
 		}));
-		const narrative = splitBody(body).narrative;
-		body = joinBody(narrative, buildAcceptanceCriteria(criteria));
+		// Splice (not joinBody) so trailing sections after the AC block — Testing
+		// Notes, **Effort:**, **Depends on:** — survive the rebuild.
+		body = spliceAcceptanceCriteria(body, criteria);
 	}
 
 	const story: UserStory = {

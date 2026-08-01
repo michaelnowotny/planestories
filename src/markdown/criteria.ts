@@ -10,6 +10,15 @@ export interface SplitBody {
 	criteria: AcceptanceCriterion[];
 	/** Whether an acceptance-criteria heading was present. */
 	hasHeading: boolean;
+	/**
+	 * Body content from the NEXT heading after the criteria block onward (or ""
+	 * when the criteria block runs to end-of-file). This is the load-bearing field
+	 * that lets a rebuild preserve trailing sections — `### Testing Notes`,
+	 * `**Effort:** …`, `**Depends on:** …` — instead of the old
+	 * `joinBody(narrative, block)` which silently DROPPED everything after the
+	 * criteria. See `spliceAcceptanceCriteria`.
+	 */
+	suffix: string;
 }
 
 /**
@@ -70,16 +79,18 @@ export function splitBody(body: string): SplitBody {
 	const headingIndex = acHeadingIndex(lines);
 
 	if (headingIndex === -1) {
-		return { narrative: body.trim(), criteria: [], hasHeading: false };
+		return { narrative: body.trim(), criteria: [], hasHeading: false, suffix: "" };
 	}
 
 	const narrative = lines.slice(0, headingIndex).join("\n").trim();
 
 	const criteria: AcceptanceCriterion[] = [];
+	let suffixStart = lines.length;
 	for (let i = headingIndex + 1; i < lines.length; i++) {
 		const line = lines[i] as string;
 		if (ANY_HEADING.test(line.trim())) {
-			break; // next section
+			suffixStart = i; // the criteria section ends where the next section begins
+			break;
 		}
 		const match = line.match(CHECKBOX_LINE);
 		if (match) {
@@ -87,7 +98,29 @@ export function splitBody(body: string): SplitBody {
 		}
 	}
 
-	return { narrative, criteria, hasHeading: true };
+	const suffix = lines.slice(suffixStart).join("\n").trim();
+	return { narrative, criteria, hasHeading: true, suffix };
+}
+
+/**
+ * Rebuild a story body with a REPLACED acceptance-criteria checklist, preserving
+ * the narrative prefix AND every trailing section after the criteria block.
+ *
+ * This is the safe replacement for `joinBody(splitBody(body).narrative, block)`,
+ * which dropped the suffix (`### Testing Notes`, `**Effort:**`, `**Depends on:**`,
+ * …). When the body has no acceptance-criteria heading, the block is appended.
+ * Passing an empty `criteria` removes the criteria block while keeping prefix and
+ * suffix. Non-checkbox free text interleaved among the checkboxes inside the AC
+ * block itself is not separately retained — our AC blocks are checkbox-only by
+ * authoring via `CHECKBOX_LINE`.
+ */
+export function spliceAcceptanceCriteria(body: string, criteria: AcceptanceCriterion[]): string {
+	const { narrative, suffix } = splitBody(body);
+	const block = buildAcceptanceCriteria(criteria);
+	return [narrative, block, suffix]
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0)
+		.join("\n\n");
 }
 
 /**
