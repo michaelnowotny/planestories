@@ -82,6 +82,49 @@ describe("ensureComment ambiguous-write safety (A10: verify before replay)", () 
 		expect(s.createCallCount()).toBe(1);
 	});
 
+	test("create is invoked with the client-level blind retry DISABLED", async () => {
+		const seen: Array<{ maxRetries?: number } | undefined> = [];
+		const s = stub(["ok"]);
+		const spy = {
+			...s.client,
+			createWorkItemComment: async <T>(
+				p: string,
+				w: string,
+				body: Record<string, unknown>,
+				opts?: { maxRetries?: number },
+			): Promise<T> => {
+				seen.push(opts);
+				return s.client.createWorkItemComment(p, w, body) as Promise<T>;
+			},
+		};
+		await ensureComment(spy as never, "p", "w", MARK, BODY, s.noSleep);
+		expect(seen).toEqual([{ maxRetries: 0 }]);
+	});
+
+	test("unverifiable state (verification read fails) rethrows WITHOUT replaying", async () => {
+		const s = stub(["transient", "ok"]);
+		let creates = 0;
+		const flaky = {
+			...s.client,
+			createWorkItemComment: async <T>(
+				p: string,
+				w: string,
+				body: Record<string, unknown>,
+			): Promise<T> => {
+				creates++;
+				return s.client.createWorkItemComment(p, w, body) as Promise<T>;
+			},
+			listWorkItemComments: async <T>(): Promise<T[]> => {
+				if (creates > 0) throw new PlaneApiError("list failed", 500);
+				return s.client.listWorkItemComments("p", "w");
+			},
+		};
+		await expect(ensureComment(flaky as never, "p", "w", MARK, BODY, s.noSleep)).rejects.toThrow(
+			"503", // the ORIGINAL create error, not the list error
+		);
+		expect(creates).toBe(1); // never replayed a write it could not verify
+	});
+
 	test("transient failures exhaust the budget, then throw (no infinite loop)", async () => {
 		const s = stub(["transient", "transient", "transient", "transient", "transient"]);
 		await expect(ensureComment(s.client as never, "p", "w", MARK, BODY, s.noSleep)).rejects.toThrow(

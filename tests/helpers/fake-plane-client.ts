@@ -338,7 +338,7 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 	};
 
 	return {
-		client: impl as unknown as PlaneClient,
+		client: Object.assign(impl, { maxRetries: 3 }) as unknown as PlaneClient,
 		calls,
 		createdLabels,
 		createdItems,

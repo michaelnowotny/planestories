@@ -228,6 +228,12 @@ async function hasMarkerComment(
  * client's retry budget); permanent errors (4xx) surface immediately. If the
  * verification read itself fails, the original error is thrown WITHOUT another
  * POST — never replay a write whose durable state cannot be confirmed.
+ *
+ * Known trade-off: with the client retry disabled, a 429's Retry-After header
+ * is not honored on the create itself — the local exponential backoff (capped
+ * 5s) paces retries instead, and the interleaved verification GET still honors
+ * Retry-After via normal client retries. Duplicate-safety beats rate-limit
+ * courtesy here; the create count stays bounded either way.
  */
 export async function ensureComment(
 	client: CommentClient,
