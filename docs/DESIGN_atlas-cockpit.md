@@ -181,3 +181,32 @@ Ring ticks: lit `rgba(94,178,255,α)` + 2.1×-width underglow `.30α`; unlit `rg
 0.055 rad (0.02 when >24 ticks); width `max(2.6, er*0.11)`. Lanes: blocks dash `[9,7]` offset `−t*0.03`
 +4px underglow pass; relates dash `[3,8]` offset `−t*0.02`. Spokes `rgba(130,155,215,.13·res)`. Background
 stars: 240, twinkle `0.28+0.36·|sin(t·0.0005+φ)|`. Beam/pulse/ring constants in §6.
+
+## 11. Build-verification addendum (2026-08-08, the build session — READ IF RE-TUNING)
+
+Shipped to `main` @ `1d072ce` (commits `5b4e24e`..`1d072ce`), double-APPROVED by Grok + Codex over
+three review rounds. Two spec constants were REPLACED during verification against the real 47x742
+board — the measured reality beat the mock's numbers:
+
+1. **The LOD driver is AREAL SPACING, not orbit radius.** The mock's `0.698*(epicR+24)` worked
+   because its ring layout made the first-orbit radius ~constant. In the force layout the mean
+   hub->child distance GROWS with cluster size (measured 95-216 world units), so big clusters
+   resolved FIRST — the telescopic feel inverted. The shipped driver is
+   `spacing = sqrt(pi*extent^2/n)` (measured 76-129, nearly flat, slightly wider for small epics)
+   with gas band `sstep(24,42, spacing*scale)` and `flyToCluster` targeting 50px spacing. The 24..42
+   band comes from the far-out regime where planets ride the 2.6px minimum radius: gas takes over
+   when spacing drops under ~3-4 floor-diameters.
+2. **Board-orphan stories get a global-MAG fade.** 214/742 real stories are top-level (the known
+   pre-v2 `parent:` backfill gap) — with no cluster to condense into they rendered always-resolved
+   and buried the fit-view nebulae. Shipped: orphans stay planets at every zoom with alpha
+   `0.3 -> 1` over MAG `1.6..2.6` — honest unfiled contacts drifting between clusters.
+
+Review-round fixes worth remembering: every selection ENTRY POINT must refuse `!visible` nodes
+(central guard in `select`/`selectEpic` + visibility checks before any `flyTo*`); scan contacts
+refresh on the deps-only toggle; `savedView` saves once per scan session; `worldSprite` floors at
+the TRUE 2.6px minimum (the mock's 5px clamp drew far-out planets ~2x their computed size);
+`<title>` escapes once; `inDeps` keeps the full ancestor chain; epic contacts ping too; hrefs are
+scheme-guarded. Verification pattern: headless chromium tour (synthetic + real board via
+balanced-brace GRAPH extraction) gating on zero pageerrors, frame-time probes (locked 16.7ms), and
+debug-injected builds (`window.__dbg` via string-replace on the anchor `resize();buildChips();`)
+to measure closure state without shipping a debug surface.
