@@ -575,7 +575,8 @@ function depCard(kind,role,ident,text,targetId){
     '</b><span class="dt">'+esc(text)+'</span></div>';}
 function wireDeps(container){
   container.querySelectorAll(".dep").forEach(card=>{
-    card.onclick=()=>{const n=byId.get(card.dataset.t);if(!n)return;
+    card.onclick=()=>{const n=byId.get(card.dataset.t);
+      if(!n||!visible(n))return; // never fly the camera to a hidden target
       if(n.kind==="epic"){selectEpic(n);flyToCluster(n);}
       else{select(n);flyToNode(n,6);}};});}
 function depsOf(id){const out=[];
@@ -678,7 +679,9 @@ function selectEpic(h){
     '</span><span class="eff">'+(st.effortDays==null?"\\u2014":fmtDays(st.effortDays)+"d")+'</span></div>').join("")+
     (kids.length>5?'<div class="morestories">\\u2026AND '+(kids.length-5)+' MORE IN ORBIT</div>':"");
   el("seStories").querySelectorAll(".srow").forEach(row=>{
-    row.onclick=()=>{const st=top[+row.dataset.i];select(st);flyToNode(st,8);};});
+    row.onclick=()=>{const st=top[+row.dataset.i];
+      if(!visible(st))return; // fly only when the select can actually take
+      select(st);flyToNode(st,8);};});
   const su=safeUrl(h.url);
   el("seOpen").hidden=!su;if(su)el("seOpen").href=su;}
 el("seClose").onclick=()=>select(null);
