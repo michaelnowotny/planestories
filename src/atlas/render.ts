@@ -401,14 +401,20 @@ function tick(){
 }
 
 // --- Cluster geometry from SETTLED positions (design 7.2) ---------------------
-// orbit = mean hub->story distance (the LOD spacing driver); extent = max + pad
-// (the nebula radius). Recomputed while the sim is hot and once when it cools.
+// extent = max hub->story distance + pad (the nebula radius). spacing = AREAL
+// room per story, sqrt(pi*extent^2/n) — the LOD driver. A mean-radius driver is
+// wrong here: radius GROWS with cluster size, which would resolve big clusters
+// first; areal spacing is nearly flat across cluster sizes and slightly larger
+// for small epics, so small clusters condense first (the telescopic feel).
+// Recomputed while the sim is hot and once when it cools.
 const GEO=new Map();
 function computeGeo(){
-  for(const h of HUBS){const hp=P.get(h.id);let sum=0,cnt=0,mx=0;
+  for(const h of HUBS){const hp=P.get(h.id);let cnt=0,mx=0;
     for(const c of storiesOf.get(h.id)){const cp=P.get(c.id);
-      const d=Math.hypot(cp.x-hp.x,cp.y-hp.y);sum+=d;cnt++;if(d>mx)mx=d;}
-    GEO.set(h.id,{orbit:cnt?sum/cnt:hp.r+24,extent:cnt?mx+16:hp.r+30});}}
+      const d=Math.hypot(cp.x-hp.x,cp.y-hp.y);cnt++;if(d>mx)mx=d;}
+    const extent=cnt?mx+16:hp.r+30;
+    GEO.set(h.id,{extent,
+      spacing:Math.sqrt(Math.PI*extent*extent/Math.max(1,cnt))});}}
 computeGeo();
 
 // --- View / camera ------------------------------------------------------------
@@ -442,9 +448,10 @@ function flyTo(s,tx,ty){anim={f:{s:view.scale,x:view.x,y:view.y},g:{s,x:tx,y:ty}
   t0:performance.now(),d:520};}
 function flyToNode(n,mag){const p=P.get(n.id),s=Math.min(fs()*40,Math.max(view.scale,fs()*(mag||5)));
   flyTo(s,W/2-p.x*s,H/2-p.y*s);}
-// Frame an epic's cluster so its planets fully condense (sp target ~66).
+// Frame an epic's cluster so its planets fully condense (spacing target 50px,
+// past the gas band's 42px upper edge).
 function flyToCluster(h){const g=GEO.get(h.id),p=P.get(h.id);
-  const s=Math.min(fs()*40,66/(0.698*(g?g.orbit:40)));
+  const s=Math.min(fs()*40,50/(g?g.spacing:80));
   flyTo(s,W/2-p.x*s,H/2-p.y*s);}
 el("fitBtn").onclick=()=>fitAll(true);
 // Ruler = draggable zoom needle (log scale over the 1x..40x MAG band).
@@ -655,10 +662,22 @@ el("seClose").onclick=()=>select(null);
 
 // --- Pointer: pan / drag-node / hover / click-select --------------------------
 function S(id){const p=P.get(id);return{x:p.x*view.scale+view.x,y:p.y*view.scale+view.y};}
-function hubLOD(h){const g=GEO.get(h.id),sp=0.698*(g?g.orbit:40)*view.scale;
-  const res=sstep(13,22,sp);return{res,neb:1-res};}
+// LOD thresholds, MEASURED against the real 47x742 board (probe 2026-08-08):
+// areal spacing is 76-129 world units, fitScale ~0.13-0.19, so screen spacing
+// at fit sits around 14-24px — below the gas band (24..42), giving nebulae at
+// fit. Far out, planets ride the 2.6px minimum radius, so their glow crowds
+// once spacing drops under ~3-4 floor-diameters (~24px): that is where gas
+// takes over. Small clusters (wider spacing) resolve by ~2.5x MAG, the biggest
+// by ~4x.
+function hubLOD(h){const g=GEO.get(h.id),sp=(g?g.spacing:80)*view.scale;
+  const res=sstep(24,42,sp);return{res,neb:1-res};}
+// Board-orphan stories (no parent epic) have no cluster to condense into.
+// They stay planets at every zoom but ride a global-MAG fade: subdued at fit
+// (0.3) so the nebula field reads calm, full presence by ~2.6x MAG. Honest:
+// unfiled work drifts between the clusters instead of vanishing.
 function lodRes(n){if(n.kind==="epic")return 1;
-  const hid=epicOf.get(n.id);if(!hid)return 1;
+  const hid=epicOf.get(n.id);
+  if(!hid)return 0.3+0.7*sstep(1.6,2.6,view.scale/fs());
   return hubLOD(byId.get(hid)).res;}
 function storyR(n,hov){
   // SIZE = EFFORT: log2 scale, clipped. Unknown effort renders as the honest
@@ -832,7 +851,9 @@ function drawNebula(h,hi,neb,t,dim){
     const gr=x.createRadialGradient(cx2,cy2,0,cx2,cy2,rr);
     gr.addColorStop(0,"rgba("+bl[3]+","+(al*neb*dim)+")");gr.addColorStop(1,"rgba("+bl[3]+",0)");
     x.fillStyle=gr;x.beginPath();x.arc(cx2,cy2,rr,0,6.283);x.fill();}
-  for(let k=0;k<3&&kids.length;k++){const s2=kids[(k*3)%kids.length],p=S(s2.id);
+  for(let k=0;k<3&&kids.length;k++){const s2=kids[(k*3)%kids.length];
+    if(!visible(s2))continue; // deps-only must not sparkle at hidden stories
+    const p=S(s2.id);
     x.globalAlpha=neb*dim*(0.25+0.3*Math.abs(Math.sin(t*0.0009+hi+k*2)));
     x.beginPath();x.arc(p.x,p.y,1.1,0,6.283);x.fillStyle="#dfe9ff";x.fill();}
   x.globalAlpha=1;x.globalCompositeOperation="source-over";}
