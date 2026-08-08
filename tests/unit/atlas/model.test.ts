@@ -249,6 +249,48 @@ describe("effortDays + priority (Cockpit model additions)", () => {
 	});
 });
 
+describe("assignee vocabulary (filter chips)", () => {
+	test("collects distinct assignees, sorted, nulls excluded", async () => {
+		const P = "p1";
+		const c = makeFakeClient({
+			projects: [{ id: P, name: "Proj", identifier: "ENG" }],
+			workItems: {
+				[P]: [
+					{
+						id: "a",
+						sequence_id: 1,
+						name: "A",
+						state: { name: "Backlog", group: "backlog" },
+						assignees: [{ email: "zoe@x.io" }],
+					},
+					{
+						id: "b",
+						sequence_id: 2,
+						name: "B",
+						state: { name: "Backlog", group: "backlog" },
+						assignees: [{ email: "ann@x.io" }],
+					},
+					{
+						id: "c",
+						sequence_id: 3,
+						name: "C",
+						state: { name: "Backlog", group: "backlog" },
+						assignees: [{ email: "zoe@x.io" }],
+					},
+					{ id: "d", sequence_id: 4, name: "D", state: { name: "Backlog", group: "backlog" } },
+				],
+			},
+		}).client;
+		const index = await fetchProjectIndex(c, P, "ENG");
+		const g = buildAtlasFromBoard(c, P, "ENG", "Proj", index);
+		expect(g.assignees).toEqual(["ann@x.io", "zoe@x.io"]);
+	});
+
+	test("file source: empty assignee vocabulary when none are set", () => {
+		expect(buildAtlasFromFile(FILE, "x.md").assignees).toEqual([]);
+	});
+});
+
 describe("dependency edges", () => {
 	test("file source: blocks is directed, relates is undirected, mirror is deduped", () => {
 		const file = [

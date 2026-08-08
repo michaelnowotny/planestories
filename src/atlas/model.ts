@@ -68,6 +68,8 @@ export interface AtlasGraph {
 	edges: AtlasEdge[];
 	/** Distinct label names (for filter chips). */
 	labels: string[];
+	/** Distinct assignee names/emails present (for filter chips), sorted. */
+	assignees: string[];
 	/** Distinct status names present. */
 	statuses: string[];
 	counts: { epics: number; stories: number; criteria: number; flagged: number; edges: number };
@@ -169,6 +171,7 @@ function summarize(
 	edges: AtlasEdge[],
 ): AtlasGraph {
 	const labels = new Set<string>();
+	const assignees = new Set<string>();
 	const statuses = new Set<string>();
 	let epics = 0;
 	let stories = 0;
@@ -179,6 +182,7 @@ function summarize(
 		if (node.kind === "epic") epics += 1;
 		else stories += 1;
 		for (const l of node.labels) labels.add(l);
+		if (node.assignee) assignees.add(node.assignee);
 		if (node.status) statuses.add(node.status);
 		criteria += node.criteria.length;
 		if (node.quality && !node.quality.ok) flagged += 1;
@@ -192,6 +196,7 @@ function summarize(
 		nodes: roots,
 		edges,
 		labels: [...labels].sort(),
+		assignees: [...assignees].sort(),
 		statuses: [...statuses],
 		counts: { epics, stories, criteria, flagged, edges: edges.length },
 	};

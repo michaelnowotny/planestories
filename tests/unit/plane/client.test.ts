@@ -245,3 +245,29 @@ describe("deriveWebBaseUrl", () => {
 		expect(deriveWebBaseUrl("https://plane.example.com")).toBe("https://plane.example.com");
 	});
 });
+
+describe("per-call retry override (non-idempotent writes)", () => {
+	// A POST that is NOT safe to blindly replay (comment create) passes
+	// maxRetries: 0 per-call: the client must surface the transient failure
+	// immediately (exactly one fetch), letting the caller verify-then-retry.
+	test("maxRetries: 0 on the call disables retries even when the client allows them", async () => {
+		const { client: c } = clientWithCapturedSleep({ maxRetries: 5 });
+		const state = queueFetch([() => makeResponse(503), () => makeResponse(200, { ok: true })]);
+		await expect(
+			c.request("POST", "/api/v1/workspaces/ws/x/", { body: {}, maxRetries: 0 }),
+		).rejects.toThrow("503");
+		expect(state.calls).toBe(1);
+	});
+
+	test("PlaneApiError carries the HTTP status for caller-side classification", async () => {
+		const { client: c } = clientWithCapturedSleep({ maxRetries: 0 });
+		queueFetch([() => makeResponse(400, { error: "bad" })]);
+		try {
+			await c.request("POST", "/api/v1/workspaces/ws/x/", { body: {} });
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect(err).toBeInstanceOf(PlaneApiError);
+			expect((err as PlaneApiError).status).toBe(400);
+		}
+	});
+});

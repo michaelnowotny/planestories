@@ -182,27 +182,91 @@ interface RawComment {
 	comment_stripped?: string;
 }
 
+/** The comment surface ensureComment needs (narrow, so tests can stub it). */
+export interface CommentClient {
+	readonly maxRetries: number;
+	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]>;
+	createWorkItemComment<T>(
+		projectId: string,
+		workItemId: string,
+		body: Record<string, unknown>,
+		opts?: { maxRetries?: number },
+	): Promise<T>;
+}
+
+/** Transient = worth replaying: network-ambiguous (no status), 429, or 5xx. */
+function isTransientPlaneError(error: unknown): boolean {
+	if (!(error instanceof PlaneApiError)) {
+		return false;
+	}
+	return error.status === undefined || error.status === 429 || error.status >= 500;
+}
+
+async function hasMarkerComment(
+	client: CommentClient,
+	projectId: string,
+	workItemId: string,
+	marker: string,
+): Promise<boolean> {
+	const existing = await client.listWorkItemComments<RawComment>(projectId, workItemId);
+	return existing.some(
+		(c) => (c.comment_html ?? "").includes(marker) || (c.comment_stripped ?? "").includes(marker),
+	);
+}
+
 /**
  * Post a comment on a work item only if one bearing `marker` isn't already there,
  * so repeated runs (e.g. groom) don't spam duplicate notes. `body` should embed
  * `marker` so the next run can find it. Returns whether it actually posted.
+ *
+ * Duplicate-safety (A10 — verify before replaying an ambiguous write): comment
+ * creation is NOT idempotent, so the POST runs with the client's blind retry
+ * DISABLED. On a failure, the comment list is re-checked: if the marker is now
+ * present, the write actually landed (timed-out-but-committed) and we are done —
+ * this is the case where the old client-level replay posted duplicates. Only a
+ * verified-absent, transient failure is retried (with backoff, up to the
+ * client's retry budget); permanent errors (4xx) surface immediately. If the
+ * verification read itself fails, the original error is thrown WITHOUT another
+ * POST — never replay a write whose durable state cannot be confirmed.
  */
 export async function ensureComment(
-	client: PlaneClient,
+	client: CommentClient,
 	projectId: string,
 	workItemId: string,
 	marker: string,
 	body: string,
+	opts?: { sleep?: (ms: number) => Promise<void> },
 ): Promise<"posted" | "exists"> {
-	const existing = await client.listWorkItemComments<RawComment>(projectId, workItemId);
-	const already = existing.some(
-		(c) => (c.comment_html ?? "").includes(marker) || (c.comment_stripped ?? "").includes(marker),
-	);
-	if (already) {
+	if (await hasMarkerComment(client, projectId, workItemId, marker)) {
 		return "exists";
 	}
-	await client.createWorkItemComment(projectId, workItemId, { comment_html: body });
-	return "posted";
+	const sleep = opts?.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+	const attempts = Math.max(1, client.maxRetries + 1);
+	for (let attempt = 1; ; attempt++) {
+		try {
+			await client.createWorkItemComment(
+				projectId,
+				workItemId,
+				{ comment_html: body },
+				{ maxRetries: 0 },
+			);
+			return "posted";
+		} catch (error) {
+			let landed: boolean;
+			try {
+				landed = await hasMarkerComment(client, projectId, workItemId, marker);
+			} catch {
+				throw error; // cannot verify durable state -> never replay the write
+			}
+			if (landed) {
+				return "posted"; // the ambiguous write committed; a replay would duplicate
+			}
+			if (!isTransientPlaneError(error) || attempt >= attempts) {
+				throw error;
+			}
+			await sleep(Math.min(500 * 2 ** (attempt - 1), 5000));
+		}
+	}
 }
 
 /**

@@ -115,6 +115,8 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
         <div class="meta">
           <div class="cell2"><div class="k">Effort</div><div class="v" id="sbEffort">&#8212;</div></div>
           <div class="cell2"><div class="k">Priority</div><div class="v" id="sbPrio">&#8212;</div></div>
+          <div class="cell2" id="sbAssigneeCell" style="grid-column:1/3" hidden><div class="k">Assignee</div>
+            <div class="v" id="sbAssignee">&#8212;</div></div>
           <div class="cell2" style="grid-column:1/3"><div class="k">Labels</div>
             <div class="v" id="sbLabels">&#8212;</div></div>
         </div></div>
@@ -482,11 +484,15 @@ window.addEventListener("mouseup",()=>{rulerDrag=false;});
 ruler.addEventListener("dblclick",()=>fitAll(true));
 
 // --- Filters ------------------------------------------------------------------
-const state={statusOn:new Set(),labelOn:new Set(),flaggedOnly:false,depsOnly:false};
+const state={statusOn:new Set(),labelOn:new Set(),assigneeOn:new Set(),
+  flaggedOnly:false,depsOnly:false};
+const ASSIGNEES=GRAPH.assignees||[]; // older embeds lack the field
+const UNASSIGNED="::unassigned::"; // filter key; cannot collide with a real name
 function visible(n){return !(state.depsOnly&&!inDeps.has(n.id));}
 function matches(n){
   if(state.statusOn.size&&!state.statusOn.has(n.statusGroup))return false;
   if(state.labelOn.size&&!n.labels.some(l=>state.labelOn.has(l)))return false;
+  if(state.assigneeOn.size&&!state.assigneeOn.has(n.assignee||UNASSIGNED))return false;
   if(state.flaggedOnly&&!(n.quality&&!n.quality.ok))return false;
   return true;}
 
@@ -613,6 +619,8 @@ function select(n){
   el("sbPill").style.background="color-mix(in srgb,"+ac+" 10%,transparent)";
   el("sbEffort").textContent=n.effortDays==null?"\\u2014":fmtDays(n.effortDays)+" dev-days";
   el("sbPrio").textContent=n.priority?n.priority.charAt(0).toUpperCase()+n.priority.slice(1):"\\u2014";
+  el("sbAssigneeCell").hidden=!n.assignee;
+  if(n.assignee)el("sbAssignee").textContent=n.assignee;
   el("sbLabels").innerHTML=n.labels.length?
     n.labels.map(l=>'<span class="lbl">'+esc(l)+'</span>').join(""):"\\u2014";
   const flagged=n.quality&&!n.quality.ok;
@@ -1094,6 +1102,14 @@ function buildChips(){
       state.statusOn.has(g),()=>{tog(state.statusOn,g);buildChips();});}
   for(const l of GRAPH.labels)chip(esc(l),state.labelOn.has(l),
     ()=>{tog(state.labelOn,l);buildChips();});
+  // Assignee chips only when the board actually has assignees; an
+  // "unassigned" chip appears alongside them when some work is unclaimed.
+  if(ASSIGNEES.length){
+    for(const a of ASSIGNEES)chip("@"+esc(clip(a,22)),state.assigneeOn.has(a),
+      ()=>{tog(state.assigneeOn,a);buildChips();});
+    if(NODES.some(n=>!n.assignee))
+      chip("@ unassigned",state.assigneeOn.has(UNASSIGNED),
+        ()=>{tog(state.assigneeOn,UNASSIGNED);buildChips();});}
   if(GRAPH.counts.flagged)chip('<span class="st" style="color:#ffb054">\\u25b2</span>'+
     GRAPH.counts.flagged+" flagged",state.flaggedOnly,
     ()=>{state.flaggedOnly=!state.flaggedOnly;buildChips();});

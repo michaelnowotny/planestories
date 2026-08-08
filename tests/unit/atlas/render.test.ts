@@ -138,6 +138,18 @@ describe("renderAtlasHtml", () => {
 		expect(html).toContain("heavyMax=heavyMax===5?Infinity:5");
 	});
 
+	test("assignee filter chips: vocabulary embedded, sentinel filter, sidebar cell", () => {
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		// The vocabulary rides the GRAPH payload (empty on this file — still present).
+		expect(html).toContain('"assignees":[]');
+		// Older embeds without the field must not break the script.
+		expect(html).toContain("GRAPH.assignees||[]");
+		// The unassigned sentinel cannot collide with a real name/email.
+		expect(html).toContain('"::unassigned::"');
+		expect(html).toContain("state.assigneeOn.has(n.assignee||UNASSIGNED)");
+		expect(html).toContain('id="sbAssigneeCell"');
+	});
+
 	test("sidebar hrefs are scheme-guarded (no javascript: URLs)", () => {
 		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
 		// The Open in Plane anchors must route through the http(s)-only guard.

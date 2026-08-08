@@ -45,6 +45,13 @@ interface RequestOptions {
 	body?: unknown;
 	/** When true, a 404 response resolves to null instead of throwing. */
 	allowNotFound?: boolean;
+	/**
+	 * Per-call retry budget override. Use 0 for NON-IDEMPOTENT writes whose
+	 * blind replay could duplicate server state (e.g. comment creation): the
+	 * transient failure surfaces immediately so the caller can verify durable
+	 * state before deciding to retry (the A10 discipline).
+	 */
+	maxRetries?: number;
 }
 
 /** A single page of a cursor-paginated Plane list response. */
@@ -129,7 +136,9 @@ export class PlaneClient {
 			body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
 		};
 
-		// attempt is 1-based; we allow up to maxRetries retries after the first try.
+		// attempt is 1-based; we allow up to the retry budget after the first try.
+		// A per-call override (options.maxRetries) beats the client default.
+		const retryBudget = options.maxRetries ?? this.maxRetries;
 		let attempt = 0;
 		while (true) {
 			attempt++;
@@ -139,7 +148,7 @@ export class PlaneClient {
 				response = await fetch(url.toString(), init);
 			} catch (error) {
 				// Network-level failure: retry (transient) until the budget is spent.
-				if (attempt <= this.maxRetries) {
+				if (attempt <= retryBudget) {
 					await this.sleep(this.backoffDelay(attempt));
 					continue;
 				}
@@ -156,7 +165,7 @@ export class PlaneClient {
 
 			// Transient HTTP failures (rate limit / server errors): honor Retry-After
 			// when present, else exponential backoff, until the retry budget is spent.
-			if (isRetryableStatus(response.status) && attempt <= this.maxRetries) {
+			if (isRetryableStatus(response.status) && attempt <= retryBudget) {
 				const delay =
 					parseRetryAfterMs(response, this.maxRetryDelayMs) ?? this.backoffDelay(attempt);
 				await this.sleep(delay);
@@ -169,6 +178,7 @@ export class PlaneClient {
 					`Plane API ${method} ${path} failed (${response.status} ${response.statusText})${
 						detail ? `: ${detail}` : ""
 					}`,
+					response.status,
 				);
 			}
 
@@ -242,11 +252,12 @@ export class PlaneClient {
 		projectId: string,
 		workItemId: string,
 		body: Record<string, unknown>,
+		opts?: { maxRetries?: number },
 	): Promise<T> {
 		return this.request<T>(
 			"POST",
 			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/comments/`),
-			{ body },
+			{ body, maxRetries: opts?.maxRetries },
 		);
 	}
 

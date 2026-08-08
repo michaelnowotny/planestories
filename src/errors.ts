@@ -13,9 +13,18 @@ export class ParseError extends Error {
 }
 
 export class PlaneApiError extends Error {
-	constructor(message: string) {
+	/**
+	 * HTTP status of the failed response, when one was received. Undefined for
+	 * network-level failures (connection refused, timeout — the ambiguous cases
+	 * where the request may or may not have reached the server). Callers use
+	 * this to classify transient (429/5xx/undefined) vs permanent (4xx) errors.
+	 */
+	readonly status?: number;
+
+	constructor(message: string, status?: number) {
 		super(message);
 		this.name = "PlaneApiError";
+		this.status = status;
 	}
 }
 
