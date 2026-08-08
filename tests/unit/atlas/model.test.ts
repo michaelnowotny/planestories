@@ -183,6 +183,72 @@ describe("buildAtlasFromBoard", () => {
 	});
 });
 
+describe("effortDays + priority (Cockpit model additions)", () => {
+	test("file source: effort line + YAML priority flow onto the node", () => {
+		const file = [
+			"## Weighted story",
+			"",
+			"```yaml",
+			"plane_identifier: DATA-1",
+			"priority: high",
+			"```",
+			"",
+			"A meaningful description.",
+			"",
+			"**Effort:** 2.5 dev-days",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] It works",
+		].join("\n");
+		const g = buildAtlasFromFile(file, "x.md");
+		const story = g.nodes[0]!;
+		expect(story.effortDays).toBe(2.5);
+		expect(story.priority).toBe("high");
+	});
+
+	test("file source: absent effort/priority stay null (never coerced to 0)", () => {
+		const g = buildAtlasFromFile(FILE, "x.md");
+		const epic = g.nodes[0]!;
+		const story = epic.children[0]!;
+		expect(story.effortDays).toBeNull();
+		expect(story.priority).toBeNull();
+		expect(epic.effortDays).toBeNull();
+		expect(epic.priority).toBeNull();
+	});
+
+	test("board source: effort parsed from the description, priority from the item", async () => {
+		const P = "p1";
+		const c = makeFakeClient({
+			projects: [{ id: P, name: "Proj", identifier: "ENG" }],
+			workItems: {
+				[P]: [
+					{
+						id: "st",
+						sequence_id: 1,
+						name: "Story",
+						priority: "high",
+						description_html: "<p>Scope text.</p><p><strong>Effort:</strong> 3 dev-days</p>",
+						state: { name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "bare",
+						sequence_id: 2,
+						name: "Bare story",
+						state: { name: "Backlog", group: "backlog" },
+					},
+				],
+			},
+		}).client;
+		const index = await fetchProjectIndex(c, P, "ENG");
+		const g = buildAtlasFromBoard(c, P, "ENG", "Proj", index);
+		const byIdent = new Map(g.nodes.map((n) => [n.identifier, n]));
+		expect(byIdent.get("ENG-1")?.effortDays).toBe(3);
+		expect(byIdent.get("ENG-1")?.priority).toBe("high");
+		expect(byIdent.get("ENG-2")?.effortDays).toBeNull();
+		expect(byIdent.get("ENG-2")?.priority).toBeNull();
+	});
+});
+
 describe("dependency edges", () => {
 	test("file source: blocks is directed, relates is undirected, mirror is deduped", () => {
 		const file = [

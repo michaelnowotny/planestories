@@ -1,4 +1,5 @@
 import { splitBody } from "../markdown/criteria.ts";
+import { parseEffortDays } from "../markdown/directives.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
 import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import type { ProjectIndex } from "../plane/issues.ts";
@@ -43,6 +44,14 @@ export interface AtlasNode {
 	statusGroup: StatusGroup;
 	labels: string[];
 	assignee: string | null;
+	/**
+	 * Dev-day effort from the `**Effort:** N dev-days` body line (null when
+	 * absent — never coerced to 0; unknown renders as the default mid-weight).
+	 * Drives planet SIZE (log scale) + the epic dossier's total/remaining.
+	 */
+	effortDays: number | null;
+	/** Plane priority ("urgent" | "high" | "medium" | "low"), null when unset. */
+	priority: string | null;
 	/** Acceptance criteria (stories only). */
 	criteria: AtlasCriterion[];
 	/** Light spec-quality assessment (stories only). */
@@ -232,6 +241,8 @@ export function buildAtlasFromFile(fileContent: string, filePath: string): Atlas
 				statusGroup: statusGroupFromName(story.status),
 				labels: story.labels,
 				assignee: story.assignee,
+				effortDays: story.effortDays,
+				priority: story.priority,
 				criteria: isEpic ? [] : criteria,
 				quality: isEpic ? null : assessQuality({ criteria, description: narrative }),
 				children: [],
@@ -354,6 +365,8 @@ export function buildAtlasFromBoard(
 				statusGroup: (item.stateGroup as StatusGroup) ?? "unknown",
 				labels: item.labels,
 				assignee: item.assigneeEmail ?? item.assigneeDisplayName ?? null,
+				effortDays: parseEffortDays(item.description ?? ""),
+				priority: item.priority ?? null,
 				criteria: isEpic ? [] : criteria,
 				quality: isEpic ? null : assessQuality({ criteria, description: item.description ?? "" }),
 				children: [],
