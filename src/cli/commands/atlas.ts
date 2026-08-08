@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { type AtlasGraph, buildAtlasFromBoard, buildAtlasFromFile } from "../../atlas/model.ts";
+import { fetchRelationsWithSweep } from "../../atlas/relations.ts";
 import { renderAtlasHtml } from "../../atlas/render.ts";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
@@ -9,7 +10,6 @@ import { createPlaneClient, type PlaneIssueRelations } from "../../plane/client.
 import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
 import { isCriterionChild } from "../../sync/board-story.ts";
-import { mapWithConcurrency } from "../../utils/concurrency.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -94,23 +94,19 @@ export function registerAtlasCommand(program: Command) {
 					let relationsById: Map<string, PlaneIssueRelations> | undefined;
 					if (options.dependencies !== false) {
 						const items = index.items.filter((item) => !isCriterionChild(item));
-						let failed = 0;
-						const pairs = await mapWithConcurrency(items, 4, async (item) => {
-							try {
-								const relations = await client.getRelations(project.id, item.id);
-								return [item.id, relations] as const;
-							} catch {
-								failed++;
-								return null;
-							}
-						});
-						relationsById = new Map(
-							pairs.filter((p): p is readonly [string, PlaneIssueRelations] => p !== null),
-						);
-						if (failed > 0) {
+						const result = await fetchRelationsWithSweep(client, project.id, items);
+						relationsById = result.relationsById;
+						if (result.recovered > 0) {
+							console.error(
+								chalk.dim(
+									`  recovered ${result.recovered} rate-limited relation lookup${result.recovered === 1 ? "" : "s"} in a paced second pass.`,
+								),
+							);
+						}
+						if (result.failed > 0) {
 							console.error(
 								chalk.yellow(
-									`  ${failed}/${items.length} relation lookups failed (rate limit?) — some dependency edges may be missing.`,
+									`  ${result.failed}/${items.length} relation lookups failed even after the paced retry pass — some dependency edges may be missing.`,
 								),
 							);
 						}

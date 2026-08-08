@@ -101,7 +101,9 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
           <div class="cell2"><div class="k">Remaining</div><div class="v" id="seRem">&#8212;</div></div>
         </div></div>
       <div class="sec"><h3>Supply lines &#183; epic boundary</h3><div id="seDeps"></div></div>
-      <div class="sec"><h3>Heaviest stories</h3><div id="seStories"></div></div>
+      <div class="sec"><div class="sech"><h3>Heaviest stories</h3>
+        <span class="mtog" id="seHeavyTog" title="All stories, or only not-yet-completed"><i data-m="all" class="on">ALL</i><i data-m="open">OPEN</i></span></div>
+        <div id="seStories"></div></div>
       <a class="open" id="seOpen" target="_blank" rel="noreferrer" hidden>Open in Plane <span style="font-size:15px">&#8599;</span></a>
     </div>
     <div id="sbContent" hidden>
@@ -291,6 +293,15 @@ h1.title{font-size:16.5px;line-height:1.42;font-weight:650;margin:0 0 16px}
 .srow .eff{color:var(--faint);font:600 10px var(--mono)}
 .nodeps{color:var(--faint);font:600 10px var(--mono);letter-spacing:.14em}
 .morestories{color:var(--faint);font:600 9.5px var(--mono);letter-spacing:.14em;padding:4px 2px}
+.morestories.link{cursor:pointer;user-select:none}
+.morestories.link:hover{color:var(--cyan)}
+.sech{display:flex;align-items:center;justify-content:space-between;margin:0 0 9px}
+.sech h3{margin:0}
+.mtog{display:inline-flex;border:1px solid var(--panel-line);border-radius:999px;overflow:hidden}
+.mtog i{font:600 8.5px var(--mono);letter-spacing:.14em;color:var(--faint);font-style:normal;
+  padding:3px 9px;cursor:pointer}
+.mtog i:hover{color:var(--muted)}
+.mtog i.on{color:var(--cyan);background:rgba(110,231,255,.09)}
 #sbEmpty{color:var(--faint);text-align:center;padding:60px 10px;
   font:600 11px var(--mono);letter-spacing:.18em;line-height:2}
 #sbFlags{color:var(--amber);font:600 10px var(--mono);letter-spacing:.06em;line-height:1.9}
@@ -672,19 +683,44 @@ function selectEpic(h){
     dh+=depCard(e.type,role,other.identifier,clip(oEpic?oEpic.title:other.title,26),other.id);}
   el("seDeps").innerHTML=dh||'<div class="nodeps">SELF-CONTAINED \\u2014 NO BOUNDARY LINES</div>';
   wireDeps(el("seDeps"));
-  const top=[...kids].sort((a,b)=>(b.effortDays==null?-1:b.effortDays)-(a.effortDays==null?-1:a.effortDays)).slice(0,5);
-  el("seStories").innerHTML=top.map((st,i)=>
-    '<div class="srow" data-i="'+i+'"><span class="st" style="color:'+(ACC[st.statusGroup]||ACC.unknown)+
-    '">\\u25cf</span><b>'+esc(st.identifier||"\\u00b7")+'</b><span class="ttl2">'+esc(st.title)+
-    '</span><span class="eff">'+(st.effortDays==null?"\\u2014":fmtDays(st.effortDays)+"d")+'</span></div>').join("")+
-    (kids.length>5?'<div class="morestories">\\u2026AND '+(kids.length-5)+' MORE IN ORBIT</div>':"");
-  el("seStories").querySelectorAll(".srow").forEach(row=>{
-    row.onclick=()=>{const st=top[+row.dataset.i];
-      if(!visible(st))return; // fly only when the select can actually take
-      select(st);flyToNode(st,8);};});
+  heavyMax=5; // a fresh dossier collapses back to the top 5 (the mode is sticky)
+  renderHeavy(h);
   const su=safeUrl(h.url);
   el("seOpen").hidden=!su;if(su)el("seOpen").href=su;}
 el("seClose").onclick=()=>select(null);
+// Heaviest stories: ALL vs OPEN (not completed/cancelled) is a sticky mode;
+// the "...AND N MORE IN ORBIT" line expands the list in place (SHOW FEWER
+// collapses). Rows stay visibility-guarded like every other selection path.
+let heavyOpen=false,heavyMax=5;
+function renderHeavy(h){
+  const kids=storiesOf.get(h.id)||[];
+  const pool=heavyOpen?
+    kids.filter(s2=>s2.statusGroup!=="completed"&&s2.statusGroup!=="cancelled"):kids;
+  const sorted=[...pool].sort((a,b)=>
+    (b.effortDays==null?-1:b.effortDays)-(a.effortDays==null?-1:a.effortDays));
+  const shown=sorted.slice(0,heavyMax);
+  const hidden=sorted.length-shown.length;
+  const box=el("seStories");
+  box.innerHTML=(shown.length?shown.map((st,i)=>
+    '<div class="srow" data-i="'+i+'"><span class="st" style="color:'+(ACC[st.statusGroup]||ACC.unknown)+
+    '">\\u25cf</span><b>'+esc(st.identifier||"\\u00b7")+'</b><span class="ttl2">'+esc(st.title)+
+    '</span><span class="eff">'+(st.effortDays==null?"\\u2014":fmtDays(st.effortDays)+"d")+'</span></div>').join(""):
+    '<div class="nodeps">'+(heavyOpen?"NO OPEN STORIES \\u2014 ALL TERRAFORMED":"NO STORIES IN ORBIT")+'</div>')+
+    (hidden>0?
+      '<div class="morestories link" id="seMore">\\u2026AND '+hidden+' MORE '+(heavyOpen?"OPEN ":"")+
+        'IN ORBIT \\u2014 SHOW ALL</div>':
+      (sorted.length>5?'<div class="morestories link" id="seMore">SHOW FEWER \\u2014 TOP 5</div>':""));
+  box.querySelectorAll(".srow").forEach(row=>{
+    row.onclick=()=>{const st=shown[+row.dataset.i];
+      if(!visible(st))return; // fly only when the select can actually take
+      select(st);flyToNode(st,8);};});
+  const more=box.querySelector("#seMore");
+  if(more)more.onclick=()=>{heavyMax=heavyMax===5?Infinity:5;renderHeavy(h);};
+}
+el("seHeavyTog").querySelectorAll("i").forEach(seg=>{
+  seg.onclick=()=>{heavyOpen=seg.dataset.m==="open";
+    el("seHeavyTog").querySelectorAll("i").forEach(s2=>s2.classList.toggle("on",s2===seg));
+    if(SEL&&SEL.kind==="epic")renderHeavy(SEL);};});
 
 // --- Pointer: pan / drag-node / hover / click-select --------------------------
 function S(id){const p=P.get(id);return{x:p.x*view.scale+view.x,y:p.y*view.scale+view.y};}

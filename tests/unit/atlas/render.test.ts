@@ -126,6 +126,18 @@ describe("renderAtlasHtml", () => {
 		expect(html).not.toContain("&amp;amp;");
 	});
 
+	test("dossier heaviest-stories controls: ALL/OPEN toggle + expandable orbit list", () => {
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		expect(html).toContain('id="seHeavyTog"');
+		// OPEN filters out completed AND cancelled (not-yet-done, honestly).
+		expect(html).toContain('s2.statusGroup!=="completed"&&s2.statusGroup!=="cancelled"');
+		// The "more in orbit" line is a click-to-expand control with a collapse state.
+		expect(html).toContain("IN ORBIT \\u2014 SHOW ALL");
+		expect(html).toContain("SHOW FEWER \\u2014 TOP 5");
+		// Expanded rows keep the visibility guard (no fly to hidden nodes).
+		expect(html).toContain("heavyMax=heavyMax===5?Infinity:5");
+	});
+
 	test("sidebar hrefs are scheme-guarded (no javascript: URLs)", () => {
 		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
 		// The Open in Plane anchors must route through the http(s)-only guard.

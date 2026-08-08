@@ -79,7 +79,9 @@ reaches Plane.
 - **Epic dossier**: progress mini-ring + `X of Y complete`, a status-breakdown bar with counts,
   **Effort TOTAL / REMAINING dev-days** (unestimated stories counted honestly, never as zero),
   boundary supply lines (dependencies crossing the epic's subtree), and the **heaviest stories**
-  top-5 by effort — rows are clickable and fly to the story.
+  by effort — an **ALL / OPEN** toggle restricts the list to not-yet-completed work, the
+  "…and N more in orbit" line click-expands the full list (SHOW FEWER collapses), and rows are
+  clickable and fly to the story.
 - **No target locked** shows a calm empty state.
 
 Keyboard: `F` fit · `R` reheat layout · `D` supply-lines only · `/` scan · `Esc` end scan / unlock.
