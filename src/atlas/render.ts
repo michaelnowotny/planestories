@@ -31,7 +31,7 @@ import type { AtlasGraph } from "./model.ts";
 export function renderAtlasHtml(graph: AtlasGraph): string {
 	// Escape the JSON so a title containing "</script>" can't break out of the tag.
 	const data = JSON.stringify(graph).replace(/</g, "\\u003c");
-	const title = `${escapeHtml(graph.project)} — Project Atlas`;
+	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
 
 	return `<!doctype html>
 <html lang="en">
@@ -342,10 +342,12 @@ const EDGES=[];
 for(const [child,par] of parentOf)EDGES.push({s:par,t:child,type:"parent"});
 for(const e of DEPS)EDGES.push({s:e.source,t:e.target,type:e.type});
 
-// Nodes that participate in the dependency web (+ their parent epics for context).
+// Nodes that participate in the dependency web (+ their FULL ancestor chain for
+// context — a dep two levels under a nested epic must keep the grandparent hub).
 const inDeps=new Set();
 for(const e of DEPS){inDeps.add(e.source);inDeps.add(e.target);}
-for(const id of [...inDeps]){const p=parentOf.get(id);if(p)inDeps.add(p);}
+for(const id of [...inDeps]){let p=parentOf.get(id);
+  while(p&&!inDeps.has(p)){inDeps.add(p);p=parentOf.get(p);}}
 
 // Direct non-epic children of an epic = its cluster stories.
 const storiesOf=new Map();
@@ -490,7 +492,9 @@ function matchesOf(q){q=q.toLowerCase();
 const scanEl=el("scan"),contactsEl=el("contacts");
 scanEl.addEventListener("input",()=>{
   const was=scanQ;scanQ=scanEl.value.trim();
-  if(!was&&scanQ)savedView={s:view.scale,x:view.x,y:view.y};
+  // Save the viewport once per scan SESSION (survives backspace-to-empty +
+  // retype), so Esc restores the true pre-scan camera, not a mid-scan one.
+  if(!was&&scanQ&&!savedView)savedView={s:view.scale,x:view.x,y:view.y};
   scanMatches=scanQ?matchesOf(scanQ):[];scanFocus=0;pingT0=performance.now();
   renderContacts();
   if(scanQ.length>=2&&scanMatches.length){
@@ -510,9 +514,16 @@ function endScan(restore){scanQ="";scanEl.value="";scanMatches=[];contactsEl.hid
   if(restore&&savedView)flyTo(savedView.s,savedView.x,savedView.y);
   savedView=null;scanEl.blur();}
 function intercept(n){
+  if(!visible(n))return; // a stale contact row must never lock a hidden node
   if(n.kind==="epic"){selectEpic(n);flyToCluster(n);}
   else{select(n);flyToNode(n,6);}
   endScan(false);}
+// Visibility changed (deps-only toggle): contacts listing hidden nodes would
+// let Enter lock a node the renderer skips — recompute against visible().
+function refreshScan(){if(!scanQ)return;
+  scanMatches=matchesOf(scanQ);
+  scanFocus=Math.max(0,Math.min(scanFocus,Math.min(5,scanMatches.length-1)));
+  renderContacts();}
 function renderContacts(){
   if(!scanQ){contactsEl.hidden=true;return;}
   contactsEl.hidden=false;
@@ -1038,6 +1049,7 @@ function buildChips(){
 function tog(set,v){if(set.has(v))set.delete(v);else set.add(v);}
 function toggleDeps(){state.depsOnly=!state.depsOnly;
   if(SEL&&!visible(SEL)){select(null);}
+  refreshScan();
   fitAll(true);fitScale=fitScaleFor();buildChips();}
 
 // --- Keyboard -----------------------------------------------------------------

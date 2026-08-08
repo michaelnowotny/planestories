@@ -69,6 +69,63 @@ describe("renderAtlasHtml", () => {
 		expect(html).toContain("Math.log2");
 	});
 
+	test("pins the measured LOD + physics constants (load-bearing calibration)", () => {
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		// Areal-spacing LOD driver + the measured gas band (docs/DESIGN + probe).
+		expect(html).toContain("Math.sqrt(Math.PI*extent*extent/Math.max(1,cnt))");
+		expect(html).toContain("sstep(24,42,sp)");
+		// Unknown effort renders at the honest mid-weight of the clamp band.
+		expect(html).toContain("n.effortDays==null?5.7:");
+		// The force physics survived the presentation rewrite unchanged.
+		expect(html).toContain("const REP=300");
+		expect(html).toContain("REP*7");
+		expect(html).toContain('e.type==="parent"?a.r+16');
+	});
+
+	test("embeds effortDays + priority in the GRAPH payload (null preserved)", () => {
+		const file = [
+			"---",
+			'project: "P"',
+			"---",
+			"",
+			"## As a user, I want X, so that Y",
+			"",
+			"```yaml",
+			"status: Done",
+			"priority: high",
+			"```",
+			"",
+			"Body.",
+			"",
+			"**Effort:** 2.5 dev-days",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] a criterion",
+		].join("\n");
+		const html = renderAtlasHtml(buildAtlasFromFile(file, "x.md"));
+		expect(html).toContain('"effortDays":2.5');
+		expect(html).toContain('"priority":"high"');
+		// And absent values stay null in the embed — never coerced to 0.
+		const bare = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		expect(bare).toContain('"effortDays":null');
+		expect(bare).toContain('"priority":null');
+	});
+
+	test("escapes the title exactly once", () => {
+		const file = [
+			"---",
+			'project: "A&B"',
+			"---",
+			"",
+			"## As a user, I want X, so that Y",
+			"",
+			"Body.",
+		].join("\n");
+		const html = renderAtlasHtml(buildAtlasFromFile(file, "x.md"));
+		expect(html).toContain("<title>A&amp;B — Project Atlas</title>");
+		expect(html).not.toContain("&amp;amp;");
+	});
+
 	test("sidebar hrefs are scheme-guarded (no javascript: URLs)", () => {
 		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
 		// The Open in Plane anchors must route through the http(s)-only guard.
