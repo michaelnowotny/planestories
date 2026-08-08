@@ -446,7 +446,8 @@ function fitScaleFor(){const b=visBounds();if(!b)return view.scale||1;
   return Math.min(aw/Math.max(1,b[2]-b[0]),ah/Math.max(1,b[3]-b[1]));}
 function fitAll(animate){const b=visBounds();if(!b)return;
   fitScale=fitBox(b[0],b[1],b[2],b[3],animate);}
-function flyTo(s,tx,ty){anim={f:{s:view.scale,x:view.x,y:view.y},g:{s,x:tx,y:ty},
+function flyTo(s,tx,ty){HOV=null; // a camera fly invalidates the pointer's world position
+  anim={f:{s:view.scale,x:view.x,y:view.y},g:{s,x:tx,y:ty},
   t0:performance.now(),d:520};}
 function flyToNode(n,mag){const p=P.get(n.id),s=Math.min(fs()*40,Math.max(view.scale,fs()*(mag||5)));
   flyTo(s,W/2-p.x*s,H/2-p.y*s);}
@@ -584,7 +585,9 @@ function depsOf(id){const out=[];
     else if(e.type==="relates"&&(e.source===id||e.target===id))
       out.push({node:byId.get(e.source===id?e.target:e.source),role:"Relates",kind:"relates"});}
   return out;}
-function select(n){SEL=n;
+function select(n){
+  if(n&&!visible(n))return; // no entry point may lock a node the renderer skips
+  SEL=n;
   el("sbEpic").hidden=true;
   el("sbEmpty").hidden=!!n;el("sbContent").hidden=!n;
   miniDirty=true;
@@ -625,7 +628,9 @@ function select(n){SEL=n;
   const su=safeUrl(n.url);
   el("sbOpen").hidden=!su;if(su)el("sbOpen").href=su;}
 el("sbClose").onclick=()=>select(null);
-function selectEpic(h){SEL=h;
+function selectEpic(h){
+  if(!visible(h))return;
+  SEL=h;
   el("sbEmpty").hidden=true;el("sbContent").hidden=true;el("sbEpic").hidden=false;
   miniDirty=true;
   const pr=epicProg.get(h.id)||{done:0,total:0,stories:0};
@@ -636,10 +641,10 @@ function selectEpic(h){SEL=h;
   el("seSub2").textContent=Math.round(100*pr.done/Math.max(1,pr.total))+"% COMPLETE";
   const kids=storiesOf.get(h.id)||[];
   const nb={completed:0,started:0,unstarted:0,backlog:0,cancelled:0,unknown:0};
-  let tot=0,rem=0,unest=0;
+  let tot=0,rem=0,unest=0,est=0;
   for(const st of kids){nb[st.statusGroup]=(nb[st.statusGroup]||0)+1;
     if(st.effortDays==null){unest++;continue;}
-    tot+=st.effortDays;
+    est++;tot+=st.effortDays;
     if(st.statusGroup==="started"||st.statusGroup==="unstarted"||st.statusGroup==="backlog")
       rem+=st.effortDays;}
   el("seBar").innerHTML=kids.length?GROUPS.filter(g=>nb[g]).map(g=>
@@ -650,9 +655,11 @@ function selectEpic(h){SEL=h;
     '<span style="color:#b9dcf2">'+nb.unstarted+' TODO</span> \\u00b7 '+
     nb.backlog+' BACKLOG \\u00b7 <span style="color:#f87171">'+nb.cancelled+' CANCELLED</span>'+
     (nb.unknown?' \\u00b7 '+nb.unknown+' UNKNOWN':"");
-  el("seTot").textContent=(tot?fmtDays(tot)+" dev-days":"\\u2014")+
+  // Gate on the COUNT of estimated stories, not the sum: an epic whose only
+  // estimate is 0 dev-days shows "0", never "-" (null vs zero distinction).
+  el("seTot").textContent=(est?fmtDays(tot)+" dev-days":"\\u2014")+
     (unest?" (+"+unest+" unest.)":"");
-  el("seRem").textContent=tot?fmtDays(rem)+" dev-days":"\\u2014";
+  el("seRem").textContent=est?fmtDays(rem)+" dev-days":"\\u2014";
   // Boundary supply lines: dependency edges crossing the epic's subtree.
   const sub=subtreeOf.get(h.id);let dh="";
   for(const e of DEPS){const aIn=sub.has(e.source),bIn=sub.has(e.target);
@@ -806,7 +813,10 @@ window.addEventListener("mouseup",()=>{miniDrag=false;});
 function sstep(a,b,v){const u=Math.min(1,Math.max(0,(v-a)/(b-a)));return u*u*(3-2*u);}
 const WSPR=new Map();
 function worldSprite(kind,r){
-  const key=kind+"|"+(r=Math.max(5,Math.round(r)));
+  // Half-pixel cache buckets, floored at the TRUE 2.6px screen minimum — a 5px
+  // clamp here would draw far-out planets ~2x their calculated size and defeat
+  // the LOD math (Codex round-1 finding).
+  const key=kind+"|"+(r=Math.max(2.6,Math.round(r*2)/2));
   let s=WSPR.get(key);
   if(!s){const R=Math.ceil(r*1.7),D=R*2,c=document.createElement("canvas");
     c.width=D;c.height=D;const g=c.getContext("2d");
@@ -989,6 +999,9 @@ function draw(t){
     segRing(c.x,c.y,er*0.88,pr.total,pr.done,hd);
     if(HOV===h&&SEL!==h){x.strokeStyle="rgba(110,231,255,.55)";x.lineWidth=1.2;
       x.beginPath();x.arc(c.x,c.y,er+3,0,6.283);x.stroke();}
+    if(SC&&SC.has(h)&&pingAge<1){ // epic contacts get the locator ping too
+      x.strokeStyle="rgba(110,231,255,"+(0.5*(1-pingAge))+")";x.lineWidth=1.2;
+      x.beginPath();x.arc(c.x,c.y,er+4+pingAge*24,0,6.283);x.stroke();}
     x.font="700 "+Math.max(9,er*0.42)+"px "+MONO;
     x.textAlign="center";x.textBaseline="middle";
     x.globalAlpha=hd;
