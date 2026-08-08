@@ -479,6 +479,9 @@ function matches(n){
 // --- Selection + scan state ---------------------------------------------------
 let SEL=null,HOV=null,scanQ="",scanMatches=[],scanFocus=0,pingT0=0,savedView=null;
 function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+// Only http(s) may reach an href: a file-sourced plane_url could otherwise
+// smuggle a javascript: scheme into the sidebar's Open in Plane anchor.
+function safeUrl(u){return u&&/^https?:\\/\\//i.test(u)?u:null;}
 function reEsc(s){return s.replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g,"\\\\$&");}
 function clip(s,n){return s.length>n?s.slice(0,n-1)+"\\u2026":s;}
 function matchesOf(q){q=q.toLowerCase();
@@ -608,7 +611,8 @@ function select(n){SEL=n;
     depCard(d.kind,d.role,d.node.identifier,clip(d.node.title,34),d.node.id)).join(""):
     '<div class="nodeps">NO SUPPLY LINES</div>';
   wireDeps(el("sbDeps"));
-  el("sbOpen").hidden=!n.url;if(n.url)el("sbOpen").href=n.url;}
+  const su=safeUrl(n.url);
+  el("sbOpen").hidden=!su;if(su)el("sbOpen").href=su;}
 el("sbClose").onclick=()=>select(null);
 function selectEpic(h){SEL=h;
   el("sbEmpty").hidden=true;el("sbContent").hidden=true;el("sbEpic").hidden=false;
@@ -657,7 +661,8 @@ function selectEpic(h){SEL=h;
     (kids.length>5?'<div class="morestories">\\u2026AND '+(kids.length-5)+' MORE IN ORBIT</div>':"");
   el("seStories").querySelectorAll(".srow").forEach(row=>{
     row.onclick=()=>{const st=top[+row.dataset.i];select(st);flyToNode(st,8);};});
-  el("seOpen").hidden=!h.url;if(h.url)el("seOpen").href=h.url;}
+  const su=safeUrl(h.url);
+  el("seOpen").hidden=!su;if(su)el("seOpen").href=su;}
 el("seClose").onclick=()=>select(null);
 
 // --- Pointer: pan / drag-node / hover / click-select --------------------------

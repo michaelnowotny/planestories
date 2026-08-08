@@ -69,6 +69,14 @@ describe("renderAtlasHtml", () => {
 		expect(html).toContain("Math.log2");
 	});
 
+	test("sidebar hrefs are scheme-guarded (no javascript: URLs)", () => {
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		// The Open in Plane anchors must route through the http(s)-only guard.
+		expect(html).toMatch(/function safeUrl\(u\)\{return u&&\/\^https\?:/);
+		expect(html).toContain("safeUrl(n.url)");
+		expect(html).toContain("safeUrl(h.url)");
+	});
+
 	test("escapes a </script> in the embedded data so it cannot break out", () => {
 		const evil = `---
 project: "P"
