@@ -165,10 +165,12 @@ bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
 # (a blocked_by/blocks/relates_to whose target work item was deleted / left the project).
 bun run src/cli/index.ts doctor --project "My Project"
 
-# Atlas: render an interactive, self-contained offline HTML map of the story tree
-# (epics -> stories -> acceptance criteria) with pan/zoom, filters, search + a quality overlay.
+# Atlas: render the interactive, self-contained offline "Cockpit" HTML map — status as a
+# terraforming ladder (rock/ice/Mars/Earth/cinder), planet size = dev-day effort, per-cluster
+# nebula LOD, dependency supply lanes, SCAN/intercept search, epic dossier (docs/ATLAS.md).
 bun run src/cli/index.ts atlas /path/to/stories.md -o atlas.html --open   # from a file (no creds)
 bun run src/cli/index.ts atlas --project "My Project" -o atlas.html        # from the live board
+bun run src/cli/index.ts atlas --project "My Project" --no-dependencies    # fast: skip supply lanes
 
 # Packet: emit a self-contained implementable brief for a coding agent from a board
 # ticket — description, acceptance criteria (board state), dependencies WITH their
