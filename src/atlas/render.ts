@@ -640,6 +640,39 @@ function select(n){
   const su=safeUrl(n.url);
   el("sbOpen").hidden=!su;if(su)el("sbOpen").href=su;}
 el("sbClose").onclick=()=>select(null);
+// Heaviest stories: ALL vs OPEN (not completed/cancelled) is a sticky mode;
+// the "...AND N MORE IN ORBIT" line expands the list in place (SHOW FEWER
+// collapses). Rows stay visibility-guarded like every other selection path.
+let heavyOpen=false,heavyMax=5;
+function renderHeavy(h){
+  const kids=storiesOf.get(h.id)||[];
+  const pool=heavyOpen?
+    kids.filter(s2=>s2.statusGroup!=="completed"&&s2.statusGroup!=="cancelled"):kids;
+  const sorted=[...pool].sort((a,b)=>
+    (b.effortDays==null?-1:b.effortDays)-(a.effortDays==null?-1:a.effortDays));
+  const shown=sorted.slice(0,heavyMax);
+  const hidden=sorted.length-shown.length;
+  const box=el("seStories");
+  box.innerHTML=(shown.length?shown.map((st,i)=>
+    '<div class="srow" data-i="'+i+'"><span class="st" style="color:'+(ACC[st.statusGroup]||ACC.unknown)+
+    '">\\u25cf</span><b>'+esc(st.identifier||"\\u00b7")+'</b><span class="ttl2">'+esc(st.title)+
+    '</span><span class="eff">'+(st.effortDays==null?"\\u2014":fmtDays(st.effortDays)+"d")+'</span></div>').join(""):
+    '<div class="nodeps">'+(heavyOpen?"NO OPEN STORIES \\u2014 ALL TERRAFORMED":"NO STORIES IN ORBIT")+'</div>')+
+    (hidden>0?
+      '<div class="morestories link" id="seMore">\\u2026AND '+hidden+' MORE '+(heavyOpen?"OPEN ":"")+
+        'IN ORBIT \\u2014 SHOW ALL</div>':
+      (sorted.length>5?'<div class="morestories link" id="seMore">SHOW FEWER \\u2014 TOP 5</div>':""));
+  box.querySelectorAll(".srow").forEach(row=>{
+    row.onclick=()=>{const st=shown[+row.dataset.i];
+      if(!visible(st))return; // fly only when the select can actually take
+      select(st);flyToNode(st,8);};});
+  const more=box.querySelector("#seMore");
+  if(more)more.onclick=()=>{heavyMax=heavyMax===5?Infinity:5;renderHeavy(h);};
+}
+el("seHeavyTog").querySelectorAll("i").forEach(seg=>{
+  seg.onclick=()=>{heavyOpen=seg.dataset.m==="open";
+    el("seHeavyTog").querySelectorAll("i").forEach(s2=>s2.classList.toggle("on",s2===seg));
+    if(SEL&&SEL.kind==="epic")renderHeavy(SEL);};});
 function selectEpic(h){
   if(!visible(h))return;
   SEL=h;
@@ -688,39 +721,6 @@ function selectEpic(h){
   const su=safeUrl(h.url);
   el("seOpen").hidden=!su;if(su)el("seOpen").href=su;}
 el("seClose").onclick=()=>select(null);
-// Heaviest stories: ALL vs OPEN (not completed/cancelled) is a sticky mode;
-// the "...AND N MORE IN ORBIT" line expands the list in place (SHOW FEWER
-// collapses). Rows stay visibility-guarded like every other selection path.
-let heavyOpen=false,heavyMax=5;
-function renderHeavy(h){
-  const kids=storiesOf.get(h.id)||[];
-  const pool=heavyOpen?
-    kids.filter(s2=>s2.statusGroup!=="completed"&&s2.statusGroup!=="cancelled"):kids;
-  const sorted=[...pool].sort((a,b)=>
-    (b.effortDays==null?-1:b.effortDays)-(a.effortDays==null?-1:a.effortDays));
-  const shown=sorted.slice(0,heavyMax);
-  const hidden=sorted.length-shown.length;
-  const box=el("seStories");
-  box.innerHTML=(shown.length?shown.map((st,i)=>
-    '<div class="srow" data-i="'+i+'"><span class="st" style="color:'+(ACC[st.statusGroup]||ACC.unknown)+
-    '">\\u25cf</span><b>'+esc(st.identifier||"\\u00b7")+'</b><span class="ttl2">'+esc(st.title)+
-    '</span><span class="eff">'+(st.effortDays==null?"\\u2014":fmtDays(st.effortDays)+"d")+'</span></div>').join(""):
-    '<div class="nodeps">'+(heavyOpen?"NO OPEN STORIES \\u2014 ALL TERRAFORMED":"NO STORIES IN ORBIT")+'</div>')+
-    (hidden>0?
-      '<div class="morestories link" id="seMore">\\u2026AND '+hidden+' MORE '+(heavyOpen?"OPEN ":"")+
-        'IN ORBIT \\u2014 SHOW ALL</div>':
-      (sorted.length>5?'<div class="morestories link" id="seMore">SHOW FEWER \\u2014 TOP 5</div>':""));
-  box.querySelectorAll(".srow").forEach(row=>{
-    row.onclick=()=>{const st=shown[+row.dataset.i];
-      if(!visible(st))return; // fly only when the select can actually take
-      select(st);flyToNode(st,8);};});
-  const more=box.querySelector("#seMore");
-  if(more)more.onclick=()=>{heavyMax=heavyMax===5?Infinity:5;renderHeavy(h);};
-}
-el("seHeavyTog").querySelectorAll("i").forEach(seg=>{
-  seg.onclick=()=>{heavyOpen=seg.dataset.m==="open";
-    el("seHeavyTog").querySelectorAll("i").forEach(s2=>s2.classList.toggle("on",s2===seg));
-    if(SEL&&SEL.kind==="epic")renderHeavy(SEL);};});
 
 // --- Pointer: pan / drag-node / hover / click-select --------------------------
 function S(id){const p=P.get(id);return{x:p.x*view.scale+view.x,y:p.y*view.scale+view.y};}
