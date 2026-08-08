@@ -94,18 +94,21 @@ const STYLES = `
   --accent:#4f46e5; --epic:#7c3aed; --edge:#cdd4df; --pill:rgba(255,255,255,.82);
   --g-backlog:#9aa6b8; --g-unstarted:#6b7688; --g-started:#3b82f6; --g-completed:#22c55e; --g-cancelled:#ef4444; --g-unknown:#9aa6b8;
   --blocks:#ea6c34; --relates:#8b5cf6; --flag:#e0900d; --flag-bg:#fef3c7;
+  --grid:rgba(15,23,42,.055); --halo:#f4f6f9; --nshadow:rgba(15,23,42,.28); --ring:rgba(255,255,255,.95);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
   --bg:#0a0f1c; --bg2:#0d1424; --panel:#0f1826; --ink:#e8edf7; --muted:#8ea0bd; --line:#1b2740;
   --card:#131f34; --card-line:#243450; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
   --accent:#8b93ff; --epic:#b794ff; --edge:#2a3a58; --pill:rgba(19,31,52,.82);
   --g-started:#60a5fa; --g-completed:#4ade80; --g-cancelled:#f87171; --blocks:#f4915f; --relates:#a78bfa; --flag:#fbbf24; --flag-bg:#3a2f12;
+  --grid:rgba(255,255,255,.06); --halo:#0a0f1c; --nshadow:rgba(0,0,0,.6); --ring:rgba(255,255,255,.85);
 }}
 :root[data-theme=dark]{
   --bg:#0a0f1c; --bg2:#0d1424; --panel:#0f1826; --ink:#e8edf7; --muted:#8ea0bd; --line:#1b2740;
   --card:#131f34; --card-line:#243450; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.45);
   --accent:#8b93ff; --epic:#b794ff; --edge:#2a3a58; --pill:rgba(19,31,52,.82);
   --g-started:#60a5fa; --g-completed:#4ade80; --g-cancelled:#f87171; --blocks:#f4915f; --relates:#a78bfa; --flag:#fbbf24; --flag-bg:#3a2f12;
+  --grid:rgba(255,255,255,.06); --halo:#0a0f1c; --nshadow:rgba(0,0,0,.6); --ring:rgba(255,255,255,.85);
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -238,28 +241,42 @@ const labelHue=new Map();
 
 // --- Layout state -------------------------------------------------------------
 const P=new Map();
-(function seed(){const R=Math.max(220,Math.sqrt(NODES.length)*48);let i=0;
+(function seed(){const R=Math.max(200,Math.sqrt(NODES.length)*30);let i=0;
   for(const n of NODES){const a=i*2.399963,r=R*Math.sqrt(i/NODES.length);
-    P.set(n.id,{x:Math.cos(a)*r,y:Math.sin(a)*r,vx:0,vy:0,r:n.kind==="epic"?11:6,pin:false}); i++;}
+    // Epic world radius grows with its story count, so big epics read as big hubs.
+    const wr=n.kind==="epic"?13+Math.min(11,Math.sqrt((childrenOf.get(n.id)||[]).length)*1.9):6;
+    P.set(n.id,{x:Math.cos(a)*r,y:Math.sin(a)*r,vx:0,vy:0,r:wr,pin:false}); i++;}
 })();
+// Per-epic completion (direct non-epic children): drives the epic progress ring.
+const epicProg=new Map();
+for(const n of NODES){ if(n.kind!=="epic")continue;
+  const kids=(childrenOf.get(n.id)||[]).map(id=>byId.get(id)).filter(c=>c&&c.kind!=="epic");
+  const countable=kids.filter(c=>c.statusGroup!=="cancelled");
+  epicProg.set(n.id,{done:countable.filter(c=>c.statusGroup==="completed").length,
+    total:countable.length,stories:kids.length});}
 const state={statusOn:new Set(),labelOn:new Set(),flaggedOnly:false,depsOnly:false,q:"",
   colorBy:"status",selected:null,hover:null,view:{x:0,y:0,scale:1}};
 let alpha=1;
 
 // --- Force simulation ---------------------------------------------------------
-const REP=520, SPRING={parent:0.09,blocks:0.03,relates:0.02}, REST={parent:30,blocks:110,relates:120},
-  GRAV=0.04, VDECAY=0.7, DECAY=0.012, AMIN=0.02;
+const REP=300, SPRING={parent:0.12,blocks:0.03,relates:0.02}, REST={parent:26,blocks:110,relates:120},
+  GRAV=0.06, VDECAY=0.7, DECAY=0.012, AMIN=0.02;
 function tick(){
   const arr=NODES,n=arr.length;
   // repulsion is O(n^2) — fine into the low thousands (a few seconds of one-time
   // settle on a ~700-node board). Barnes-Hut would be the next step for larger.
-  for(let i=0;i<n;i++){const a=P.get(arr[i].id);
+  for(let i=0;i<n;i++){const a=P.get(arr[i].id),aEpic=arr[i].kind==="epic";
     for(let j=i+1;j<n;j++){const b=P.get(arr[j].id);
       let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy; if(d2<0.01){dx=Math.random()-0.5;dy=Math.random()-0.5;d2=dx*dx+dy*dy+0.01;}
-      const f=REP/d2,fx=dx*f,fy=dy*f; a.vx+=fx*alpha;a.vy+=fy*alpha;b.vx-=fx*alpha;b.vy-=fy*alpha;}}
+      // epic pairs repel harder so cluster hubs never overlap each other
+      const f=(aEpic&&arr[j].kind==="epic"?REP*7:REP)/d2,fx=dx*f,fy=dy*f;
+      a.vx+=fx*alpha;a.vy+=fy*alpha;b.vx-=fx*alpha;b.vy-=fy*alpha;}}
   for(const e of EDGES){const a=P.get(e.s),b=P.get(e.t);
     let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)||0.01;
-    const f=(d-REST[e.type])/d*SPRING[e.type]*alpha,fx=dx*f,fy=dy*f; a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy;}
+    // parent rest grows with the epic's radius so a fat hub can't swallow its
+    // stories (rest 26 < epic wr up to 24 pulled child CENTRES inside the disc)
+    const rest=e.type==="parent"?a.r+16:REST[e.type];
+    const f=(d-rest)/d*SPRING[e.type]*alpha,fx=dx*f,fy=dy*f; a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy;}
   for(const nd of arr){const p=P.get(nd.id);
     p.vx-=p.x*GRAV*alpha; p.vy-=p.y*GRAV*alpha;
     if(p.pin){p.vx=0;p.vy=0;continue;}       // dragged node: hold + discard force (no fling)
@@ -272,6 +289,7 @@ let COL={};
 function readColours(){const cs=getComputedStyle(document.documentElement);const g=k=>cs.getPropertyValue(k).trim();
   COL={ink:g("--ink"),muted:g("--muted"),card:g("--card"),cardLine:g("--card-line"),epic:g("--epic"),
     accent:g("--accent"),edge:g("--edge"),blocks:g("--blocks"),relates:g("--relates"),flag:g("--flag"),pill:g("--pill"),
+    grid:g("--grid"),halo:g("--halo"),nshadow:g("--nshadow"),ring:g("--ring"),
     backlog:g("--g-backlog"),unstarted:g("--g-unstarted"),started:g("--g-started"),completed:g("--g-completed"),
     cancelled:g("--g-cancelled"),unknown:g("--g-unknown")};}
 function nodeColour(n){
@@ -313,8 +331,8 @@ function drawHull(members,hue){
   ctx.beginPath();let m0=mid(ex[n-1],ex[0]);ctx.moveTo(m0.x,m0.y);
   for(let i=0;i<n;i++){const cur=ex[i],nx=ex[(i+1)%n],m=mid(cur,nx);ctx.quadraticCurveTo(cur.x,cur.y,m.x,m.y);}
   ctx.closePath();
-  ctx.fillStyle="hsla("+hue+",68%,55%,0.06)";ctx.fill();
-  ctx.strokeStyle="hsla("+hue+",58%,55%,0.20)";ctx.lineWidth=1.1;ctx.stroke();
+  ctx.fillStyle="hsla("+hue+",68%,55%,0.09)";ctx.fill();
+  ctx.strokeStyle="hsla("+hue+",58%,52%,0.32)";ctx.lineWidth=1.4/state.view.scale;ctx.stroke();
 }
 
 // --- Drawing ------------------------------------------------------------------
@@ -324,51 +342,123 @@ function resize(){dpr=window.devicePixelRatio||1;cv.width=canvas.clientWidth*dpr
 function T(){const v=state.view;ctx.setTransform(v.scale*dpr,0,0,v.scale*dpr,v.x*dpr,v.y*dpr);}
 function clip(s,n){return s.length>n?s.slice(0,n-1)+"…":s;}
 
+// Screen radius with a MINIMUM: nodes never shrink below a visible, clickable
+// size no matter how far out the view is zoomed (the Apple Maps pin rule). This
+// is the single load-bearing fix for "zoomed out = invisible specks".
+function screenR(n){const p=P.get(n.id),s=state.view.scale;
+  return n.kind==="epic"?Math.max(15,Math.min(30,p.r*s)):Math.max(5,Math.min(15,p.r*s));}
+// Faint world-anchored dot grid — spatial reference + the "infinite canvas" feel.
+function drawGrid(){const v=state.view,w=canvas.clientWidth,h=canvas.clientHeight;
+  let step=72,guard=0; while(step*v.scale<34&&guard++<24)step*=2; while(step*v.scale>110&&guard++<48)step/=2;
+  ctx.fillStyle=COL.grid;
+  const x0=Math.floor((-v.x/v.scale)/step)*step,y0=Math.floor((-v.y/v.scale)/step)*step;
+  const x1=(w-v.x)/v.scale,y1=(h-v.y)/v.scale;
+  for(let x=x0;x<=x1;x+=step)for(let y=y0;y<=y1;y+=step){
+    ctx.beginPath();ctx.arc(x*v.scale+v.x,y*v.scale+v.y,1.1,0,6.283);ctx.fill();}}
+// Crisp text over any background: halo stroke in the page colour, then fill.
+function haloText(txt,x,y,font,color,align){ctx.font=font;ctx.textAlign=align||"center";ctx.textBaseline="middle";
+  ctx.lineWidth=4;ctx.lineJoin="round";ctx.strokeStyle=COL.halo;ctx.strokeText(txt,x,y);
+  ctx.fillStyle=color;ctx.fillText(txt,x,y);}
+
 function draw(){
   ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,cv.width,cv.height);
+  drawGrid();
   T();
-  const f=focusId(), sc=state.view.scale;
-  // cluster hulls (only when a cluster is legible / not focusing / not deps-only)
-  if(!f&&!state.depsOnly){
+  const f=focusId(), sc=state.view.scale, v=state.view;
+  // cluster hulls — ALWAYS drawn (fainter under focus): the islands are the map.
+  if(!state.depsOnly){
+    ctx.globalAlpha=f?0.45:1;
     for(const n of NODES){ if(n.kind!=="epic"||!visible(n))continue;
       const kids=(childrenOf.get(n.id)||[]).filter(id=>{const c=byId.get(id);return c&&c.kind!=="epic";});
       if(kids.length<2)continue;
       drawHull([n.id,...kids],epicHue.get(n.id)); }
+    ctx.globalAlpha=1;
   }
-  // edges
+  // edges — widths are divided by scale so they hold a constant SCREEN width.
   ctx.lineCap="round";
   for(const e of EDGES){const A=byId.get(e.s),B=byId.get(e.t);
     if(!visible(A)||!visible(B))continue;
     const a=P.get(e.s),b=P.get(e.t), involved=f&&(e.s===f||e.t===f);
     const faded=(dimmed(A)||dimmed(B))&&!involved;
-    ctx.globalAlpha=faded?0.05:(f&&!involved?0.12:(e.type==="parent"?0.45:0.92));
-    // gentle curve: bow the line out a touch for an organic look
+    ctx.globalAlpha=faded?0.07:(f&&!involved?0.14:(e.type==="parent"?0.4:0.92));
     const mx=(a.x+b.x)/2,my=(a.y+b.y)/2,dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy)||1;
     const bow=Math.min(24,d*0.12),cxp=mx-dy/d*bow,cyp=my+dx/d*bow;
     ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.quadraticCurveTo(cxp,cyp,b.x,b.y);
-    if(e.type==="relates"){ctx.setLineDash([5,5]);ctx.strokeStyle=COL.relates;ctx.lineWidth=involved?2.2:1.4;}
-    else if(e.type==="blocks"){ctx.setLineDash([]);ctx.strokeStyle=COL.blocks;ctx.lineWidth=involved?2.4:1.6;}
-    else{ctx.setLineDash([]);ctx.strokeStyle=COL.edge;ctx.lineWidth=involved?1.7:1;}
+    if(e.type==="relates"){ctx.setLineDash([5/sc,5/sc]);ctx.strokeStyle=COL.relates;ctx.lineWidth=(involved?2.4:1.5)/sc;}
+    else if(e.type==="blocks"){ctx.setLineDash([]);ctx.strokeStyle=COL.blocks;ctx.lineWidth=(involved?2.6:1.8)/sc;}
+    else{ctx.setLineDash([]);ctx.strokeStyle=COL.edge;ctx.lineWidth=(involved?1.6:1)/sc;}
     ctx.stroke();
-    if(e.type==="blocks")arrow(cxp,cyp,b,P.get(e.t).r);
+    if(e.type==="blocks")arrow(cxp,cyp,b,effR(B)/sc,7/sc); // effR: hover-expanded radius
   }
   ctx.setLineDash([]);ctx.globalAlpha=1;
-  // nodes
-  const showLabels=sc>1.35;
-  for(const n of NODES){ if(!visible(n))continue; const p=P.get(n.id),dim=dimmed(n);
-    const sel=state.selected===n.id, hov=state.hover===n.id, r=p.r*(hov?1.25:1);
-    ctx.globalAlpha=dim?0.16:1;
-    if((sel||hov)&&!dim){ctx.shadowColor=nodeColour(n);ctx.shadowBlur=16;}
-    ctx.beginPath();ctx.arc(p.x,p.y,r,0,6.283);ctx.fillStyle=nodeColour(n);ctx.fill();
-    ctx.shadowBlur=0;
-    if(sel){ctx.lineWidth=2.6;ctx.strokeStyle=COL.accent;ctx.stroke();}
-    else if(n.quality&&!n.quality.ok){ctx.lineWidth=2;ctx.strokeStyle=COL.flag;ctx.stroke();}
-    else if(n.kind==="epic"){ctx.lineWidth=2.4;ctx.strokeStyle="hsl("+epicHue.get(n.id)+",70%,58%)";ctx.stroke();}
-    else{ctx.lineWidth=1;ctx.strokeStyle="rgba(255,255,255,.35)";ctx.stroke();}
-    if(!dim&&(n.kind==="epic"||sel||hov||showLabels))
-      label(p.x+r+5,p.y,clip(n.title,n.kind==="epic"?30:26),n.kind==="epic");
+  // nodes + labels — SCREEN space: constant sizes, real shadows, readable type.
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const S=n=>{const p=P.get(n.id);return{x:p.x*v.scale+v.x,y:p.y*v.scale+v.y};};
+  const placed=[]; // label declutter rects (screen space)
+  const collides=(x,y,w,h)=>{for(const r of placed){if(x<r.x+r.w&&x+w>r.x&&y<r.y+r.h&&y+h>r.y)return true;}return false;};
+  const storyLabels=sc>1.15;
+  // Perf: while the simulation is hot (settling), skip the per-story soft
+  // shadows — ~800 shadowBlur fills per frame is the one real cost in draw().
+  const softShadows=alpha<=0.06;
+  // stories first (under the epics), then epics as landmarks on top
+  for(const pass of [0,1]) for(const n of NODES){
+    if(!visible(n))continue; if((n.kind==="epic")!==(pass===1))continue;
+    const {x,y}=S(n), dim=dimmed(n);
+    const sel=state.selected===n.id, hov=state.hover===n.id;
+    let r=screenR(n)*(hov&&!sel?1.15:1);
+    if(n.kind==="epic"){
+      const hue=epicHue.get(n.id), pr=epicProg.get(n.id)||{done:0,total:0,stories:0};
+      ctx.globalAlpha=dim?0.45:1;
+      if(!dim){ctx.shadowColor=COL.nshadow;ctx.shadowBlur=12;ctx.shadowOffsetY=2;}
+      ctx.beginPath();ctx.arc(x,y,r,0,6.283);ctx.fillStyle=COL.card;ctx.fill();
+      ctx.shadowBlur=0;ctx.shadowOffsetY=0;
+      // progress ring in the epic's hue: track + completed arc (from 12 o'clock)
+      const rw=Math.max(3,r*0.16);
+      ctx.lineWidth=rw;ctx.strokeStyle=COL.cardLine;
+      ctx.beginPath();ctx.arc(x,y,r-rw/2-0.5,0,6.283);ctx.stroke();
+      if(pr.total>0&&pr.done>0){
+        ctx.strokeStyle="hsl("+hue+",62%,48%)";ctx.lineCap="round";
+        ctx.beginPath();ctx.arc(x,y,r-rw/2-0.5,-1.5708,-1.5708+6.2832*(pr.done/pr.total));ctx.stroke();}
+      if(sel){ctx.lineWidth=2.6;ctx.strokeStyle=COL.accent;ctx.beginPath();ctx.arc(x,y,r+2.4,0,6.283);ctx.stroke();}
+      // story count at the centre — the epic's "weight" at a glance
+      haloText(String(pr.stories),x,y+0.5,"700 "+Math.max(10,Math.min(13,r*0.6))+"px ui-sans-serif,system-ui,sans-serif",COL.ink);
+      // label BELOW the disc, app-icon style; decluttered so labels never overlap
+      if(!dim||sel||hov){
+        const txt=clip(n.title,26), font="640 11.5px ui-sans-serif,system-ui,sans-serif";
+        ctx.font=font; const tw=ctx.measureText(txt).width;
+        const lx=x-tw/2,ly=y+r+7; // text baseline-middle at ly+6 → extent ~[ly, ly+13]
+        if(sel||hov||!collides(lx-3,ly,tw+6,14)){
+          placed.push({x:lx-3,y:ly,w:tw+6,h:14});
+          ctx.globalAlpha=dim?0.55:1;
+          haloText(txt,x,ly+6,font,COL.ink);
+        }
+      }
+      ctx.globalAlpha=1;
+    } else {
+      ctx.globalAlpha=dim?0.3:1;
+      if(!dim&&softShadows){ctx.shadowColor=COL.nshadow;ctx.shadowBlur=5;ctx.shadowOffsetY=1;}
+      if((sel||hov)&&!dim){ctx.shadowColor=nodeColour(n);ctx.shadowBlur=14;ctx.shadowOffsetY=0;}
+      ctx.beginPath();ctx.arc(x,y,r,0,6.283);ctx.fillStyle=nodeColour(n);ctx.fill();
+      ctx.shadowBlur=0;ctx.shadowOffsetY=0;
+      // the white ring is what makes dots read as "stickers" on the canvas.
+      // (Flags are a BADGE, not a ring — on a real board ~40% of stories can be
+      // flagged, and amber rings everywhere read as alarm noise.)
+      if(sel){ctx.lineWidth=2.6;ctx.strokeStyle=COL.accent;}
+      else{ctx.lineWidth=1.6;ctx.strokeStyle=COL.ring;}
+      ctx.stroke();
+      if(n.quality&&!n.quality.ok&&!dim){
+        const bx=x+r*0.74,by=y-r*0.74;
+        ctx.beginPath();ctx.arc(bx,by,Math.max(2.2,r*0.34),0,6.283);
+        ctx.fillStyle=COL.flag;ctx.fill();
+        ctx.lineWidth=1.2;ctx.strokeStyle=COL.ring;ctx.stroke();
+      }
+      if((sel||hov||storyLabels)&&!dim){
+        const txt=clip(n.title,26);
+        haloText(txt,x+r+6,y+0.5,"500 10.5px ui-sans-serif,system-ui,sans-serif",COL.ink,"left");
+      }
+      ctx.globalAlpha=1;
+    }
   }
-  ctx.globalAlpha=1;
   el("empty").hidden=NODES.some(n=>visible(n)&&matches(n));
   drawMinimap();
 }
@@ -386,10 +476,11 @@ function drawMinimap(){
   const ox=(W-gw*s)/2-b.mnx*s, oy=(H-gh*s)/2-b.mny*s;
   miniT={s,ox,oy};
   const wx=x=>x*s+ox, wy=y=>y*s+oy;
-  // nodes as tiny dots
+  // nodes as tiny dots (epics carry their cluster hue as landmarks)
   for(const n of NODES){if(!visible(n))continue;const p=P.get(n.id);
-    mctx.beginPath();mctx.arc(wx(p.x),wy(p.y),n.kind==="epic"?2:1.3,0,6.283);
-    mctx.fillStyle=nodeColour(n);mctx.globalAlpha=.85;mctx.fill();}
+    mctx.beginPath();mctx.arc(wx(p.x),wy(p.y),n.kind==="epic"?2.6:1.5,0,6.283);
+    mctx.fillStyle=n.kind==="epic"?"hsl("+epicHue.get(n.id)+",62%,52%)":nodeColour(n);
+    mctx.globalAlpha=.9;mctx.fill();}
   mctx.globalAlpha=1;
   // current viewport rectangle
   const v=state.view,vw=canvas.clientWidth,vh=canvas.clientHeight;
@@ -412,39 +503,49 @@ mini.addEventListener("mousedown",e=>{e.stopPropagation();miniDrag=true;
   hideTip();if(state.hover)state.hover=null;miniPan(e);}); // miniPan's draw() clears the stale hover
 window.addEventListener("mousemove",e=>{if(miniDrag)miniPan(e);});
 window.addEventListener("mouseup",()=>{miniDrag=false;});
-function arrow(cx,cy,b,tr){ // arrowhead pointing into target b, tangent from control point
+function arrow(cx,cy,b,tr,s){ // arrowhead into target b; tr/s pre-scaled to world units
   let dx=b.x-cx,dy=b.y-cy,d=Math.hypot(dx,dy)||1;dx/=d;dy/=d;
-  const tx=b.x-dx*(tr+2),ty=b.y-dy*(tr+2),s=6;
+  s=s||6; const inset=tr+s*0.33; // inset scales with the arrow so the gap is constant on screen
+  const tx=b.x-dx*inset,ty=b.y-dy*inset;
   ctx.beginPath();ctx.moveTo(tx,ty);
   ctx.lineTo(tx-dx*s-dy*s*0.55,ty-dy*s+dx*s*0.55);
   ctx.lineTo(tx-dx*s+dy*s*0.55,ty-dy*s-dx*s*0.55);
   ctx.closePath();ctx.fillStyle=ctx.strokeStyle;ctx.fill();
 }
-function label(x,y,text,bold){
-  ctx.font=(bold?"640 ":"500 ")+"11px ui-sans-serif,system-ui,sans-serif";
-  const w=ctx.measureText(text).width,padX=5,h=15;
-  roundRect(x-3,y-h/2,w+padX*2,h,5);ctx.fillStyle=COL.pill;ctx.fill();
-  ctx.fillStyle=COL.ink;ctx.textBaseline="middle";ctx.textAlign="left";ctx.fillText(text,x+padX-3,y+0.5);
-}
-function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);
-  ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
-
 // --- Hit testing + interaction ------------------------------------------------
 function toWorld(mx,my){const v=state.view;return{x:(mx-v.x)/v.scale,y:(my-v.y)/v.scale};}
-function nodeAt(mx,my){const w=toWorld(mx,my);let best=null,bd=1e9;
-  for(const n of NODES){if(!visible(n))continue;const p=P.get(n.id),d=Math.hypot(p.x-w.x,p.y-w.y),rr=p.r+7/state.view.scale;
-    if(d<rr&&d<bd){bd=d;best=n;}}return best;}
+// SCREEN-space hit test that mirrors the PAINT order exactly: containment is
+// checked in reverse draw order (epics — drawn topmost — before stories; later
+// array entries before earlier), using the same radii the renderer draws with,
+// INCLUDING the hover 1.15x expansion (else the rim of a hovered disc is
+// visible-but-not-interactive and hover flickers at the edge). A small slop
+// fallback keeps tiny dots grabbable just outside their rim.
+function effR(n){return screenR(n)*(state.hover===n.id&&state.selected!==n.id?1.15:1);}
+function nodeAt(mx,my){const v=state.view;
+  const sd=n=>{const p=P.get(n.id);return Math.hypot(p.x*v.scale+v.x-mx,p.y*v.scale+v.y-my);};
+  for(const wantEpic of [true,false])
+    for(let i=NODES.length-1;i>=0;i--){const n=NODES[i];
+      if((n.kind==="epic")!==wantEpic||!visible(n))continue;
+      if(sd(n)<=effR(n))return n;}
+  let best=null,bd=1e9;
+  for(const n of NODES){if(!visible(n))continue;const d=sd(n);
+    if(d<effR(n)+5&&d<bd){bd=d;best=n;}}
+  return best;}
 function relMouse(e){const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
 
 let drag=null;
 canvas.addEventListener("mousedown",e=>{const m=relMouse(e),n=nodeAt(m.x,m.y);
-  if(n){P.get(n.id).pin=true;drag={node:n,moved:false};}
+  if(n){const p=P.get(n.id),w=toWorld(m.x,m.y);p.pin=true;
+    // keep the pointer-to-centre offset so grabbing a disc's edge doesn't jump
+    // the node under the cursor on the first move (Codex #4)
+    drag={node:n,ox:p.x-w.x,oy:p.y-w.y,moved:false};}
   else drag={pan:true,x:e.clientX,y:e.clientY,vx:state.view.x,vy:state.view.y,moved:false};
   canvas.classList.add("grabbing");hideTip();});
 window.addEventListener("mousemove",e=>{
   if(miniDrag)return; // minimap is driving the view; skip hover
   if(drag){ if(drag.pan){state.view.x=drag.vx+(e.clientX-drag.x);state.view.y=drag.vy+(e.clientY-drag.y);drag.moved=true;draw();}
-    else{const m=relMouse(e),w=toWorld(m.x,m.y),p=P.get(drag.node.id);p.x=w.x;p.y=w.y;p.vx=0;p.vy=0;drag.moved=true;reheat(0.3);}
+    else{const m=relMouse(e),w=toWorld(m.x,m.y),p=P.get(drag.node.id);
+      p.x=w.x+drag.ox;p.y=w.y+drag.oy;p.vx=0;p.vy=0;drag.moved=true;reheat(0.3);}
     return; }
   // mousemove is on window (so a drag continues outside the canvas); for HOVER,
   // ignore movement that isn't over the canvas (e.g. over the panel/header).
@@ -461,7 +562,10 @@ window.addEventListener("mouseup",()=>{ if(!drag)return;
   drag=null;canvas.classList.remove("grabbing");});
 canvas.addEventListener("mouseleave",()=>{hideTip();if(state.hover){state.hover=null;draw();}});
 canvas.addEventListener("wheel",e=>{e.preventDefault();const m=relMouse(e);
-  const f=e.deltaY<0?1.12:0.893,ns=Math.min(4.5,Math.max(0.12,state.view.scale*f));
+  // floor never exceeds the CURRENT scale: a fit below 0.04 must not snap IN on
+  // a zoom-OUT gesture — it just refuses to go further out (Codex #1).
+  const floor=Math.min(0.04,state.view.scale);
+  const f=e.deltaY<0?1.12:0.893,ns=Math.min(4.5,Math.max(floor,state.view.scale*f));
   state.view.x=m.x-(m.x-state.view.x)*(ns/state.view.scale);
   state.view.y=m.y-(m.y-state.view.y)*(ns/state.view.scale);state.view.scale=ns;draw();hideTip();},{passive:false});
 function select(id){state.selected=id;renderPanel();draw();}
@@ -558,8 +662,13 @@ function fit(){let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9,any=false;
   for(const n of NODES){if(!visible(n))continue;any=true;const p=P.get(n.id);
     mnx=Math.min(mnx,p.x);mny=Math.min(mny,p.y);mxx=Math.max(mxx,p.x);mxy=Math.max(mxy,p.y);}
   if(!any){state.view={x:canvas.clientWidth/2,y:canvas.clientHeight/2,scale:1};draw();return;}
-  const gw=(mxx-mnx)+140,gh=(mxy-mny)+140,w=canvas.clientWidth,h=canvas.clientHeight;
-  const s=Math.min(state.depsOnly?2.2:3,Math.min(w/gw,h/gh))||1;
+  // SCREEN-space gutter: nodes have minimum SCREEN sizes (epic disc up to 30px +
+  // its label below), so padding must be budgeted in pixels — world padding
+  // collapses to nothing at small scales and clipped boundary nodes (Codex #2).
+  const G=64, w=canvas.clientWidth,h=canvas.clientHeight;
+  const aw=Math.max(80,w-2*G),ah=Math.max(80,h-2*G); // guard tiny windows
+  const gw=Math.max(1,mxx-mnx),gh=Math.max(1,mxy-mny);
+  const s=Math.min(state.depsOnly?2.2:3,Math.min(aw/gw,ah/gh))||1;
   state.view.scale=s;state.view.x=w/2-((mnx+mxx)/2)*s;state.view.y=h/2-((mny+mxy)/2)*s;draw();}
 
 // --- Legend + header ----------------------------------------------------------
