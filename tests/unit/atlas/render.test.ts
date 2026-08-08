@@ -38,14 +38,35 @@ describe("renderAtlasHtml", () => {
 		expect(html).toMatch(/\[hidden\]\{display:none!important\}/);
 	});
 
-	test("the auto-dark media query is well-formed (no selector list bleeding into @media)", () => {
-		// A dangling `:root[data-theme=dark],` before `@media` is invalid CSS and voids
-		// the whole prefers-color-scheme block.
+	test("is dark-only cockpit chrome (the light theme + Color-by are retired)", () => {
+		// Design decision (docs/DESIGN_atlas-cockpit.md 5): the cockpit is inherently
+		// dark; the old theme toggle, prefers-color-scheme block, and Color-by
+		// dropdown are deliberate losses. Guard against their resurrection.
 		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
-		expect(html).not.toMatch(/data-theme=dark\],\s*@media/);
-		expect(html).toMatch(
-			/@media \(prefers-color-scheme:dark\)\{:root:not\(\[data-theme=light\]\)\{/,
-		);
+		expect(html).not.toContain("prefers-color-scheme");
+		expect(html).not.toContain("data-theme");
+		expect(html).not.toContain('id="colorby"');
+	});
+
+	test("the embedded SCRIPT is syntactically valid JavaScript", () => {
+		// The script is a template string tsc does NOT check. Extract the module
+		// body between the <script> tags and parse it (GRAPH line included).
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const m = html.match(/<script>\n([\s\S]*?)<\/script>/);
+		expect(m).not.toBeNull();
+		expect(() => new Function(m?.[1] as string)).not.toThrow();
+	});
+
+	test("carries the terraforming ladder + selection amber (design anchors)", () => {
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		// One world per status group, planets never stars.
+		for (const anchor of ['"earth"', '"mars"', '"ice"', '"rock"', '"cinder"']) {
+			expect(html).toContain(anchor);
+		}
+		// Amber is attention-only: the selection pulsar constant must be present.
+		expect(html).toContain("#ffb054");
+		// Effort drives size: the log2 weight formula is in the script.
+		expect(html).toContain("Math.log2");
 	});
 
 	test("escapes a </script> in the embedded data so it cannot break out", () => {
