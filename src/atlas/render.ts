@@ -487,7 +487,7 @@ ruler.addEventListener("dblclick",()=>fitAll(true));
 const state={statusOn:new Set(),labelOn:new Set(),assigneeOn:new Set(),
   flaggedOnly:false,depsOnly:false};
 const ASSIGNEES=GRAPH.assignees||[]; // older embeds lack the field
-const UNASSIGNED="::unassigned::"; // filter key; cannot collide with a real name
+const UNASSIGNED=Symbol("unassigned"); // filter key; CANNOT collide with any string
 function visible(n){return !(state.depsOnly&&!inDeps.has(n.id));}
 function matches(n){
   if(state.statusOn.size&&!state.statusOn.has(n.statusGroup))return false;

@@ -144,8 +144,9 @@ describe("renderAtlasHtml", () => {
 		expect(html).toContain('"assignees":[]');
 		// Older embeds without the field must not break the script.
 		expect(html).toContain("GRAPH.assignees||[]");
-		// The unassigned sentinel cannot collide with a real name/email.
-		expect(html).toContain('"::unassigned::"');
+		// The unassigned sentinel is a Symbol — NO string assignee can collide
+		// (Codex round-1: a file could literally set assignee: "::unassigned::").
+		expect(html).toContain('Symbol("unassigned")');
 		expect(html).toContain("state.assigneeOn.has(n.assignee||UNASSIGNED)");
 		expect(html).toContain('id="sbAssigneeCell"');
 	});

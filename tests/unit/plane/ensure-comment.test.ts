@@ -125,6 +125,33 @@ describe("ensureComment ambiguous-write safety (A10: verify before replay)", () 
 		expect(creates).toBe(1); // never replayed a write it could not verify
 	});
 
+	test("a 429's Retry-After is honored between create attempts", async () => {
+		const s = stub(["ok"]);
+		let calls = 0;
+		const limited = {
+			...s.client,
+			createWorkItemComment: async <T>(
+				p: string,
+				w: string,
+				body: Record<string, unknown>,
+			): Promise<T> => {
+				calls++;
+				if (calls === 1) {
+					throw new PlaneApiError("Plane API POST failed (429)", 429, 30000);
+				}
+				return s.client.createWorkItemComment(p, w, body) as Promise<T>;
+			},
+		};
+		const slept: number[] = [];
+		const out = await ensureComment(limited as never, "p", "w", MARK, BODY, {
+			sleep: async (ms) => {
+				slept.push(ms);
+			},
+		});
+		expect(out).toBe("posted");
+		expect(slept).toEqual([30000]); // server-directed delay, not the 500ms local backoff
+	});
+
 	test("transient failures exhaust the budget, then throw (no infinite loop)", async () => {
 		const s = stub(["transient", "transient", "transient", "transient", "transient"]);
 		await expect(ensureComment(s.client as never, "p", "w", MARK, BODY, s.noSleep)).rejects.toThrow(

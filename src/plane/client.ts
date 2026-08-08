@@ -179,6 +179,7 @@ export class PlaneClient {
 						detail ? `: ${detail}` : ""
 					}`,
 					response.status,
+					parseRetryAfterMs(response, this.maxRetryDelayMs) ?? undefined,
 				);
 			}
 

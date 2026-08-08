@@ -270,7 +270,10 @@ export async function ensureComment(
 			if (!isTransientPlaneError(error) || attempt >= attempts) {
 				throw error;
 			}
-			await sleep(Math.min(500 * 2 ** (attempt - 1), 5000));
+			// Honor a server-directed Retry-After when the failed create carried one;
+			// otherwise pace with local exponential backoff.
+			const serverDelay = error instanceof PlaneApiError ? error.retryAfterMs : undefined;
+			await sleep(serverDelay ?? Math.min(500 * 2 ** (attempt - 1), 5000));
 		}
 	}
 }

@@ -20,11 +20,14 @@ export class PlaneApiError extends Error {
 	 * this to classify transient (429/5xx/undefined) vs permanent (4xx) errors.
 	 */
 	readonly status?: number;
+	/** Server-directed retry delay (parsed Retry-After), when the response gave one. */
+	readonly retryAfterMs?: number;
 
-	constructor(message: string, status?: number) {
+	constructor(message: string, status?: number, retryAfterMs?: number) {
 		super(message);
 		this.name = "PlaneApiError";
 		this.status = status;
+		this.retryAfterMs = retryAfterMs;
 	}
 }
 
