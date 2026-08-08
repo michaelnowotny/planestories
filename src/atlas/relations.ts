@@ -54,5 +54,14 @@ export async function fetchRelationsWithSweep(
 			failed++;
 		}
 	}
-	return { relationsById, failed, recovered };
+	// Rebuild in INPUT order: recovered entries append after the sweep, which
+	// would make edge order (and the rendered HTML) vary with request timing —
+	// the atlas is a diff-stable artifact, so iteration order must be data
+	// order, never network order.
+	const ordered = new Map<string, PlaneIssueRelations>();
+	for (const item of items) {
+		const rel = relationsById.get(item.id);
+		if (rel) ordered.set(item.id, rel);
+	}
+	return { relationsById: ordered, failed, recovered };
 }

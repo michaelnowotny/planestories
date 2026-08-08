@@ -54,6 +54,15 @@ describe("fetchRelationsWithSweep", () => {
 		expect(calls.filter((c) => c === "b").length).toBe(2);
 	});
 
+	test("recovered entries keep INPUT order (diff-stable output)", async () => {
+		// "a" and "b" fail first pass and recover in the sweep; the map must still
+		// iterate a, b, c — edge order (and the rendered HTML) must not depend on
+		// request timing.
+		const { client } = stubClient({ a: 1, b: 1 });
+		const { relationsById } = await fetchRelationsWithSweep(client, "p1", items);
+		expect([...relationsById.keys()]).toEqual(["a", "b", "c"]);
+	});
+
 	test("an item that keeps failing is reported, not fatal", async () => {
 		const { client } = stubClient({ b: 99 });
 		const { relationsById, failed } = await fetchRelationsWithSweep(client, "p1", items);
