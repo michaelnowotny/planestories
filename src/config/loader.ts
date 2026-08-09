@@ -66,6 +66,12 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 		const byNorm = new Map<string, string>();
 		for (const c of multiConfig.contexts) {
 			const norm = normalizeCtx(c.name);
+			if (norm === "") {
+				throw new ConfigError(
+					`Context name "${c.name}" normalizes to nothing (no alphanumerics) — ` +
+						"per-context env lookup would be ambiguous. Rename it.",
+				);
+			}
 			const clash = byNorm.get(norm);
 			if (clash !== undefined && clash !== c.name) {
 				throw new ConfigError(

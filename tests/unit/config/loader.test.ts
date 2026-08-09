@@ -376,6 +376,27 @@ describe("context-name normalization safety (Codex P1)", () => {
 		}
 	});
 
+	test("a DEFINED context whose name normalizes to nothing is rejected even when another context is selected", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "planestories-emptynorm-"));
+		try {
+			const rcPath = join(tempDir, "emptynorm.json");
+			writeFileSync(
+				rcPath,
+				JSON.stringify({
+					contexts: [
+						{ name: "good", apiKey: "k1", workspaceSlug: "w1" },
+						{ name: "--", apiKey: "k2", workspaceSlug: "w2" },
+					],
+				}),
+			);
+			await expect(loadConfig({ configPath: rcPath, context: "good" })).rejects.toThrow(
+				"normalizes to nothing",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	test("a context name that normalizes to nothing is rejected", async () => {
 		process.env["PLANE_CTX__API_KEY"] = "k";
 		await expect(
