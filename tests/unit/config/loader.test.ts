@@ -202,11 +202,9 @@ describe("loadConfig", () => {
 			expect(config.defaultLabels).toEqual(["Design Task"]);
 		});
 
-		test("throws when --context specified but config is flat", async () => {
+		test("throws when --context specified but config is flat (and no env-only profile)", async () => {
 			const configPath = join(FIXTURES_DIR, "valid.json");
-			expect(loadConfig({ configPath, context: "orgA" })).rejects.toThrow(
-				"--context flag was specified but the config file does not use the multi-context format",
-			);
+			expect(loadConfig({ configPath, context: "orgA" })).rejects.toThrow("PLANE_CTX_ORGA_API_KEY");
 		});
 
 		test("throws when config has contexts but no --context provided", async () => {
@@ -223,12 +221,16 @@ describe("loadConfig", () => {
 			);
 		});
 
-		test("PLANE_API_KEY env var overrides selected context's apiKey", async () => {
+		// CHANGED CONTRACT (replicate P1): bare PLANE_API_KEY no longer clobbers a
+		// NAMED context — per-context PLANE_CTX_<NAME>_API_KEY is the only override.
+		// The old behavior silently gave both sides of a --from/--to pair the same
+		// credentials.
+		test("bare PLANE_API_KEY does NOT override a selected context's apiKey", async () => {
 			process.env.PLANE_API_KEY = "plane_api_from_env_override";
 			const configPath = join(FIXTURES_DIR, "multi-context.json");
 			const config = await loadConfig({ configPath, context: "orgA" });
 
-			expect(config.apiKey).toBe("plane_api_from_env_override");
+			expect(config.apiKey).toBe("plane_api_orgA_key123");
 		});
 
 		test("fills defaults for missing optional fields in context", async () => {
@@ -248,5 +250,95 @@ describe("loadConfig", () => {
 			expect(config.apiKey).toBe("plane_api_test1234567890abcdef");
 			expect(config.workspaceSlug).toBe("engineering-ws");
 		});
+	});
+});
+
+describe("per-context credential isolation (replicate P1)", () => {
+	const originalEnv = process.env;
+	const MULTI = join(FIXTURES_DIR, "multi-context.json");
+
+	beforeEach(() => {
+		process.env = { ...originalEnv };
+		for (const k of Object.keys(process.env)) {
+			if (k.startsWith("PLANE_")) delete process.env[k];
+		}
+	});
+
+	afterEach(() => {
+		process.env = originalEnv;
+	});
+
+	test("bare PLANE_* env does NOT clobber a named context (the dual-profile fix)", async () => {
+		// The old behavior: one global key silently overwrote BOTH sides of a
+		// --from/--to pair. A named context must resolve its own credentials.
+		process.env.PLANE_API_KEY = "cloud-key-must-not-leak";
+		process.env.PLANE_WORKSPACE_SLUG = "cloud-ws-must-not-leak";
+		const config = await loadConfig({ configPath: MULTI, context: "orgA" });
+		expect(config.apiKey).toBe("plane_api_orgA_key123");
+		expect(config.workspaceSlug).toBe("org-a");
+	});
+
+	test("bare PLANE_* env still applies on the flat/default path (back-compat)", async () => {
+		process.env.PLANE_API_KEY = "env-key";
+		process.env.PLANE_WORKSPACE_SLUG = "env-ws";
+		const config = await loadConfig({ configPath: join(FIXTURES_DIR, "valid.json") });
+		expect(config.apiKey).toBe("env-key");
+		expect(config.workspaceSlug).toBe("env-ws");
+	});
+
+	test("PLANE_CTX_<NAME>_* env overrides the selected context's file values", async () => {
+		process.env.PLANE_CTX_ORGA_API_KEY = "ctx-env-key";
+		process.env.PLANE_CTX_ORGA_BASE_URL = "https://ce.example.com";
+		const config = await loadConfig({ configPath: MULTI, context: "orgA" });
+		expect(config.apiKey).toBe("ctx-env-key");
+		expect(config.baseUrl).toBe("https://ce.example.com");
+		expect(config.workspaceSlug).toBe("org-a"); // untouched fields keep file values
+	});
+
+	test("env-only context: no multi-context file needed when PLANE_CTX_<NAME>_* is set", async () => {
+		process.env.PLANE_CTX_CE_API_KEY = "ce-key";
+		process.env.PLANE_CTX_CE_WORKSPACE_SLUG = "archimedes";
+		process.env.PLANE_CTX_CE_BASE_URL = "https://plane.example.works";
+		// flat config file on disk; the named context resolves purely from env
+		const config = await loadConfig({
+			configPath: join(FIXTURES_DIR, "valid.json"),
+			context: "ce",
+		});
+		expect(config.apiKey).toBe("ce-key");
+		expect(config.workspaceSlug).toBe("archimedes");
+		expect(config.baseUrl).toBe("https://plane.example.works");
+	});
+
+	test("context names normalize for env lookup (dashes -> underscores, case-insensitive)", async () => {
+		process.env["PLANE_CTX_MY_VPS_API_KEY"] = "vps-key";
+		process.env["PLANE_CTX_MY_VPS_WORKSPACE_SLUG"] = "vps-ws";
+		const config = await loadConfig({
+			configPath: join(FIXTURES_DIR, "valid.json"),
+			context: "my-vps",
+		});
+		expect(config.apiKey).toBe("vps-key");
+	});
+
+	test("unknown context with no env profile fails with the per-context env name in the message", async () => {
+		await expect(
+			loadConfig({ configPath: join(FIXTURES_DIR, "valid.json"), context: "nope" }),
+		).rejects.toThrow("PLANE_CTX_NOPE_API_KEY");
+	});
+
+	test("named context missing its key mentions the per-context env var, not the bare one", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "planestories-ctx-"));
+		try {
+			const rcPath = join(tempDir, "ctx.json");
+			writeFileSync(
+				rcPath,
+				JSON.stringify({ contexts: [{ name: "keyless", workspaceSlug: "ws" }] }),
+			);
+			process.env.PLANE_API_KEY = "bare-key-should-not-satisfy";
+			await expect(loadConfig({ configPath: rcPath, context: "keyless" })).rejects.toThrow(
+				"PLANE_CTX_KEYLESS_API_KEY",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
 	});
 });

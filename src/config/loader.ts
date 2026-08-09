@@ -23,10 +23,21 @@ export interface LoadConfigOptions {
  *   2. `.planestoriesrc.json` in `options.cwd` (or process.cwd())
  *   3. `~/.config/planestories/config.json`
  *
- * After loading the file the PLANE_* env vars are merged in (they override file
- * values). Credentials are expected to come from the environment (.env);
- * committed config files should hold only non-secret defaults. A ConfigError is
- * thrown when no API key or workspace slug is available from any source.
+ * Credential resolution (replicate P1 — per-context isolation):
+ *   - DEFAULT (no --context): bare PLANE_API_KEY / PLANE_WORKSPACE_SLUG /
+ *     PLANE_BASE_URL env vars override file values, as always.
+ *   - NAMED context (--context <name>): ONLY the per-context env vars
+ *     PLANE_CTX_<NAME>_API_KEY / _WORKSPACE_SLUG / _BASE_URL override the
+ *     context's file entry. Bare PLANE_* is DELIBERATELY ignored — a single
+ *     global key must never silently clobber both sides of a --from/--to
+ *     instance pair (the dual-profile clobber both review engines flagged).
+ *   - ENV-ONLY context: when the config file has no such context (or is flat)
+ *     but PLANE_CTX_<NAME>_API_KEY exists, the context is synthesized purely
+ *     from its per-context env vars — no config file required.
+ *   <NAME> = context name uppercased, runs of non-alphanumerics -> "_".
+ * Credentials are expected to come from the environment (.env); committed
+ * config files should hold only non-secret defaults. A ConfigError is thrown
+ * when no API key or workspace slug is available from any source.
  */
 export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedConfig> {
 	const configPath = resolveConfigPath(options);
@@ -51,36 +62,60 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 
 		const entry = multiConfig.contexts.find((c) => c.name === contextName);
 		if (!entry) {
-			const names = multiConfig.contexts.map((c) => c.name).join(", ");
-			throw new ConfigError(`Context "${contextName}" not found. Available contexts: ${names}`);
+			// Env-only context: synthesized purely from PLANE_CTX_<NAME>_* vars.
+			if (process.env[ctxEnvName(contextName, "API_KEY")]) {
+				config = {};
+			} else {
+				const names = multiConfig.contexts.map((c) => c.name).join(", ");
+				throw new ConfigError(
+					`Context "${contextName}" not found. Available contexts: ${names}. ` +
+						`(An env-only context needs ${ctxEnvName(contextName, "API_KEY")} set.)`,
+				);
+			}
+		} else {
+			config = {
+				apiKey: entry.apiKey,
+				workspaceSlug: entry.workspaceSlug,
+				baseUrl: entry.baseUrl,
+				defaultProject: entry.defaultProject,
+				defaultLabels: entry.defaultLabels,
+				sourceLabel: entry.sourceLabel,
+			};
 		}
-
-		config = {
-			apiKey: entry.apiKey,
-			workspaceSlug: entry.workspaceSlug,
-			baseUrl: entry.baseUrl,
-			defaultProject: entry.defaultProject,
-			defaultLabels: entry.defaultLabels,
-			sourceLabel: entry.sourceLabel,
-		};
 	} else {
 		if (options?.context) {
-			throw new ConfigError(
-				"--context flag was specified but the config file does not use the multi-context format",
-			);
+			// Flat/no config file + a named context: valid ONLY as an env-only context.
+			if (process.env[ctxEnvName(options.context, "API_KEY")]) {
+				config = {};
+			} else {
+				throw new ConfigError(
+					`Context "${options.context}" was requested but the config file is not ` +
+						`multi-context and ${ctxEnvName(options.context, "API_KEY")} is not set. ` +
+						"Define the context in the config file or set its PLANE_CTX_* env vars.",
+				);
+			}
+		} else {
+			config = raw as CliConfig;
 		}
-		config = raw as CliConfig;
 	}
 
-	// Merge env vars -- env takes precedence (credentials belong in .env).
-	if (process.env.PLANE_API_KEY) {
-		config.apiKey = process.env.PLANE_API_KEY;
+	// Merge env vars. A NAMED context resolves ONLY its per-context vars; the
+	// bare PLANE_* vars apply ONLY on the default path (see doc comment above).
+	const envFor = (field: "API_KEY" | "WORKSPACE_SLUG" | "BASE_URL"): string | undefined =>
+		options?.context
+			? process.env[ctxEnvName(options.context, field)]
+			: process.env[`PLANE_${field}`];
+	const envApiKey = envFor("API_KEY");
+	if (envApiKey) {
+		config.apiKey = envApiKey;
 	}
-	if (process.env.PLANE_WORKSPACE_SLUG) {
-		config.workspaceSlug = process.env.PLANE_WORKSPACE_SLUG;
+	const envSlug = envFor("WORKSPACE_SLUG");
+	if (envSlug) {
+		config.workspaceSlug = envSlug;
 	}
-	if (process.env.PLANE_BASE_URL) {
-		config.baseUrl = process.env.PLANE_BASE_URL;
+	const envBaseUrl = envFor("BASE_URL");
+	if (envBaseUrl) {
+		config.baseUrl = envBaseUrl;
 	}
 	if (process.env.PLANE_SOURCE_LABEL) {
 		config.sourceLabel = process.env.PLANE_SOURCE_LABEL;
@@ -88,15 +123,21 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 
 	if (!config.apiKey) {
 		throw new ConfigError(
-			"No API key found. Set PLANE_API_KEY in your environment (.env). " +
-				"Do not commit credentials to a config file.",
+			options?.context
+				? `No API key for context "${options.context}". Set ${ctxEnvName(options.context, "API_KEY")} ` +
+						"in your environment (.env), or apiKey in that context's config entry."
+				: "No API key found. Set PLANE_API_KEY in your environment (.env). " +
+						"Do not commit credentials to a config file.",
 		);
 	}
 
 	if (!config.workspaceSlug) {
 		throw new ConfigError(
-			"No workspace slug found. Set PLANE_WORKSPACE_SLUG in your environment (.env) " +
-				'or "workspaceSlug" in your config file (.planestoriesrc.json).',
+			options?.context
+				? `No workspace slug for context "${options.context}". Set ${ctxEnvName(options.context, "WORKSPACE_SLUG")} ` +
+						"in your environment (.env), or workspaceSlug in that context's config entry."
+				: "No workspace slug found. Set PLANE_WORKSPACE_SLUG in your environment (.env) " +
+						'or "workspaceSlug" in your config file (.planestoriesrc.json).',
 		);
 	}
 
@@ -106,6 +147,15 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/** Per-context env var name: PLANE_CTX_<NAME>_<FIELD>, name normalized. */
+export function ctxEnvName(context: string, field: string): string {
+	const norm = context
+		.toUpperCase()
+		.replace(/[^A-Z0-9]+/g, "_")
+		.replace(/^_+|_+$/g, "");
+	return `PLANE_CTX_${norm}_${field}`;
+}
 
 /**
  * Determines which config file path to use based on discovery order.
