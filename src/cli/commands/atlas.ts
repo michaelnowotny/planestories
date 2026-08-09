@@ -49,7 +49,10 @@ export function registerAtlasCommand(program: Command) {
 		)
 		.argument("[file]", "Markdown stories file (omit and use --project to render the live board)")
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-p, --project <name>", "Render the whole live Plane project instead of a file")
 		.option(
 			"-o, --output <file>",

@@ -184,6 +184,12 @@ bun run src/cli/index.ts packet DATA-1 -o epic-packet.md     # an epic + its who
 # unestimated stories), and which stories are blocked / blocking. Read-only.
 bun run src/cli/index.ts epic DATA-1
 
+# Contexts / instance profiles: --context <name> selects a named Plane instance.
+# A context lives in the config file OR purely in env as PLANE_CTX_<NAME>_API_KEY /
+# _WORKSPACE_SLUG / _BASE_URL (e.g. PLANE_CTX_CE_* for a self-hosted CE). Bare
+# PLANE_API_KEY/... apply ONLY when no --context is given — a named context never
+# falls back to the bare vars, so dual-instance work cannot cross credentials.
+
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects
 

@@ -189,7 +189,10 @@ export function registerImportCommand(program: Command) {
 		.description("Import user stories from markdown files to Plane")
 		.argument("<files...>", "Markdown file paths or glob patterns")
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-p, --project <name>", "Force all stories into this project (overrides frontmatter)")
 		.option("--create-labels", "Create labels that don't exist instead of skipping them", false)
 		.option("--source-label <name>", "Tag every created item with this label (auto-created)")

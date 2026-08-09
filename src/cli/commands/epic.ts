@@ -29,7 +29,10 @@ export function registerEpicCommand(program: Command) {
 		)
 		.argument("<identifier>", "Plane epic identifier (e.g. DATA-1)")
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-p, --project <name>", "Project the epic belongs to (defaults to defaultProject)")
 		.action(async (identifier: string, options) => {
 			try {

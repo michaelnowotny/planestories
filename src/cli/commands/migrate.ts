@@ -99,7 +99,10 @@ export function registerMigrateCriteriaCommand(program: Command) {
 			"Fold legacy `::ac<n>` criterion sub-items into their parent's description as a TipTap task-list, then close the children. Idempotent; dry-run by default.",
 		)
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-p, --project <name>", "Project to migrate (required if no defaultProject)")
 		.option("--limit <n>", "Max parents to migrate this run (rate-limit batching)", (v) =>
 			Number(v),

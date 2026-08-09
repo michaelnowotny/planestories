@@ -30,7 +30,10 @@ export function registerSetCommand(program: Command) {
 		)
 		.argument("<identifiers...>", "Work item identifiers, e.g. BLOOM-12")
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-p, --project <name>", "Project (required if no defaultProject)")
 		.option("-s, --status <state>", "Set the state by name (e.g. 'In Progress')")
 		.option("--priority <level>", "Set priority: urgent|high|medium|low|none")

@@ -35,7 +35,10 @@ export function registerExportCommand(program: Command) {
 		.command("export")
 		.description("Export Plane work items to a markdown file")
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-o, --output <file>", "Output file path", "./exported-stories.md")
 		.option("-p, --project <name>", "Project to export from (required if no defaultProject)")
 		.option("-i, --issues <ids>", "Comma-separated work item identifiers (e.g. BLOOM-8)")

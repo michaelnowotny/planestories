@@ -128,7 +128,10 @@ export function registerGroomCommand(program: Command) {
 			"Reconcile a project: close orphaned criterion sub-items; report duplicate-title and parentless items. With --write-back <files>, INSTEAD reverse-sync criterion done-state board→file (no board writes).",
 		)
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-p, --project <name>", "Project to groom (required if no defaultProject)")
 		.option(
 			"--write-back <files...>",

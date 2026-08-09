@@ -30,7 +30,10 @@ export function registerPacketCommand(program: Command) {
 		)
 		.argument("<identifier>", "Plane work-item identifier (e.g. DATA-123)")
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option(
 			"-p, --project <name>",
 			"Project the identifier belongs to (defaults to defaultProject)",

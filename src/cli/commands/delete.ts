@@ -77,7 +77,10 @@ export function registerDeleteCommand(program: Command) {
 		.description("Delete (or archive) Plane work items — scoped to files or an external_source")
 		.argument("[files...]", "Markdown files whose plane_ids should be deleted")
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-p, --project <name>", "Project (required for --external-source)")
 		.option(
 			"--external-source [source]",

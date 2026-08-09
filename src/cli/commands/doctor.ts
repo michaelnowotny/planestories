@@ -33,7 +33,10 @@ export function registerDoctorCommand(program: Command) {
 			"CI health check: report board rot (orphaned criterion sub-items, duplicate titles, parentless sub-items). Exits non-zero on findings unless --no-fail-on-findings.",
 		)
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.option("-p, --project <name>", "Project to check (required if no defaultProject)")
 		.option("--no-fail-on-findings", "Report findings but always exit 0")
 		.option("--json", "Emit the report as JSON (machine-readable acceptance gate)", false)

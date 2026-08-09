@@ -30,7 +30,10 @@ export function registerProjectsCommand(program: Command) {
 		.command("projects")
 		.description("List the projects in your Plane workspace (identifier + name)")
 		.option("-c, --config <path>", "Config file path")
-		.option("--context <name>", "Select a named context from multi-context config")
+		.option(
+			"--context <name>",
+			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+		)
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
