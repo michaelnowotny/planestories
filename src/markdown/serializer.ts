@@ -10,13 +10,23 @@ import { normalizeRelationIdentifiers } from "./directives.ts";
  * - Optional fenced YAML blocks with metadata
  * - Story body content
  */
-export function serializeStories(stories: UserStory[], frontmatter?: FileFrontmatter): string {
+export function serializeStories(
+	stories: UserStory[],
+	frontmatter?: FileFrontmatter,
+	opts?: {
+		/** Inert YAML comment lines (no leading #) emitted inside the frontmatter block. */
+		frontmatterComments?: string[];
+	},
+): string {
 	const parts: string[] = [];
 
 	// Emit file-level frontmatter if provided
 	if (frontmatter?.project) {
 		parts.push("---");
 		parts.push(`project: "${frontmatter.project}"`);
+		for (const line of opts?.frontmatterComments ?? []) {
+			parts.push(`# ${line}`);
+		}
 		parts.push("---");
 		parts.push("");
 	}

@@ -25,6 +25,12 @@ export interface ExportOptions {
 	syncCriteria?: boolean;
 	/** Include items carrying the archive label (excluded by default). */
 	includeArchived?: boolean;
+	/**
+	 * Orphan worksheet: export ONLY non-epic stories with no board parent, with
+	 * an epics directory as inert frontmatter comments — the file the operator
+	 * fills `parent:` lines into and reviews as a diff.
+	 */
+	orphansOnly?: boolean;
 }
 
 /**
@@ -92,6 +98,12 @@ export async function exportStories(
 		}
 	}
 
+	// An item that parents at least one NON-criterion child is an epic (planestories
+	// models an epic as a parent work item). Criterion sub-items don't make a parent
+	// an epic — those are a story's acceptance criteria.
+	const isEpic = (item: FetchedWorkItem): boolean =>
+		(index.childrenByParent.get(item.id) ?? []).some((c) => !isCriterionChild(c));
+
 	// Stable ascending order so a round-tripped file matches creation order.
 	let filtered = filterWorkItems(items, filterInput, project.identifier).sort(
 		(a, b) => a.sequenceId - b.sequenceId,
@@ -107,18 +119,17 @@ export async function exportStories(
 			(item) => !item.labels.some((l) => l.toLowerCase() === ARCHIVE_LABEL),
 		);
 	}
+	// Orphan worksheet: only parentless non-epics (the stories a `parent:` line
+	// would file into a cluster).
+	if (options.orphansOnly) {
+		filtered = filtered.filter((item) => !item.parent && !isEpic(item));
+	}
 
 	const parentIdentifier = (item: FetchedWorkItem): string | null => {
 		if (!item.parent) return null;
 		const p = index.byId.get(item.parent);
 		return p ? `${project.identifier}-${p.sequenceId}` : null;
 	};
-
-	// An item that parents at least one NON-criterion child is an epic (planestories
-	// models an epic as a parent work item). Criterion sub-items don't make a parent
-	// an epic — those are a story's acceptance criteria.
-	const isEpic = (item: FetchedWorkItem): boolean =>
-		(index.childrenByParent.get(item.id) ?? []).some((c) => !isCriterionChild(c));
 
 	const stories = await mapWithConcurrency(filtered, 6, async (item) => {
 		const relations = await client.getRelations(project.id, item.id);
@@ -144,7 +155,20 @@ export async function exportStories(
 
 	const frontmatter: FileFrontmatter = { project: projectName };
 
-	const markdown = serializeStories(stories, frontmatter);
+	// Worksheet header: every epic, as inert YAML comments the parser ignores.
+	const frontmatterComments = options.orphansOnly
+		? [
+				"ORPHAN WORKSHEET - add `parent: <EPIC-ID>` to a story's yaml block to file it.",
+				"Unknown parents FAIL the import for that story (never guessed).",
+				"Epics directory:",
+				...items
+					.filter(isEpic)
+					.sort((a, b) => a.sequenceId - b.sequenceId)
+					.map((ep) => `  EPIC ${project.identifier}-${ep.sequenceId} - ${ep.name}`),
+			]
+		: undefined;
+
+	const markdown = serializeStories(stories, frontmatter, { frontmatterComments });
 	await Bun.write(options.outputPath, markdown);
 
 	return { count: stories.length, outputPath: options.outputPath };

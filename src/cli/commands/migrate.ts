@@ -63,6 +63,14 @@ function printReport(report: MigrateReport): void {
 		);
 	}
 
+	if (report.onlyUnmatched.length > 0) {
+		console.log(
+			chalk.red(
+				`  --only ids matching NO migration candidate (typo? no ::ac children? already migrated?): ${report.onlyUnmatched.join(", ")}`,
+			),
+		);
+	}
+
 	if (report.conflicts.length > 0) {
 		console.log(
 			chalk.red(`  ${report.conflicts.length} parent(s) SKIPPED (conflict — fix by hand):`),
@@ -96,6 +104,17 @@ export function registerMigrateCriteriaCommand(program: Command) {
 		.option("--limit <n>", "Max parents to migrate this run (rate-limit batching)", (v) =>
 			Number(v),
 		)
+		.option(
+			"--only <ids>",
+			"Comma-separated parent identifiers to migrate (deliberate canary; repeatable; ignores --limit)",
+			(value: string, previous: string[]) => previous.concat(value.split(",").map((s) => s.trim())),
+			[] as string[],
+		)
+		.option(
+			"--json",
+			"Emit the report as JSON (machine-readable; suppresses the text report)",
+			false,
+		)
 		.option("-y, --yes", "Apply changes; without it, only the report is shown", false)
 		.action(async (options) => {
 			try {
@@ -110,9 +129,14 @@ export function registerMigrateCriteriaCommand(program: Command) {
 					config,
 					project: options.project,
 					limit: options.limit,
+					only: options.only,
 					apply: options.yes,
 				});
-				printReport(report);
+				if (options.json) {
+					console.log(JSON.stringify(report, null, 1));
+				} else {
+					printReport(report);
+				}
 			} catch (error) {
 				handleError(error);
 			}

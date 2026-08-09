@@ -261,3 +261,84 @@ describe("exportStories", () => {
 		).rejects.toThrow(ConfigError);
 	});
 });
+
+describe("export --orphans-only (orphan worksheet)", () => {
+	function orphanBoard(): FakeData {
+		return {
+			projects: [{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{
+						id: "epic-1",
+						sequence_id: 1,
+						name: "The epic",
+						state: { id: "s1", name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "child-1",
+						sequence_id: 2,
+						name: "Filed story",
+						parent: "epic-1",
+						state: { id: "s1", name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "orphan-1",
+						sequence_id: 3,
+						name: "Unfiled story",
+						state: { id: "s1", name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "crit-1",
+						sequence_id: 4,
+						name: "a criterion",
+						parent: "child-1",
+						external_id: "filed::ac0",
+						external_source: "planestories",
+						state: { id: "s2", name: "Done", group: "completed" },
+					},
+				],
+			},
+		};
+	}
+
+	test("emits only parentless non-epics, with an epics directory header", async () => {
+		const { client } = makeFakeClient(orphanBoard());
+		const outputPath = join(tmpDir, "orphans.md");
+		const result = await exportStories(client, {
+			config,
+			filters: {},
+			project: "Q1 Release",
+			outputPath,
+			orphansOnly: true,
+		});
+		expect(result.count).toBe(1);
+		const md = readFileSync(outputPath, "utf8");
+		// Only the orphan story is exported…
+		expect(md).toContain("Unfiled story");
+		expect(md).not.toContain("## The epic");
+		expect(md).not.toContain("Filed story");
+		expect(md).not.toContain("a criterion");
+		// …with the epics directory as inert YAML comments in the frontmatter.
+		expect(md).toContain("# ORPHAN WORKSHEET");
+		expect(md).toContain("#   EPIC ENG-1 - The epic");
+	});
+
+	test("the worksheet round-trips: comments are inert to the parser", async () => {
+		const { client } = makeFakeClient(orphanBoard());
+		const outputPath = join(tmpDir, "orphans.md");
+		await exportStories(client, {
+			config,
+			filters: {},
+			project: "Q1 Release",
+			outputPath,
+			orphansOnly: true,
+		});
+		const md = readFileSync(outputPath, "utf8");
+		const { parseMarkdownFile } = await import("../../../src/markdown/parser.ts");
+		const parsed = parseMarkdownFile(md, outputPath);
+		expect(parsed.frontmatter.project).toBe("Q1 Release");
+		expect(parsed.stories.length).toBe(1);
+		expect(parsed.stories[0]?.title).toBe("Unfiled story");
+		expect(parsed.stories[0]?.parent).toBeNull();
+	});
+});

@@ -30,6 +30,12 @@ export interface MigrateOptions {
 	apply?: boolean;
 	/** Max parents to migrate per run (rate-limit batching). 0/undefined = all. */
 	limit?: number;
+	/**
+	 * Explicit parent identifiers (e.g. "DATA-101") to migrate — the deliberate
+	 * canary. When present, ONLY these are selected and `limit` is ignored.
+	 * Requested ids that are not migration candidates are reported, never guessed.
+	 */
+	only?: string[];
 }
 
 export interface MigrateParentRef {
@@ -53,6 +59,9 @@ export interface MigrateReport {
 	childrenClosed: number;
 	/** Parents deferred past the --limit this run. */
 	deferred: number;
+	/** `--only` ids that matched NO migration candidate (typo, no ::ac children,
+	 * already fully migrated, or not in this project). */
+	onlyUnmatched: string[];
 	applied: boolean;
 }
 
@@ -200,9 +209,35 @@ export async function migrateCriteria(
 		workParents.push(item);
 	}
 
-	const limit = options.limit && options.limit > 0 ? options.limit : workParents.length;
-	const selected = workParents.slice(0, limit);
-	const deferred = workParents.length - selected.length;
+	// --only: a deliberate canary list. Selection is exactly the requested ids;
+	// --limit is ignored. Ids matching a CONFLICT parent count as "matched" (the
+	// conflict report covers them); everything else unmatched is surfaced.
+	let candidates = workParents;
+	const onlyUnmatched: string[] = [];
+	const onlyIds = (options.only ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean);
+	if (onlyIds.length > 0) {
+		const wanted = new Set(onlyIds);
+		candidates = workParents.filter((p) => wanted.has(ident(p).toUpperCase()));
+		const matched = new Set(candidates.map((p) => ident(p).toUpperCase()));
+		for (const c of conflicts) {
+			if (wanted.has(c.identifier.toUpperCase())) {
+				matched.add(c.identifier.toUpperCase());
+			}
+		}
+		for (const id of onlyIds) {
+			if (!matched.has(id)) {
+				onlyUnmatched.push(id);
+			}
+		}
+	}
+	const limit =
+		onlyIds.length > 0
+			? candidates.length
+			: options.limit && options.limit > 0
+				? options.limit
+				: candidates.length;
+	const selected = candidates.slice(0, limit);
+	const deferred = candidates.length - selected.length;
 
 	const migrated: MigrateParentRef[] = [];
 	const alreadyMigrated: MigrateParentRef[] = [];
@@ -284,6 +319,7 @@ export async function migrateCriteria(
 		criteriaFolded,
 		childrenClosed,
 		deferred,
+		onlyUnmatched,
 		applied: Boolean(options.apply),
 	};
 }

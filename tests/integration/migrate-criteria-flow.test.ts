@@ -454,3 +454,82 @@ describe("checkCriteriaMigration (doctor drift)", () => {
 		expect(drift.dual).toHaveLength(0);
 	});
 });
+
+describe("migrateCriteria --only (deliberate canary)", () => {
+	/** Two un-migrated parents, each with one open ::ac child. */
+	function twoParentBoard(): FakeData {
+		return {
+			projects: [{ id: PROJECT, name: "Proj", identifier: "ENG" }],
+			states: {
+				[PROJECT]: [
+					{ id: "done", name: "Done", group: "completed" },
+					{ id: "backlog", name: "Backlog", group: "backlog" },
+				],
+			},
+			workItems: {
+				[PROJECT]: [
+					{
+						id: "p1",
+						sequence_id: 1,
+						name: "First parent",
+						description_html: "<p>n1</p>",
+						state: { name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "p1c",
+						sequence_id: 2,
+						name: "crit one",
+						parent: "p1",
+						external_id: "one::ac0",
+						external_source: "planestories",
+						state: { name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "p2",
+						sequence_id: 3,
+						name: "Second parent",
+						description_html: "<p>n2</p>",
+						state: { name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "p2c",
+						sequence_id: 4,
+						name: "crit two",
+						parent: "p2",
+						external_id: "two::ac0",
+						external_source: "planestories",
+						state: { name: "Backlog", group: "backlog" },
+					},
+				],
+			},
+		};
+	}
+
+	test("selects exactly the named parent; the other is untouched and NOT deferred", async () => {
+		const fake = makeFakeClient(twoParentBoard());
+		const report = await migrateCriteria(fake.client, {
+			config,
+			project: "Proj",
+			apply: true,
+			only: ["ENG-3"],
+		});
+		expect(report.migrated.map((m) => m.identifier)).toEqual(["ENG-3"]);
+		expect(report.onlyUnmatched).toEqual([]);
+		expect(fake.updatedItems.some((u) => u.workItemId === "p1")).toBe(false);
+		expect(fake.updatedItems.some((u) => u.workItemId === "p2")).toBe(true);
+	});
+
+	test("--only ignores --limit and reports unmatched ids (case-insensitive match)", async () => {
+		const fake = makeFakeClient(twoParentBoard());
+		const report = await migrateCriteria(fake.client, {
+			config,
+			project: "Proj",
+			only: ["eng-1", "ENG-3", "ENG-999"],
+			limit: 1,
+		});
+		// limit=1 would normally defer one — --only overrides it.
+		expect(report.migrated.map((m) => m.identifier).sort()).toEqual(["ENG-1", "ENG-3"]);
+		expect(report.deferred).toBe(0);
+		expect(report.onlyUnmatched).toEqual(["ENG-999"]);
+	});
+});

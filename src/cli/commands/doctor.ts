@@ -5,6 +5,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { createPlaneClient } from "../../plane/client.ts";
 import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
+import { isOwnedCriterionChild } from "../../sync/board-story.ts";
 import { checkDependencyGraph } from "../../sync/graph_check.ts";
 import { groom } from "../../sync/groomer.ts";
 import { checkCriteriaMigration } from "../../sync/migrate.ts";
@@ -35,6 +36,7 @@ export function registerDoctorCommand(program: Command) {
 		.option("--context <name>", "Select a named context from multi-context config")
 		.option("-p, --project <name>", "Project to check (required if no defaultProject)")
 		.option("--no-fail-on-findings", "Report findings but always exit 0")
+		.option("--json", "Emit the report as JSON (machine-readable acceptance gate)", false)
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
@@ -60,6 +62,14 @@ export function registerDoctorCommand(program: Command) {
 				// description task-list model). Points the operator at `migrate-criteria`.
 				const criteria = checkCriteriaMigration(index, project.identifier);
 
+				// Post-migration ledger: how many owned ::ac children sit closed on the
+				// board (migrate closes, never deletes — this is the residue count).
+				const closedCriterionChildren = index.items.filter(
+					(i) =>
+						isOwnedCriterionChild(i) &&
+						(i.stateGroup === "completed" || i.stateGroup === "cancelled"),
+				).length;
+
 				const findings =
 					report.orphanedCriteria.length +
 					report.duplicateTitles.length +
@@ -67,6 +77,29 @@ export function registerDoctorCommand(program: Command) {
 					graph.dangling.length +
 					criteria.unmigrated.length +
 					criteria.dual.length;
+
+				if (options.json) {
+					console.log(
+						JSON.stringify(
+							{
+								project: project.identifier,
+								findings,
+								orphanedCriteria: report.orphanedCriteria,
+								duplicateTitles: report.duplicateTitles,
+								parentlessCriteria: report.parentlessCriteria,
+								danglingRelations: graph.dangling,
+								criteria,
+								ledger: { closedCriterionChildren },
+							},
+							null,
+							1,
+						),
+					);
+					if (findings > 0 && options.failOnFindings !== false) {
+						process.exit(1);
+					}
+					return;
+				}
 
 				console.log("");
 				console.log(chalk.bold(`Doctor ${report.project}`));
@@ -84,6 +117,9 @@ export function registerDoctorCommand(program: Command) {
 					`  Unmigrated criteria (::ac children, no list): ${criteria.unmigrated.length}`,
 				);
 				console.log(`  Dual criteria (list + open ::ac children):    ${criteria.dual.length}`);
+				console.log(
+					chalk.dim(`  Ledger: closed ::ac children on the board:    ${closedCriterionChildren}`),
+				);
 
 				for (const c of criteria.unmigrated) {
 					console.log(

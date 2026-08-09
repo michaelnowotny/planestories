@@ -49,6 +49,11 @@ export function registerExportCommand(program: Command) {
 		.option("-l, --label <name>", "Filter by label name")
 		.option("--sync-criteria", "Reconstruct acceptance criteria from sub-items", false)
 		.option("--include-archived", "Include items carrying the 'archived' label", false)
+		.option(
+			"--orphans-only",
+			"Orphan worksheet: only non-epic stories with no parent, plus an epics directory header",
+			false,
+		)
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
@@ -78,6 +83,7 @@ export function registerExportCommand(program: Command) {
 					outputPath: options.output,
 					syncCriteria: options.syncCriteria,
 					includeArchived: options.includeArchived,
+					orphansOnly: options.orphansOnly,
 				});
 
 				console.log(chalk.green(`Exported ${result.count} stories to ${result.outputPath}`));

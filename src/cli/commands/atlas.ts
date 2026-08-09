@@ -51,7 +51,15 @@ export function registerAtlasCommand(program: Command) {
 		.option("-c, --config <path>", "Config file path")
 		.option("--context <name>", "Select a named context from multi-context config")
 		.option("-p, --project <name>", "Render the whole live Plane project instead of a file")
-		.option("-o, --output <file>", "Output HTML file", "./atlas.html")
+		.option(
+			"-o, --output <file>",
+			"Output file (default ./atlas.html, or ./atlas.json with --json)",
+		)
+		.option(
+			"--json",
+			"Emit the graph as JSON (nodes with effort/priority/assignee, dependency edges, counts) instead of HTML",
+			false,
+		)
 		.option("--open", "Open the generated file in your browser", false)
 		.option(
 			"--no-dependencies",
@@ -121,14 +129,17 @@ export function registerAtlasCommand(program: Command) {
 					);
 				}
 
-				const html = renderAtlasHtml(graph);
-				const abs = resolve(options.output);
-				await Bun.write(abs, html);
+				const html = options.json ? "" : renderAtlasHtml(graph);
+				const outPath = options.output ?? (options.json ? "./atlas.json" : "./atlas.html");
+				const abs = resolve(outPath);
+				await Bun.write(abs, options.json ? `${JSON.stringify(graph, null, "\t")}\n` : html);
 
 				const flagged = graph.counts.flagged ? `, ${graph.counts.flagged} flagged` : "";
 				const deps = graph.counts.edges ? `, ${graph.counts.edges} dependencies` : "";
 				console.log(
-					chalk.green(`Atlas written to ${options.output}`) +
+					chalk.green(
+						`Atlas ${options.json ? "graph JSON" : ""} written to ${outPath}`.replace("  ", " "),
+					) +
 						chalk.dim(
 							` (${graph.counts.epics} epics, ${graph.counts.stories} stories${deps}${flagged})`,
 						),
