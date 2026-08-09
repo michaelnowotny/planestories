@@ -214,16 +214,27 @@ export async function migrateCriteria(
 	// conflict report covers them); everything else unmatched is surfaced.
 	let candidates = workParents;
 	const onlyUnmatched: string[] = [];
-	const onlyIds = (options.only ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean);
+	const rawOnly = options.only ?? [];
+	const onlyIds = rawOnly.map((s) => s.trim().toUpperCase()).filter(Boolean);
+	// Fail CLOSED: `--only=` / `--only ,` normalizes to nothing — refusing beats
+	// silently falling back to migrating the whole board (Codex P1).
+	if (rawOnly.length > 0 && onlyIds.length === 0) {
+		throw new ConfigError(
+			"--only was given but contains no identifiers — refusing to fall back to migrating everything.",
+		);
+	}
 	if (onlyIds.length > 0) {
 		const wanted = new Set(onlyIds);
 		candidates = workParents.filter((p) => wanted.has(ident(p).toUpperCase()));
 		const matched = new Set(candidates.map((p) => ident(p).toUpperCase()));
-		for (const c of conflicts) {
-			if (wanted.has(c.identifier.toUpperCase())) {
-				matched.add(c.identifier.toUpperCase());
-			}
+		// Scope the conflict report to the requested ids (still counted as
+		// matched): a canary report must not carry unrelated board conflicts.
+		const scopedConflicts = conflicts.filter((c) => wanted.has(c.identifier.toUpperCase()));
+		for (const c of scopedConflicts) {
+			matched.add(c.identifier.toUpperCase());
 		}
+		conflicts.length = 0;
+		conflicts.push(...scopedConflicts);
 		for (const id of onlyIds) {
 			if (!matched.has(id)) {
 				onlyUnmatched.push(id);

@@ -455,58 +455,58 @@ describe("checkCriteriaMigration (doctor drift)", () => {
 	});
 });
 
-describe("migrateCriteria --only (deliberate canary)", () => {
-	/** Two un-migrated parents, each with one open ::ac child. */
-	function twoParentBoard(): FakeData {
-		return {
-			projects: [{ id: PROJECT, name: "Proj", identifier: "ENG" }],
-			states: {
-				[PROJECT]: [
-					{ id: "done", name: "Done", group: "completed" },
-					{ id: "backlog", name: "Backlog", group: "backlog" },
-				],
-			},
-			workItems: {
-				[PROJECT]: [
-					{
-						id: "p1",
-						sequence_id: 1,
-						name: "First parent",
-						description_html: "<p>n1</p>",
-						state: { name: "Backlog", group: "backlog" },
-					},
-					{
-						id: "p1c",
-						sequence_id: 2,
-						name: "crit one",
-						parent: "p1",
-						external_id: "one::ac0",
-						external_source: "planestories",
-						state: { name: "Backlog", group: "backlog" },
-					},
-					{
-						id: "p2",
-						sequence_id: 3,
-						name: "Second parent",
-						description_html: "<p>n2</p>",
-						state: { name: "Backlog", group: "backlog" },
-					},
-					{
-						id: "p2c",
-						sequence_id: 4,
-						name: "crit two",
-						parent: "p2",
-						external_id: "two::ac0",
-						external_source: "planestories",
-						state: { name: "Backlog", group: "backlog" },
-					},
-				],
-			},
-		};
-	}
+/** Two un-migrated parents, each with one open ::ac child. */
+function twoParentBoardShared(): FakeData {
+	return {
+		projects: [{ id: PROJECT, name: "Proj", identifier: "ENG" }],
+		states: {
+			[PROJECT]: [
+				{ id: "done", name: "Done", group: "completed" },
+				{ id: "backlog", name: "Backlog", group: "backlog" },
+			],
+		},
+		workItems: {
+			[PROJECT]: [
+				{
+					id: "p1",
+					sequence_id: 1,
+					name: "First parent",
+					description_html: "<p>n1</p>",
+					state: { name: "Backlog", group: "backlog" },
+				},
+				{
+					id: "p1c",
+					sequence_id: 2,
+					name: "crit one",
+					parent: "p1",
+					external_id: "one::ac0",
+					external_source: "planestories",
+					state: { name: "Backlog", group: "backlog" },
+				},
+				{
+					id: "p2",
+					sequence_id: 3,
+					name: "Second parent",
+					description_html: "<p>n2</p>",
+					state: { name: "Backlog", group: "backlog" },
+				},
+				{
+					id: "p2c",
+					sequence_id: 4,
+					name: "crit two",
+					parent: "p2",
+					external_id: "two::ac0",
+					external_source: "planestories",
+					state: { name: "Backlog", group: "backlog" },
+				},
+			],
+		},
+	};
+}
 
+describe("migrateCriteria --only (deliberate canary)", () => {
 	test("selects exactly the named parent; the other is untouched and NOT deferred", async () => {
-		const fake = makeFakeClient(twoParentBoard());
+		const fake = makeFakeClient(twoParentBoardShared());
 		const report = await migrateCriteria(fake.client, {
 			config,
 			project: "Proj",
@@ -520,7 +520,7 @@ describe("migrateCriteria --only (deliberate canary)", () => {
 	});
 
 	test("--only ignores --limit and reports unmatched ids (case-insensitive match)", async () => {
-		const fake = makeFakeClient(twoParentBoard());
+		const fake = makeFakeClient(twoParentBoardShared());
 		const report = await migrateCriteria(fake.client, {
 			config,
 			project: "Proj",
@@ -531,5 +531,51 @@ describe("migrateCriteria --only (deliberate canary)", () => {
 		expect(report.migrated.map((m) => m.identifier).sort()).toEqual(["ENG-1", "ENG-3"]);
 		expect(report.deferred).toBe(0);
 		expect(report.onlyUnmatched).toEqual(["ENG-999"]);
+	});
+});
+
+describe("migrateCriteria --only fail-closed + scoped conflicts (Codex round-1)", () => {
+	test("--only provided but empty REFUSES to run (never falls back to everything)", async () => {
+		const fake = makeFakeClient(twoParentBoardShared());
+		await expect(
+			migrateCriteria(fake.client, {
+				config,
+				project: "Proj",
+				apply: true,
+				only: ["", "  "],
+			}),
+		).rejects.toThrow("--only");
+		expect(fake.updatedItems).toHaveLength(0); // nothing was migrated
+	});
+
+	test("--only scopes the conflicts report to the requested ids", async () => {
+		const data = twoParentBoardShared();
+		// make ENG-1 a conflict: duplicate ::ac0 index children
+		data.workItems?.[PROJECT]?.push({
+			id: "p1c-dup",
+			sequence_id: 5,
+			name: "dup crit",
+			parent: "p1",
+			external_id: "one-dup::ac0",
+			external_source: "planestories",
+			state: { name: "Backlog", group: "backlog" },
+		});
+		const fake = makeFakeClient(data);
+		// canary names only ENG-3: the unrelated ENG-1 conflict must NOT appear
+		const scoped = await migrateCriteria(fake.client, {
+			config,
+			project: "Proj",
+			only: ["ENG-3"],
+		});
+		expect(scoped.conflicts).toEqual([]);
+		expect(scoped.migrated.map((m) => m.identifier)).toEqual(["ENG-3"]);
+		// naming the conflicted parent DOES surface it (and counts as matched)
+		const direct = await migrateCriteria(fake.client, {
+			config,
+			project: "Proj",
+			only: ["ENG-1"],
+		});
+		expect(direct.conflicts.map((c) => c.identifier)).toEqual(["ENG-1"]);
+		expect(direct.onlyUnmatched).toEqual([]);
 	});
 });
