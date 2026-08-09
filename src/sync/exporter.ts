@@ -1,5 +1,6 @@
+import { fetchRelationsWithSweep } from "../atlas/relations.ts";
 import { ARCHIVE_LABEL } from "../constants.ts";
-import { ConfigError } from "../errors.ts";
+import { ConfigError, PlaneApiError } from "../errors.ts";
 import { serializeStories } from "../markdown/serializer.ts";
 import type { PlaneClient } from "../plane/client.ts";
 import { filterWorkItems, type WorkItemFilterInput } from "../plane/filters.ts";
@@ -131,8 +132,22 @@ export async function exportStories(
 		return p ? `${project.identifier}-${p.sequenceId}` : null;
 	};
 
+	// Relations for every exported story, with the paced rate-limit sweep — but
+	// FAIL-HARD if any lookup still fails: a file silently missing dependency
+	// lines would REMOVE those relations from the board on re-import.
+	const rel = await fetchRelationsWithSweep(client, project.id, filtered, 6);
+	if (rel.failed > 0) {
+		throw new PlaneApiError(
+			`${rel.failed} relation lookup(s) failed even after the paced retry pass — export aborted ` +
+				"(an exported file missing dependency lines would clobber board relations on re-import). Re-run.",
+		);
+	}
+
 	const stories = await mapWithConcurrency(filtered, 6, async (item) => {
-		const relations = await client.getRelations(project.id, item.id);
+		const relations = rel.relationsById.get(item.id);
+		if (!relations) {
+			throw new PlaneApiError(`missing relations for ${project.identifier}-${item.sequenceId}`);
+		}
 		// Description-first (design §2): when the item already carries its criteria in
 		// the description, that is authoritative — ignore any legacy children. Only a
 		// legacy parent WITHOUT a description checklist folds its `::ac<n>` children.
@@ -164,7 +179,10 @@ export async function exportStories(
 				...items
 					.filter(isEpic)
 					.sort((a, b) => a.sequenceId - b.sequenceId)
-					.map((ep) => `  EPIC ${project.identifier}-${ep.sequenceId} - ${ep.name.replace(/\s+/g, " ")}`),
+					.map(
+						(ep) =>
+							`  EPIC ${project.identifier}-${ep.sequenceId} - ${ep.name.replace(/\s+/g, " ")}`,
+					),
 			]
 		: undefined;
 

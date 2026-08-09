@@ -342,3 +342,38 @@ describe("export --orphans-only (orphan worksheet)", () => {
 		expect(parsed.stories[0]?.parent).toBeNull();
 	});
 });
+
+describe("export relation-fetch resilience (sweep + fail-hard)", () => {
+	test("a transiently rate-limited relation lookup is recovered by the sweep", async () => {
+		const { client } = makeFakeClient(dataWithItems());
+		let failures = 1;
+		const flaky = Object.create(client);
+		flaky.getRelations = async (projectId: string, itemId: string) => {
+			if (failures > 0) {
+				failures--;
+				throw new Error("429 simulated");
+			}
+			return client.getRelations(projectId, itemId);
+		};
+		const outputPath = join(tmpDir, "sweep.md");
+		const result = await exportStories(flaky, {
+			config,
+			filters: {},
+			project: "Q1 Release",
+			outputPath,
+		});
+		expect(result.count).toBe(2); // both stories exported despite the first-pass failure
+	});
+
+	test("persistently failing relations ABORT the export (no silently thin file)", async () => {
+		const { client } = makeFakeClient(dataWithItems());
+		const broken = Object.create(client);
+		broken.getRelations = async () => {
+			throw new Error("429 forever");
+		};
+		const outputPath = join(tmpDir, "broken.md");
+		await expect(
+			exportStories(broken, { config, filters: {}, project: "Q1 Release", outputPath }),
+		).rejects.toThrow("export aborted");
+	});
+});
