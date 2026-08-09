@@ -164,7 +164,7 @@ export async function exportStories(
 				...items
 					.filter(isEpic)
 					.sort((a, b) => a.sequenceId - b.sequenceId)
-					.map((ep) => `  EPIC ${project.identifier}-${ep.sequenceId} - ${ep.name}`),
+					.map((ep) => `  EPIC ${project.identifier}-${ep.sequenceId} - ${ep.name.replace(/\s+/g, " ")}`),
 			]
 		: undefined;
 
