@@ -342,3 +342,44 @@ describe("per-context credential isolation (replicate P1)", () => {
 		}
 	});
 });
+
+describe("context-name normalization safety (Codex P1)", () => {
+	const originalEnv = process.env;
+	beforeEach(() => {
+		process.env = { ...originalEnv };
+		for (const k of Object.keys(process.env)) {
+			if (k.startsWith("PLANE_")) delete process.env[k];
+		}
+	});
+	afterEach(() => {
+		process.env = originalEnv;
+	});
+
+	test("two contexts whose names normalize identically are rejected at load", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "planestories-collide-"));
+		try {
+			const rcPath = join(tempDir, "collide.json");
+			writeFileSync(
+				rcPath,
+				JSON.stringify({
+					contexts: [
+						{ name: "a-b", apiKey: "k1", workspaceSlug: "w1" },
+						{ name: "a_b", apiKey: "k2", workspaceSlug: "w2" },
+					],
+				}),
+			);
+			await expect(loadConfig({ configPath: rcPath, context: "a-b" })).rejects.toThrow(
+				"normalize to the same",
+			);
+		} finally {
+			rmSync(tempDir, { recursive: true, force: true });
+		}
+	});
+
+	test("a context name that normalizes to nothing is rejected", async () => {
+		process.env["PLANE_CTX__API_KEY"] = "k";
+		await expect(
+			loadConfig({ configPath: join(FIXTURES_DIR, "valid.json"), context: "--" }),
+		).rejects.toThrow("normalizes to nothing");
+	});
+});

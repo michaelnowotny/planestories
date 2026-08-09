@@ -58,7 +58,14 @@ Create `.planestoriesrc.json` in your project root for **non-secret** defaults. 
 }
 ```
 
-`PLANE_API_KEY`, `PLANE_WORKSPACE_SLUG`, and `PLANE_BASE_URL` from the environment always override config-file values.
+`PLANE_API_KEY`, `PLANE_WORKSPACE_SLUG`, and `PLANE_BASE_URL` from the environment override
+config-file values **when no `--context` is selected**. A **named context** (`--context ce`)
+resolves only its own `PLANE_CTX_<NAME>_API_KEY` / `_WORKSPACE_SLUG` / `_BASE_URL` variables —
+the bare variables never apply to it, so working against two Plane instances (e.g. cloud +
+self-hosted) can never cross credentials. A context may exist purely in the environment
+(no config-file entry needed): setting `PLANE_CTX_CE_*` makes `--context ce` work as-is.
+**Migration note:** if you previously relied on bare `PLANE_API_KEY` overriding a `--context`
+selection, set `PLANE_CTX_<NAME>_API_KEY` instead.
 
 ### 4. Write your first story
 

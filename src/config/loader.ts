@@ -49,9 +49,32 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 	// Resolve multi-context → flat CliConfig
 	let config: CliConfig;
 
+	if (options?.context !== undefined && normalizeCtx(options.context) === "") {
+		throw new ConfigError(
+			`Context name "${options.context}" normalizes to nothing (no alphanumerics) — ` +
+				"per-context env lookup would be ambiguous. Use a name with letters/digits.",
+		);
+	}
+
 	if (isMultiContextConfig(raw)) {
 		const multiConfig = raw as MultiContextConfig;
 		const contextName = options?.context;
+
+		// Two context names that normalize to the same env name (e.g. "a-b" and
+		// "a_b" -> PLANE_CTX_A_B_*) would share credential overrides — the exact
+		// cross-instance clobber this contract exists to prevent. Reject outright.
+		const byNorm = new Map<string, string>();
+		for (const c of multiConfig.contexts) {
+			const norm = normalizeCtx(c.name);
+			const clash = byNorm.get(norm);
+			if (clash !== undefined && clash !== c.name) {
+				throw new ConfigError(
+					`Context names "${clash}" and "${c.name}" normalize to the same env name ` +
+						`(PLANE_CTX_${norm}_*) — rename one; per-context credentials must be unambiguous.`,
+				);
+			}
+			byNorm.set(norm, c.name);
+		}
 
 		if (!contextName) {
 			const names = multiConfig.contexts.map((c) => c.name).join(", ");
@@ -148,13 +171,17 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Per-context env var name: PLANE_CTX_<NAME>_<FIELD>, name normalized. */
-export function ctxEnvName(context: string, field: string): string {
-	const norm = context
+/** Normalized context segment for env lookup (may be "" — callers must reject). */
+function normalizeCtx(context: string): string {
+	return context
 		.toUpperCase()
 		.replace(/[^A-Z0-9]+/g, "_")
 		.replace(/^_+|_+$/g, "");
-	return `PLANE_CTX_${norm}_${field}`;
+}
+
+/** Per-context env var name: PLANE_CTX_<NAME>_<FIELD>, name normalized. */
+export function ctxEnvName(context: string, field: string): string {
+	return `PLANE_CTX_${normalizeCtx(context)}_${field}`;
 }
 
 /**
