@@ -79,3 +79,46 @@ describe("checkDependencyGraph (dangling relations)", () => {
 		expect(report.dangling).toHaveLength(0);
 	});
 });
+
+describe("relation-fetch resilience (sweep + fail-hard acceptance gate)", () => {
+	function baseData(): FakeData {
+		return {
+			projects: [{ id: PROJECT_UUID, name: "Data Platform", identifier: "DATA" }],
+			workItems: {
+				[PROJECT_UUID]: [
+					{ id: "a", sequence_id: 1, name: "A", state: { name: "Backlog", group: "backlog" } },
+					{ id: "b", sequence_id: 2, name: "B", state: { name: "Backlog", group: "backlog" } },
+				],
+			},
+			relations: { a: { blocking: ["b"] } },
+		};
+	}
+
+	test("a transiently rate-limited lookup is recovered by the sweep", async () => {
+		const { client } = makeFakeClient(baseData());
+		let failures = 1;
+		const flaky = Object.create(client);
+		flaky.getRelations = async (projectId: string, itemId: string) => {
+			if (failures > 0) {
+				failures--;
+				throw new Error("429 simulated");
+			}
+			return client.getRelations(projectId, itemId);
+		};
+		const index = await fetchProjectIndex(flaky, PROJECT_UUID, "DATA");
+		const report = await checkDependencyGraph(flaky, PROJECT_UUID, "DATA", index);
+		expect(report.dangling).toEqual([]); // completed despite the first-pass failure
+	});
+
+	test("persistent failure ABORTS the check (no false-clean gate)", async () => {
+		const { client } = makeFakeClient(baseData());
+		const broken = Object.create(client);
+		broken.getRelations = async () => {
+			throw new Error("429 forever");
+		};
+		const index = await fetchProjectIndex(client, PROJECT_UUID, "DATA");
+		await expect(checkDependencyGraph(broken, PROJECT_UUID, "DATA", index)).rejects.toThrow(
+			"aborted",
+		);
+	});
+});

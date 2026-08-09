@@ -1,6 +1,7 @@
+import { fetchRelationsWithSweep } from "../atlas/relations.ts";
+import { PlaneApiError } from "../errors.ts";
 import type { PlaneClient } from "../plane/client.ts";
 import type { FetchedWorkItem, ProjectIndex } from "../plane/issues.ts";
-import { mapWithConcurrency } from "../utils/concurrency.ts";
 import { isCriterionChild } from "./board-story.ts";
 
 /** A relation on the board whose target work item isn't in the project. */
@@ -43,8 +44,22 @@ export async function checkDependencyGraph(
 	const ident = (item: FetchedWorkItem): string => `${projectIdentifier}-${item.sequenceId}`;
 	const seenRelatesTo = new Set<string>(); // dedup the symmetric relates_to edges
 
-	const perItem = await mapWithConcurrency(items, 6, async (item) => {
-		const relations = await client.getRelations(projectId, item.id);
+	// Relations with the paced rate-limit sweep — FAIL-HARD on residual failure:
+	// doctor is an acceptance gate, and silently missing relations would
+	// under-report dangling edges (a false-clean).
+	const rel = await fetchRelationsWithSweep(client, projectId, items, 6);
+	if (rel.failed > 0) {
+		throw new PlaneApiError(
+			`${rel.failed} relation lookup(s) failed even after the paced retry pass — ` +
+				"dependency-graph check aborted (a partial scan would under-report dangling relations). Re-run.",
+		);
+	}
+
+	const perItem = items.map((item) => {
+		const relations = rel.relationsById.get(item.id);
+		if (!relations) {
+			throw new PlaneApiError(`missing relations for ${ident(item)}`);
+		}
 		const dangling: DanglingRelation[] = [];
 
 		for (const targetId of relations.blocked_by ?? []) {
