@@ -9,8 +9,8 @@ planestories bridges markdown user stories in your repository and [Plane](https:
 work items, in both directions. Stories are written, reviewed, and versioned like code;
 the board stays current for everyone else. On top of that round-trip it adds a quality
 toolchain (linting, board health checks, grooming), the **Project Atlas** — an interactive
-map of your entire project that reads at every altitude from executive overview to a single
-acceptance criterion — and a **replication engine** that migrates whole projects between
+map of your entire project that reads at every altitude, from executive overview down to
+a single story card with its acceptance criteria — and a **replication engine** that migrates whole projects between
 Plane deployments (cloud ↔ self-hosted) with exact ticket numbers preserved.
 
 > **Attribution.** planestories is a fork of [**linearstories**](https://github.com/stackingturtles/linearstories) by **Ijonas Kisselbach / Stacking Turtles Ltd.**, adapted to target Plane instead of Linear. The original is MIT-licensed; that license is preserved in full (see [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE)). Huge thanks to the original author.
@@ -23,8 +23,9 @@ gap and then makes the state of the whole project legible:
 
 - **Stories as code.** User stories with checkbox acceptance criteria live in markdown,
   in git — reviewable in pull requests, greppable, diffable, and consumable by AI coding
-  agents as deterministic specs. Imports are idempotent; exports are warm (unchanged
-  stories cost zero writes); the board and the files converge instead of drifting.
+  agents as deterministic specs. Imports are idempotent and skip-unchanged (a re-import
+  of an unchanged story makes zero API writes); exports write back the hashes that keep
+  the next import warm — board and files stay reconciled through explicit, cheap syncs.
 - **Discipline that scales.** `lint` enforces story quality at authoring time; `doctor`
   detects board rot (orphaned criteria, duplicate titles, dangling dependencies) and
   works as a CI gate; `groom` cleans up after closed work; a rating skill scores story
@@ -37,7 +38,8 @@ gap and then makes the state of the whole project legible:
   altitude, no login required (it is a self-contained HTML file you can attach to an
   email).
 - **Deployment freedom.** The replication engine snapshots a project into a versioned
-  JSON file (which doubles as a full backup) and replays it onto any Plane instance —
+  JSON file (which doubles as a backup of everything it carries) and replays it onto any
+  Plane instance —
   cloud to self-hosted Community Edition or back — preserving exact `PROJECT-N` ticket
   numbers, hierarchy, dependencies, comments, and (where the target accepts them) original
   timestamps and authorship. Verification is a first-class command, not a hope. Migrating
@@ -102,7 +104,7 @@ The replication engine removes the biggest piece of PM-tool infrastructure debt:
 stuck where your data is.
 
 ```bash
-# 1. One paced read -> a versioned, digest-bound snapshot (also a full backup)
+# 1. One paced read -> a versioned, digest-bound snapshot (doubles as a board backup)
 planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json
 
 # 2. Replay onto any target -- zero source reads, dry-run by default, resumable
@@ -124,17 +126,21 @@ planestories replicate freshness --from cloud --snapshot data.snapshot.json --de
   run resumes exactly where it stopped; ambiguous writes are reconciled before any
   replay; a concurrent write to the target aborts the run rather than corrupting
   numbering. `verify` is a field-complete cutover gate and `freshness --deep` proves the
-  source didn't drift since the snapshot. Honest degradation/loss manifests report
-  anything a target cannot carry — nothing is silently dropped.
+  source didn't drift since the snapshot. Anything a target cannot carry — and anything
+  outside snapshot scope — is counted in explicit degradation/loss manifests rather than
+  dropped without a trace.
 - **Cutover tooling included:** `replicate relink` rewrites your markdown corpus to the
   new instance's ids/URLs atomically; `rename-project` frees or renames identifiers.
-- **Snapshots are backups.** A nightly `replicate snapshot` gives you versioned,
-  restorable, diffable board backups for free.
+- **Snapshots are board backups.** A nightly `replicate snapshot` gives you versioned,
+  restorable, diffable backups of everything the snapshot carries — items, hierarchy,
+  dependencies, comments, states, labels (not attachments/modules/pages/activity; see
+  [`docs/REPLICATE.md`](docs/REPLICATE.md)).
 
 Multi-instance work is first-class: named credential **contexts**
 (`--context ce`, configured via `PLANE_CTX_<NAME>_*` env vars) keep cloud and
 self-hosted credentials strictly separated, and the client speaks both Plane REST
-dialects (`/issues/` and `/work-items/`), auto-selected per instance. See
+dialects (`/issues/` and `/work-items/`) — configurable per context, with probe-driven
+auto-selection during replicate runs. See
 [`docs/REPLICATE.md`](docs/REPLICATE.md).
 
 ## Quick start
@@ -285,7 +291,7 @@ Use `--dry-run --check` to validate routing before importing.
 
 On create, planestories stamps each work item with `external_id` (derived from the story title) and `external_source: "planestories"`, then writes `plane_id` back into the file. Re-running the import updates that item **by its `plane_id`** — never duplicating. A story that has **no** `plane_id` but whose title matches an existing item is treated as a duplicate (see below), so a second file can't silently overwrite the first file's work item — link it explicitly with `--adopt-duplicates` (or add the `plane_id`) when that's what you intend.
 
-- **Skip-unchanged.** Each synced story stores a `plane_hash` (a hash of the rendered payload). On re-import, a linked story whose content is unchanged is reported `unchanged` and makes **zero API writes** — so re-importing a large, mostly-static board is cheap. Cosmetic markdown reflow that renders to the same HTML doesn't count as a change. `--force` re-imports regardless. (An edit made in the Plane UI while the file is untouched is intentionally not pulled back by import — that's a future `groom` reverse-sync's job.)
+- **Skip-unchanged.** Each synced story stores a `plane_hash` (a hash of the rendered payload). On re-import, a linked story whose content is unchanged is reported `unchanged` and makes **zero API writes** — so re-importing a large, mostly-static board is cheap. Cosmetic markdown reflow that renders to the same HTML doesn't count as a change. `--force` re-imports regardless. (An edit made in the Plane UI while the file is untouched is intentionally not pulled back by import — use `groom --write-back` to pull acceptance-criteria checkbox state back into files; other board-side edits surface via `export`.)
 - **Warm export → import.** `export` writes `plane_hash` too, so re-importing an unedited exported file is all-`unchanged` (no blind description rewrites). For files that carry a `plane_id` but no `plane_hash` (legacy or hand-authored), import reconstructs the board item from a single project listing and adopts the hash if the content already matches — one list call, never a per-item fetch.
 - **Duplicate guard.** Before creating a brand-new story, planestories checks whether an item with the **exact same title** already exists in the project (created by anyone). By default it **skips with a warning** (`duplicate of ENG-42 (Backlog)`), so you never get accidental twins. Pass `--adopt-duplicates` to link a single exact match instead (multiple matches are a hard error — set `plane_id` manually), or `--force-create` to create anyway.
 
@@ -434,23 +440,47 @@ grading).
 
 ### `atlas`
 
-Render an interactive **Project Atlas** — a single self-contained HTML file (no server, no CDN, works
-offline) that lays your epics, stories, and acceptance criteria out as a tidy tree you can pan, zoom,
-filter, and search. Point it at a stories file *or* a live Plane project:
+Render the **Project Atlas** — the interactive star-map cockpit shown above — as a single
+self-contained HTML file (no server, no CDN, works offline; deliberately dark-only). Point
+it at a stories file *or* a live Plane project:
 
 ```
-planestories atlas stories/q1-2026.md -o atlas.html --open   # from a file (offline)
+planestories atlas stories/q1-2026.md -o atlas.html          # from a file (offline)
 planestories atlas --project "Data Platform" -o atlas.html   # from the live board
+planestories atlas --project "Data Platform" --json -o g.json # the same graph as data
 ```
 
-Every node shows its status colour, an acceptance-criteria completion ring, and a spec-quality flag;
-click one for a details panel with its criteria, labels, and a deep link back to Plane. Filter chips
-narrow by status group, label, or "flagged only" (which prunes to the flagged stories while keeping
-their parent epics as context). Light/dark theme follows your OS and has a manual toggle. Open the
-file in any browser — nothing is uploaded anywhere. See [docs/ATLAS.md](./docs/ATLAS.md).
+Epics are ringed star systems (ring count = stories, hub size = rolled-up effort); stories
+are planets whose color is the status terraforming ladder and whose size is log-scaled
+effort; orbits encode parent-child structure and supply lines draw dependencies. The
+telescopic LOD resolves nebulae into worlds as you approach. SCAN searches by title or id with
+a keyboard contact list; lock a planet for its story card (criteria included) or an epic
+for its dossier (progress ring, status breakdown, effort totals, boundary supply lines,
+heaviest stories, Open-in-Plane). Chips filter by status group, label, **assignee**, or
+flagged-only. `--json` emits the identical graph (nodes, dependency edges, effort,
+status, criteria) for tooling. See [docs/ATLAS.md](./docs/ATLAS.md).
 
-> Inspired by Ijonas Kisselbach's Project Atlas in linearstories, rethought for Plane and shipped as a
-> zero-dependency offline artifact.
+> Inspired by Ijonas Kisselbach's Project Atlas in linearstories, rethought for Plane as
+> the cockpit design and shipped as a zero-dependency offline artifact.
+
+### `replicate` / `rename-project`
+
+Migrate a whole project between Plane instances with exact `PROJECT-N` preservation:
+
+```
+planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json
+planestories replicate apply --to ce --snapshot data.snapshot.json          # dry-run
+planestories replicate apply --to ce --snapshot data.snapshot.json --yes    # real, journaled, resumable
+planestories replicate verify --to ce --snapshot data.snapshot.json         # field-complete gate
+planestories replicate freshness --from cloud --snapshot data.snapshot.json --deep
+planestories replicate relink --to ce --snapshot data.snapshot.json --yes stories/
+planestories rename-project --context ce --project OLDID --identifier NEWID --yes
+```
+
+Apply is dry-run by default, fail-closed before any destination write, and resumable from
+its fsync'd journal after any crash; `--no-exact-identifiers` accepts renumbering,
+`--recreate-target` drops and rebuilds a run-created target. Full contract, guarantees,
+and honest limitations: [`docs/REPLICATE.md`](docs/REPLICATE.md).
 
 ## Rating story quality — `/rate-userstories`
 

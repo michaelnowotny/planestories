@@ -110,3 +110,11 @@ The generated HTML inlines all CSS, all JavaScript, and the graph data (as embed
 no remote stylesheets, and no fonts fetched from a CDN — the strict-CSP-friendly kind of page you
 can email, drop in an artifact store, or open on a plane. Nothing is ever uploaded. Sidebar links
 only ever carry `http(s)` URLs. The cockpit is dark-only by design.
+
+
+## Machine-readable output — `atlas --json`
+
+`atlas --json` emits the exact graph the cockpit renders — nodes (id, kind, identifier,
+title, status/statusGroup, labels, assignee, effortDays, priority, criteria, quality),
+dependency edges (`blocks`/`relates`), and counts — so external tooling and the HTML can
+never disagree.
