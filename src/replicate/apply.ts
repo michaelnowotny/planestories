@@ -150,7 +150,7 @@ export async function applySnapshot(
 				// Explicit drop-and-rebuild: delete the run-created project (if any)
 				// and retire this journal generation. The run then continues as a
 				// fresh one — including a fresh empirical probe of the target.
-				await recreateOwnedTarget(client, journal);
+				await recreateOwnedTarget(ownershipGuardedClient(client, journal), journal);
 				journal.archivePoisoned();
 				journal = null;
 			} else if (journal.isPoisoned) {
@@ -208,29 +208,34 @@ export async function applySnapshot(
 			journal.append({ type: "probe", probe });
 		}
 
+		// Every destination write from here on is lock-ownership-guarded: the
+		// journal exists, so a stolen lock must stop Plane mutation immediately,
+		// not merely the next journal append.
+		const write = ownershipGuardedClient(client, journal);
+
 		let projectId = journal.projectCreated?.projectId ?? null;
 		if (projectId) {
-			await verifyOwnedProject(client, journal, projectId);
+			await verifyOwnedProject(write, journal, projectId);
 		}
 
 		if (journal.cleanupStarted) {
 			assertCleanupCanContinue(journal, snapshot, gate.mode);
 			if (!projectId)
 				throw new ReplicateError("Cleanup-started journal has no run-created project");
-			await cleanupPlaceholders(client, journal, projectId, gate.mode);
-			await lightVerify(client, snapshot, projectId, gate.mode, journal);
+			await cleanupPlaceholders(write, journal, projectId, gate.mode);
+			await lightVerify(write, snapshot, projectId, gate.mode, journal);
 			journal.append({ type: "apply-complete" });
 			return resultFromJournal(journal, gate.mode, false, gate.manifests, probe, 0);
 		}
 
 		if (!projectId) {
-			projectId = await createOrAdoptProject(client, journal, destName, destIdentifier, snapshot);
+			projectId = await createOrAdoptProject(write, journal, destName, destIdentifier, snapshot);
 		}
 
-		const stateMap = await replicateStates(client, journal, projectId, snapshot, gate.manifests);
-		const labelMap = await replicateLabels(client, journal, projectId, snapshot);
+		const stateMap = await replicateStates(write, journal, projectId, snapshot, gate.manifests);
+		const labelMap = await replicateLabels(write, journal, projectId, snapshot);
 		const itemPhase = await replicateItems(
-			client,
+			write,
 			journal,
 			projectId,
 			snapshot,
@@ -244,11 +249,11 @@ export async function applySnapshot(
 			return resultFromJournal(journal, gate.mode, false, gate.manifests, probe, itemPhase.skipped);
 		}
 
-		await replicateParents(client, journal, projectId, snapshot);
-		await replicateRelations(client, journal, projectId, snapshot, probe);
-		await replicateComments(client, journal, projectId, snapshot, probe, options.sleep);
-		await cleanupPlaceholders(client, journal, projectId, gate.mode);
-		await lightVerify(client, snapshot, projectId, gate.mode, journal);
+		await replicateParents(write, journal, projectId, snapshot);
+		await replicateRelations(write, journal, projectId, snapshot, probe);
+		await replicateComments(write, journal, projectId, snapshot, probe, options.sleep);
+		await cleanupPlaceholders(write, journal, projectId, gate.mode);
+		await lightVerify(write, snapshot, projectId, gate.mode, journal);
 		journal.append({ type: "apply-complete" });
 		return resultFromJournal(journal, gate.mode, false, gate.manifests, probe, itemPhase.skipped);
 	} finally {
@@ -364,6 +369,103 @@ async function createOrAdoptProject(
 		name: destName,
 	});
 	return project.id;
+}
+
+/**
+ * Wrap every PLANE WRITE with a journal-lock ownership check. The per-append
+ * check alone is too late: state creation, label creation, archive verbs and
+ * --recreate-target's project DELETE all reach Plane before their next append,
+ * so a process whose lock was stolen could keep mutating the destination.
+ * With this wrapper, a lost lock stops the very next write (only a request
+ * already in flight can still land — unavoidable without server-side leases).
+ * Reads intentionally pass through unguarded.
+ */
+function ownershipGuardedClient(client: ApplyClient, journal: Journal): ApplyClient {
+	const own = (): void => journal.assertOwnership();
+	return {
+		baseUrl: client.baseUrl,
+		workspaceSlug: client.workspaceSlug,
+		dialect: client.dialect,
+		maxRetries: client.maxRetries,
+		listProjects: <T>() => client.listProjects<T>(),
+		listWorkspaceMembers: <T>() => client.listWorkspaceMembers<T>(),
+		getProject: <T>(projectId: string) => client.getProject<T>(projectId),
+		getWorkItem: <T>(projectId: string, workItemId: string) =>
+			client.getWorkItem<T>(projectId, workItemId),
+		listWorkItems: <T>(
+			projectId: string,
+			query?: Record<string, string | number | boolean | undefined>,
+		) => client.listWorkItems<T>(projectId, query),
+		listArchivedWorkItems: <T>(projectId: string) => client.listArchivedWorkItems<T>(projectId),
+		listStates: <T>(projectId: string) => client.listStates<T>(projectId),
+		listLabels: <T>(projectId: string) => client.listLabels<T>(projectId),
+		getRelations: (projectId: string, workItemId: string) =>
+			client.getRelations(projectId, workItemId),
+		listWorkItemComments: <T>(projectId: string, workItemId: string) =>
+			client.listWorkItemComments<T>(projectId, workItemId),
+		createProject: <T>(body: Record<string, unknown>, opts?: { maxRetries?: number }) => {
+			own();
+			return client.createProject<T>(body, opts);
+		},
+		deleteProject: (projectId: string) => {
+			own();
+			return client.deleteProject(projectId);
+		},
+		createWorkItem: <T>(
+			projectId: string,
+			body: Record<string, unknown>,
+			opts?: { maxRetries?: number },
+		) => {
+			own();
+			return client.createWorkItem<T>(projectId, body, opts);
+		},
+		updateWorkItem: <T>(projectId: string, workItemId: string, body: Record<string, unknown>) => {
+			own();
+			return client.updateWorkItem<T>(projectId, workItemId, body);
+		},
+		deleteWorkItem: (projectId: string, workItemId: string) => {
+			own();
+			return client.deleteWorkItem(projectId, workItemId);
+		},
+		archiveWorkItem: (projectId: string, workItemId: string) => {
+			own();
+			return client.archiveWorkItem(projectId, workItemId);
+		},
+		createState: <T>(projectId: string, body: Record<string, unknown>) => {
+			own();
+			return client.createState<T>(projectId, body);
+		},
+		updateState: <T>(projectId: string, stateId: string, body: Record<string, unknown>) => {
+			own();
+			return client.updateState<T>(projectId, stateId, body);
+		},
+		createLabel: <T>(projectId: string, body: Record<string, unknown>) => {
+			own();
+			return client.createLabel<T>(projectId, body);
+		},
+		updateLabel: <T>(projectId: string, labelId: string, body: Record<string, unknown>) => {
+			own();
+			return client.updateLabel<T>(projectId, labelId, body);
+		},
+		createRelation: (
+			projectId: string,
+			workItemId: string,
+			relationType: PlaneRelationKind,
+			issues: string[],
+		) => {
+			own();
+			return client.createRelation(projectId, workItemId, relationType, issues);
+		},
+		createWorkItemComment: <T>(
+			projectId: string,
+			workItemId: string,
+			body: Record<string, unknown>,
+			opts?: { maxRetries?: number },
+		) => {
+			own();
+			return client.createWorkItemComment<T>(projectId, workItemId, body, opts);
+		},
+	};
 }
 
 async function recreateOwnedTarget(client: ApplyClient, journal: Journal): Promise<void> {

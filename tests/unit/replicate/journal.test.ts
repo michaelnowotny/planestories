@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Journal, type JournalHeader } from "../../../src/replicate/journal.ts";
+import {
+	Journal,
+	type JournalHeader,
+	restoreDisplacedLock,
+} from "../../../src/replicate/journal.ts";
 
 function tempJournal(): { dir: string; path: string } {
 	const dir = mkdtempSync(join(tmpdir(), "planestories-journal-"));
@@ -131,6 +135,28 @@ describe("replication journal", () => {
 			writeFileSync(`${temp.path}.lock`, "99999999");
 			expect(() => journal.append({ type: "cleanup-started" })).toThrow(/lock/);
 			journal.close();
+		} finally {
+			rmSync(temp.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a displaced lock is restored via LINK and can never clobber a third contender", () => {
+		// Deterministic three-contender scenario, disk-state level: stealer B
+		// renamed fresh owner A's lock away (staleName holds A); meanwhile
+		// contender C wx-created a new lock at lockPath. B's restore must NOT
+		// overwrite C — link() fails on EEXIST where rename() would clobber.
+		const temp = tempJournal();
+		try {
+			const lockPath = `${temp.path}.lock`;
+			const staleName = `${lockPath}.stale-77-0`;
+			writeFileSync(staleName, "1111"); // displaced owner A
+			writeFileSync(lockPath, "2222"); // third contender C already holds the path
+			restoreDisplacedLock(staleName, lockPath);
+			expect(readFileSync(lockPath, "utf8")).toBe("2222"); // C untouched
+			// With the path free, the same restore puts A back.
+			rmSync(lockPath);
+			restoreDisplacedLock(staleName, lockPath);
+			expect(readFileSync(lockPath, "utf8")).toBe("1111");
 		} finally {
 			rmSync(temp.dir, { recursive: true, force: true });
 		}

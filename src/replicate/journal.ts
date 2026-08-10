@@ -2,6 +2,7 @@ import {
 	closeSync,
 	existsSync,
 	fsyncSync,
+	linkSync,
 	openSync,
 	readFileSync,
 	renameSync,
@@ -169,15 +170,15 @@ export class Journal {
 		}
 	}
 
-	append(entry: JournalEntry): void {
-		if (this.closed) {
-			throw new ReplicateError(`Cannot append to closed journal ${this.path}`);
-		}
-		// Ownership backstop: the rename-steal narrows but cannot fully close the
-		// two-delayed-stealers race without kernel flock (unavailable without
-		// native deps). Re-checking the lock before EVERY durable fact means a
-		// process on the losing side of a steal stops at its next append instead
-		// of continuing to mutate a journal another process now owns.
+	/**
+	 * Ownership backstop: the rename-steal narrows but cannot fully close the
+	 * delayed-stealer race without kernel flock (unavailable without native
+	 * deps). Callers re-check before every DURABLE operation — every journal
+	 * append AND every Plane write (via the apply layer's guarded client) — so a
+	 * process on the losing side of a steal stops at its next operation instead
+	 * of continuing to mutate state another process now owns.
+	 */
+	assertOwnership(): void {
 		let holder: string;
 		try {
 			holder = readFileSync(this.lockPath, "utf8").trim();
@@ -189,6 +190,13 @@ export class Journal {
 				`Journal lock for ${this.path} is no longer held by this process (holder: ${holder || "none"}) — refusing to write.`,
 			);
 		}
+	}
+
+	append(entry: JournalEntry): void {
+		if (this.closed) {
+			throw new ReplicateError(`Cannot append to closed journal ${this.path}`);
+		}
+		this.assertOwnership();
 		writeSync(this.fd, `${JSON.stringify(entry)}\n`);
 		fsyncSync(this.fd);
 		this.entries.push(entry);
@@ -337,8 +345,11 @@ function acquireLock(path: string, warn?: (message: string) => void): string {
 			}
 			// rename operates by PATH, so a delayed stealer can grab a lock that
 			// was REPLACED since it read the stale pid. Verify we renamed the lock
-			// we examined; if not, restore it and retry. (The remaining sub-ms
-			// third-party window is why append() re-checks ownership per fact.)
+			// we examined; if not, restore it and retry. The restore uses LINK,
+			// never rename: link fails with EEXIST when a third contender has
+			// already wx-created a fresh lock, so we can never clobber a live
+			// lock. If the restore loses that race, the victim's ownership is
+			// genuinely gone and its own per-operation ownership checks stop it.
 			let stolen: string;
 			try {
 				stolen = readFileSync(staleName, "utf8").trim();
@@ -346,11 +357,7 @@ function acquireLock(path: string, warn?: (message: string) => void): string {
 				stolen = "";
 			}
 			if (stolen !== raw) {
-				try {
-					renameSync(staleName, lockPath);
-				} catch {
-					// The victim may have re-created its lock; leave the debris.
-				}
+				restoreDisplacedLock(staleName, lockPath);
 				continue;
 			}
 			warn?.(`Replacing stale replication journal lock ${lockPath} (pid ${raw || "unknown"})`);
@@ -362,6 +369,23 @@ function acquireLock(path: string, warn?: (message: string) => void): string {
 		}
 	}
 	throw new ReplicateError(`Could not acquire journal lock ${lockPath}`);
+}
+
+/**
+ * Put a displaced (wrongly renamed-away) lock back WITHOUT ever clobbering a
+ * lock some third contender created meanwhile: link() fails with EEXIST when
+ * the path is taken, unlike rename() which silently overwrites. When the
+ * restore loses that race the displaced owner's lock is genuinely gone — its
+ * own per-operation ownership checks stop it — and the debris file is inert.
+ * Exported for the deterministic three-contender test.
+ */
+export function restoreDisplacedLock(staleName: string, lockPath: string): void {
+	try {
+		linkSync(staleName, lockPath);
+		unlinkSync(staleName);
+	} catch {
+		// A third contender holds the path; leave the debris (inert).
+	}
 }
 
 function processAlive(pid: number): boolean {

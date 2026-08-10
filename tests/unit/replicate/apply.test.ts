@@ -439,6 +439,33 @@ describe("replication apply", () => {
 		}
 	});
 
+	test("a stolen lock stops PLANE WRITES immediately, not just journal appends", async () => {
+		// The append-time check alone is too late: states, labels, archive verbs
+		// and --recreate-target's DELETE reach Plane BEFORE their next append.
+		// Steal the lock during the states-phase READ; the very next operation is
+		// a Plane write (createState) that must be refused pre-flight.
+		const ctx = context();
+		const fake = new FakePlane();
+		const snapshot = sampleSnapshot();
+		let writesAtSteal = -1;
+		const origListStates = fake.listStates.bind(fake);
+		fake.listStates = async <T>(projectId: string): Promise<T[]> => {
+			if (writesAtSteal === -1 && existsSync(`${ctx.options.journalPath}.lock`)) {
+				writeFileSync(`${ctx.options.journalPath}.lock`, "99999999");
+				writesAtSteal = fake.writeCalls;
+			}
+			return origListStates<T>(projectId);
+		};
+		try {
+			await expect(applySnapshot(fake, snapshot, ctx.options)).rejects.toThrow(/lock/);
+			expect(writesAtSteal).toBeGreaterThan(-1);
+			// Not a single Plane write landed after the steal.
+			expect(fake.writeCalls).toBe(writesAtSteal);
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
 	test("a journal holding only a torn header is discarded and the run proceeds fresh", async () => {
 		// Crash during the very first header write leaves a file with zero
 		// committed records. It holds no facts, so it must not brick the run
