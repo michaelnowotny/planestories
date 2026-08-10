@@ -244,6 +244,49 @@ describe("replicate verify", () => {
 		}
 	});
 
+	test("verify judges authorship/footers by the JOURNALED probe map, not live membership (X3b)", async () => {
+		// Apply mapped the author via the probe's member snapshot and wrote NO
+		// footer. If the member later leaves the workspace, verify consulting the
+		// LIVE list would flip the footer predicate and mutilate the comment's
+		// real footer-shaped content into a false failure.
+		const dir = mkdtempSync(join(tmpdir(), "planestories-verify-"));
+		const fake = new FakePlane();
+		const snapshot = sampleSnapshot();
+		const item1 = snapshot.items.find((item) => item.sequenceId === 1)!;
+		snapshot.comments[item1.id] = [
+			{
+				id: "comment-footerish",
+				commentHtml:
+					"<p>real content</p><p><em>— replicated from LEGACY; original author Bob, 2020-01-01</em></p>",
+				createdAt: "2024-01-01T00:00:00Z",
+				createdBy: "source-mapped",
+			},
+		];
+		snapshot.digest = computeSnapshotDigest(snapshot);
+		const journalPath = join(dir, "apply.jsonl");
+		try {
+			await applySnapshot(fake, snapshot, {
+				yes: true,
+				flags,
+				journalPath,
+				toolVersion: "test",
+				runId: "verify-test",
+				sleep: async () => {},
+			});
+			fake.members.length = 0; // the member leaves AFTER apply
+			const report = await verifySnapshot(fake, snapshot, { journalPath });
+			expect(
+				report.findings.filter(
+					(finding) =>
+						(finding.check === "comments" || finding.check === "authorship") &&
+						finding.severity === "failure",
+				),
+			).toEqual([]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	test("state GROUP differences are failures even when only casing differs (X4)", async () => {
 		const ctx = await applied();
 		try {

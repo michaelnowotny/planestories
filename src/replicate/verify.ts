@@ -53,7 +53,6 @@ export interface VerifyClient {
 	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	listStates<T>(projectId: string): Promise<T[]>;
 	listLabels<T>(projectId: string): Promise<T[]>;
-	listWorkspaceMembers<T>(): Promise<T[]>;
 	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]>;
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
 }
@@ -93,12 +92,6 @@ interface RawState {
 interface RawLabel {
 	id: string;
 	name?: string;
-}
-
-interface RawMember {
-	id?: string;
-	member?: string;
-	email?: string;
 }
 
 interface RawComment {
@@ -155,12 +148,11 @@ export async function verifySnapshot(
 	const entries = readJournal(options.journalPath);
 	const facts = journalFacts(entries, snapshot, client);
 
-	const [live, archived, states, labels, members] = await Promise.all([
+	const [live, archived, states, labels] = await Promise.all([
 		client.listWorkItems<RawItem>(facts.projectId),
 		client.listArchivedWorkItems<RawItem>(facts.projectId),
 		client.listStates<RawState>(facts.projectId),
 		client.listLabels<RawLabel>(facts.projectId),
-		client.listWorkspaceMembers<RawMember>(),
 	]);
 	if (archived === null) {
 		// Live-only verification is provable ONLY when nothing was ever archived:
@@ -232,11 +224,11 @@ export async function verifySnapshot(
 
 	const statesById = new Map(states.map((state) => [state.id, state]));
 	const labelsById = new Map(labels.map((label) => [label.id, label]));
-	const targetMemberByEmail = new Map(
-		members
-			.filter((member) => member.email && (member.member ?? member.id))
-			.map((member) => [member.email!.toLowerCase(), member.member ?? member.id!]),
-	);
+	// Verify judges what apply PROMISED: apply mapped authors/assignees through
+	// the probe's member snapshot, which the journal preserves. The LIVE member
+	// list can differ (someone joined/left after apply) and would flip footer
+	// predicates and expected ids into false failures.
+	const targetMemberByEmail = new Map(Object.entries(facts.probe.memberByEmail));
 	for (const source of snapshot.items) {
 		const targetId = facts.targetBySource.get(source.id)?.id;
 		const target = targetId ? targetById.get(targetId) : undefined;
@@ -598,21 +590,21 @@ async function compareComments(
 				continue;
 			}
 			// Apply generated a footer ONLY when native authorship was unavailable
-			// (same predicate as buildCommentBody). Stripping unconditionally would
-			// delete legitimate content from a source comment that itself ends in a
-			// footer-shaped paragraph (e.g. re-replicating a replicated board).
+			// (same predicate as buildCommentBody, evaluated against the JOURNALED
+			// probe member map). The marker-attribute strip is UNCONDITIONAL (the
+			// marker is unambiguously ours); only the text-shape fallback is gated,
+			// so a native comment whose real content ends footer-shaped survives.
 			const nativeAuthor =
 				facts.probe.commentCreatedByAccepted === true &&
 				mappedCreator(comment.createdBy, snapshot, targetMemberByEmail) !== null;
 			const applyWroteFooter = !nativeAuthor || facts.probe.commentCreatedAtAccepted !== true;
+			const storedStripped = stripMarkerFooter(target.comment_html ?? "");
 			compareHtml(
 				"comments",
 				item,
 				target,
 				comment.commentHtml,
-				applyWroteFooter
-					? stripCommentFooter(target.comment_html ?? "")
-					: (target.comment_html ?? ""),
+				applyWroteFooter ? stripTextShapeFooter(storedStripped) : storedStripped,
 				add,
 			);
 			compareCommentAuthorship(
@@ -921,15 +913,20 @@ function isEmptyHtml(html: string | null): boolean {
 	return html !== null && htmlToMarkdown(html) === "";
 }
 
-function stripCommentFooter(html: string): string {
-	return (
-		html
-			.replace(/<p\b[^>]*\bdata-psrepl-comment=(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/p>\s*$/i, "")
-			// A sanitizing target can strip the data-psrepl marker while keeping the
-			// visible provenance text — recognize the footer by its text shape too.
-			.replace(/<p\b[^>]*><em>— replicated from [\s\S]*?<\/em><\/p>\s*$/i, "")
-			.trim()
-	);
+/** Strip OUR marker-attributed footer paragraph — unconditional (the marker is ours). */
+function stripMarkerFooter(html: string): string {
+	return html
+		.replace(/<p\b[^>]*\bdata-psrepl-comment=(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/p>\s*$/i, "")
+		.trim();
+}
+
+/**
+ * Strip a footer recognized only by its TEXT SHAPE — for sanitizing targets
+ * that removed the data-psrepl marker while keeping the visible provenance
+ * text. Callers gate this on apply having actually generated a footer.
+ */
+function stripTextShapeFooter(html: string): string {
+	return html.replace(/<p\b[^>]*><em>— replicated from [\s\S]*?<\/em><\/p>\s*$/i, "").trim();
 }
 
 function hosts(baseUrl: string): Set<string> {
