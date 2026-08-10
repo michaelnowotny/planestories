@@ -25,9 +25,34 @@ export interface PlaneClientOptions {
 	maxRetryDelayMs?: number;
 	/** Injectable sleep, so tests can run without real delays. */
 	sleep?: (ms: number) => Promise<void>;
+	/** Work-item REST path family. Default "issues" (see PlaneEndpointDialect). */
+	dialect?: PlaneEndpointDialect;
 }
 
 export type PlaneDependencyRelationType = "blocked_by" | "blocking" | "relates_to";
+
+/**
+ * Every relation kind Plane's data model carries. The dependency subset above is
+ * what the story-file sync understands; replication moves ALL kinds a target
+ * dialect accepts (probe-gated).
+ */
+export type PlaneRelationKind =
+	| "blocked_by"
+	| "blocking"
+	| "relates_to"
+	| "duplicate"
+	| "start_before"
+	| "start_after"
+	| "finish_before"
+	| "finish_after";
+
+/**
+ * Which REST path family a Plane instance serves work items under. The `/issues/`
+ * family is past its announced deprecation but still serves on current cloud and
+ * CE; `/work-items/` is its successor. The probe selects per instance; `issues`
+ * stays the default because the whole tool is proven against it.
+ */
+export type PlaneEndpointDialect = "issues" | "work-items";
 
 export interface PlaneIssueRelations {
 	blocking: string[];
@@ -82,6 +107,7 @@ export class PlaneClient {
 	readonly maxRetries: number;
 	readonly retryBaseDelayMs: number;
 	readonly maxRetryDelayMs: number;
+	readonly dialect: PlaneEndpointDialect;
 	private readonly sleep: (ms: number) => Promise<void>;
 
 	constructor(options: PlaneClientOptions) {
@@ -92,7 +118,13 @@ export class PlaneClient {
 		this.maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES);
 		this.retryBaseDelayMs = options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
 		this.maxRetryDelayMs = options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
+		this.dialect = options.dialect ?? "issues";
 		this.sleep = options.sleep ?? defaultSleep;
+	}
+
+	/** The work-item API path segment for this instance's endpoint dialect. */
+	get itemsSegment(): string {
+		return this.dialect === "work-items" ? "work-items" : "issues";
 	}
 
 	/** Absolute browser URL for a work item, used in markdown write-back. */
@@ -246,7 +278,7 @@ export class PlaneClient {
 	}
 
 	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]> {
-		return this.listAll<T>(`/projects/${projectId}/issues/${workItemId}/comments/`);
+		return this.listAll<T>(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/comments/`);
 	}
 
 	createWorkItemComment<T>(
@@ -257,15 +289,21 @@ export class PlaneClient {
 	): Promise<T> {
 		return this.request<T>(
 			"POST",
-			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/comments/`),
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/comments/`),
 			{ body, maxRetries: opts?.maxRetries },
 		);
 	}
 
-	createWorkItem<T>(projectId: string, body: Record<string, unknown>): Promise<T> {
-		return this.request<T>("POST", this.workspacePath(`/projects/${projectId}/issues/`), {
-			body,
-		});
+	createWorkItem<T>(
+		projectId: string,
+		body: Record<string, unknown>,
+		opts?: { maxRetries?: number },
+	): Promise<T> {
+		return this.request<T>(
+			"POST",
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/`),
+			{ body, maxRetries: opts?.maxRetries },
+		);
 	}
 
 	updateWorkItem<T>(
@@ -275,39 +313,39 @@ export class PlaneClient {
 	): Promise<T> {
 		return this.request<T>(
 			"PATCH",
-			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/`),
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/`),
 			{ body },
 		);
 	}
 
 	listWorkItems<T>(projectId: string, query: RequestOptions["query"] = {}): Promise<T[]> {
-		return this.listAll<T>(`/projects/${projectId}/issues/`, query);
+		return this.listAll<T>(`/projects/${projectId}/${this.itemsSegment}/`, query);
 	}
 
 	/** Retrieve a single work item (e.g. to read its current labels before merging). */
 	getWorkItem<T>(projectId: string, workItemId: string): Promise<T> {
 		return this.request<T>(
 			"GET",
-			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/`),
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/`),
 		);
 	}
 
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations> {
 		return this.request<PlaneIssueRelations>(
 			"GET",
-			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/relations/`),
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/relations/`),
 		);
 	}
 
 	createRelation(
 		projectId: string,
 		workItemId: string,
-		relationType: PlaneDependencyRelationType,
+		relationType: PlaneRelationKind,
 		issues: string[],
 	): Promise<void> {
 		return this.request<void>(
 			"POST",
-			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/relations/`),
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/relations/`),
 			{ body: { relation_type: relationType, issues } },
 		);
 	}
@@ -315,12 +353,14 @@ export class PlaneClient {
 	removeRelation(
 		projectId: string,
 		workItemId: string,
-		relationType: PlaneDependencyRelationType,
+		relationType: PlaneRelationKind,
 		relatedIssue: string,
 	): Promise<void> {
 		return this.request<void>(
 			"POST",
-			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/relations/remove/`),
+			this.workspacePath(
+				`/projects/${projectId}/${this.itemsSegment}/${workItemId}/relations/remove/`,
+			),
 			{ body: { relation_type: relationType, related_issue: relatedIssue } },
 		);
 	}
@@ -329,7 +369,7 @@ export class PlaneClient {
 	deleteWorkItem(projectId: string, workItemId: string): Promise<void> {
 		return this.request<void>(
 			"DELETE",
-			this.workspacePath(`/projects/${projectId}/issues/${workItemId}/`),
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/`),
 		);
 	}
 
@@ -343,10 +383,86 @@ export class PlaneClient {
 		externalId: string,
 		externalSource: string,
 	): Promise<T | null> {
-		return this.request<T | null>("GET", this.workspacePath(`/projects/${projectId}/issues/`), {
-			query: { external_id: externalId, external_source: externalSource },
+		return this.request<T | null>(
+			"GET",
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/`),
+			{
+				query: { external_id: externalId, external_source: externalSource },
+				allowNotFound: true,
+			},
+		);
+	}
+
+	// --- Project / state / label / archive surface (replication) ---
+
+	getProject<T>(projectId: string): Promise<T> {
+		return this.request<T>("GET", this.workspacePath(`/projects/${projectId}/`));
+	}
+
+	createProject<T>(body: Record<string, unknown>): Promise<T> {
+		return this.request<T>("POST", this.workspacePath("/projects/"), { body });
+	}
+
+	updateProject<T>(projectId: string, body: Record<string, unknown>): Promise<T> {
+		return this.request<T>("PATCH", this.workspacePath(`/projects/${projectId}/`), { body });
+	}
+
+	/** Permanently delete a project and everything in it (204 on success). */
+	deleteProject(projectId: string): Promise<void> {
+		return this.request<void>("DELETE", this.workspacePath(`/projects/${projectId}/`));
+	}
+
+	createState<T>(projectId: string, body: Record<string, unknown>): Promise<T> {
+		return this.request<T>("POST", this.workspacePath(`/projects/${projectId}/states/`), { body });
+	}
+
+	updateState<T>(projectId: string, stateId: string, body: Record<string, unknown>): Promise<T> {
+		return this.request<T>(
+			"PATCH",
+			this.workspacePath(`/projects/${projectId}/states/${stateId}/`),
+			{ body },
+		);
+	}
+
+	updateLabel<T>(projectId: string, labelId: string, body: Record<string, unknown>): Promise<T> {
+		return this.request<T>(
+			"PATCH",
+			this.workspacePath(`/projects/${projectId}/labels/${labelId}/`),
+			{ body },
+		);
+	}
+
+	/**
+	 * List a project's ARCHIVED work items. Availability varies by instance
+	 * version; returns null when the endpoint does not exist (404), so callers
+	 * can record "archived inventory unavailable" instead of failing.
+	 */
+	async listArchivedWorkItems<T>(projectId: string): Promise<T[] | null> {
+		const path = `/projects/${projectId}/archived-${this.itemsSegment}/`;
+		const probe = await this.request<PlanePage<T> | T[] | null>("GET", this.workspacePath(path), {
+			query: { per_page: 100 },
 			allowNotFound: true,
 		});
+		if (probe === null) {
+			return null;
+		}
+		return this.listAll<T>(path);
+	}
+
+	/** Archive a work item (availability varies by instance version). */
+	archiveWorkItem(projectId: string, workItemId: string): Promise<void> {
+		return this.request<void>(
+			"POST",
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/archive/`),
+		);
+	}
+
+	/** Restore an archived work item. */
+	unarchiveWorkItem(projectId: string, workItemId: string): Promise<void> {
+		return this.request<void>(
+			"DELETE",
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/archive/`),
+		);
 	}
 }
 

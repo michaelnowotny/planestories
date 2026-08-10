@@ -37,3 +37,15 @@ export class ResolverError extends Error {
 		this.name = "ResolverError";
 	}
 }
+
+/**
+ * A replication invariant failed. Fail-closed by design: snapshot reads must be
+ * complete, apply writes must land exactly where planned, and anything else
+ * surfaces as this error instead of a "mostly right" destination.
+ */
+export class ReplicateError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ReplicateError";
+	}
+}
