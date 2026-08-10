@@ -204,6 +204,15 @@ describe("codex P3 round fixes", () => {
 		);
 	});
 
+	test("maxInstant ordering is total down to sub-millisecond digits (X1)", async () => {
+		const { compareInstants } = await import("../../../src/replicate/instants.ts");
+		// Same millisecond, different microseconds: ordering must not depend on
+		// input order (a reversed API page produced a false-stale).
+		expect(compareInstants("2026-01-01T00:00:00.123456Z", "2026-01-01T00:00:00.123999Z")).toBe(-1);
+		expect(compareInstants("2026-01-01T00:00:00.123999Z", "2026-01-01T00:00:00.123456Z")).toBe(1);
+		expect(compareInstants("2026-01-01T00:00:00.123Z", "2026-01-01T00:00:00.123000Z")).toBe(0);
+	});
+
 	test("microsecond-precision instants are not conflated by millisecond parsing", async () => {
 		const { sameNullableInstant } = await import("../../../src/replicate/instants.ts");
 		expect(sameNullableInstant("2026-01-01T00:00:00.123456Z", "2026-01-01T00:00:00.123999Z")).toBe(

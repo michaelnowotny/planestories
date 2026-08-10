@@ -1,7 +1,7 @@
 import { ReplicateError } from "../errors.ts";
 import type { PlaneEndpointDialect, PlaneIssueRelations } from "../plane/client.ts";
 import { sweepFetch } from "../utils/sweep.ts";
-import { sameNullableInstant } from "./instants.ts";
+import { compareInstants, sameNullableInstant } from "./instants.ts";
 import { compactRelations } from "./snapshot.ts";
 import type { ProjectSnapshot, SnapshotRelations } from "./types.ts";
 
@@ -228,9 +228,12 @@ export function formatFreshnessReport(report: FreshnessReport, json = false): st
 }
 
 function maxInstant(values: Array<string | null>): string | null {
+	// Total order down to sub-millisecond digits: millisecond-truncated ordering
+	// made the winner depend on API row order within one millisecond, producing
+	// a false-stale with zero drifted items when compared strictly.
 	let max: string | null = null;
 	for (const value of values) {
-		if (value !== null && (max === null || Date.parse(value) > Date.parse(max))) max = value;
+		if (value !== null && (max === null || compareInstants(value, max) > 0)) max = value;
 	}
 	return max;
 }

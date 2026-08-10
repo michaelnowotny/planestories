@@ -16,3 +16,12 @@ function fractionDigits(value: string): string {
 	const match = /\.(\d+)/.exec(value);
 	return (match?.[1] ?? "").padEnd(9, "0");
 }
+
+/** Total order consistent with sameNullableInstant (ms, then fraction digits). */
+export function compareInstants(a: string, b: string): number {
+	const byMs = Date.parse(a) - Date.parse(b);
+	if (byMs !== 0) return byMs < 0 ? -1 : 1;
+	const fa = fractionDigits(a);
+	const fb = fractionDigits(b);
+	return fa < fb ? -1 : fa > fb ? 1 : 0;
+}

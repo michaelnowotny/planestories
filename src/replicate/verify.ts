@@ -331,12 +331,20 @@ function journalFacts(
 		);
 	}
 	const commentTargetBySource = new Map<string, string>();
+	const commentSourceByTarget = new Map<string, string>();
 	for (const entry of entries) {
 		if (entry.type !== "comment-created") continue;
-		if (commentTargetBySource.has(entry.sourceCommentId)) {
-			throw new ReplicateError("Verify journal has duplicate comment mappings");
+		if (
+			commentTargetBySource.has(entry.sourceCommentId) ||
+			commentSourceByTarget.has(entry.targetCommentId)
+		) {
+			// Not a bijection: two sources sharing one target would leave a target
+			// comment unexamined while counts still balance — altered content
+			// could escape verification.
+			throw new ReplicateError("Verify journal comment mapping is not one-to-one");
 		}
 		commentTargetBySource.set(entry.sourceCommentId, entry.targetCommentId);
+		commentSourceByTarget.set(entry.targetCommentId, entry.sourceCommentId);
 	}
 	return {
 		header,
@@ -383,15 +391,16 @@ function compareScalars(
 	const sourceState = snapshot.states.find((state) => state.id === source.stateId);
 	const targetStateId = referenceId(target.state);
 	const targetState = targetStateId ? statesById.get(targetStateId) : undefined;
-	// Apply ADOPTS states case-insensitively by (name, group) without patching
-	// casing — verify must mirror that rule or a legitimate apply cannot pass.
+	// Apply adopts states by case-insensitive NAME but EXACT group (Plane groups
+	// are a fixed lowercase enum) — verify mirrors exactly that: name casing
+	// drift is a warning, any group difference is a failure.
 	const lower = (value: string | null | undefined) => value?.toLowerCase() ?? null;
 	if (lower(sourceState?.name) !== lower(targetState?.name)) {
 		add(itemFinding("state", "failure", source, target.id, "State name mismatch"));
 	} else if ((sourceState?.name ?? null) !== (targetState?.name ?? null)) {
 		add(itemFinding("state", "warning", source, target.id, "State name casing differs"));
 	}
-	if (lower(sourceState?.group) !== lower(targetState?.group)) {
+	if ((sourceState?.group ?? null) !== (targetState?.group ?? null)) {
 		add(itemFinding("state", "failure", source, target.id, "State group mismatch"));
 	}
 	if (sourceState && targetState && sourceState.color !== (targetState.color ?? "")) {
@@ -588,12 +597,22 @@ async function compareComments(
 				);
 				continue;
 			}
+			// Apply generated a footer ONLY when native authorship was unavailable
+			// (same predicate as buildCommentBody). Stripping unconditionally would
+			// delete legitimate content from a source comment that itself ends in a
+			// footer-shaped paragraph (e.g. re-replicating a replicated board).
+			const nativeAuthor =
+				facts.probe.commentCreatedByAccepted === true &&
+				mappedCreator(comment.createdBy, snapshot, targetMemberByEmail) !== null;
+			const applyWroteFooter = !nativeAuthor || facts.probe.commentCreatedAtAccepted !== true;
 			compareHtml(
 				"comments",
 				item,
 				target,
 				comment.commentHtml,
-				stripCommentFooter(target.comment_html ?? ""),
+				applyWroteFooter
+					? stripCommentFooter(target.comment_html ?? "")
+					: (target.comment_html ?? ""),
 				add,
 			);
 			compareCommentAuthorship(
@@ -911,10 +930,6 @@ function stripCommentFooter(html: string): string {
 			.replace(/<p\b[^>]*><em>— replicated from [\s\S]*?<\/em><\/p>\s*$/i, "")
 			.trim()
 	);
-}
-
-function escapeHtmlChar(char: string): string {
-	return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]!;
 }
 
 function hosts(baseUrl: string): Set<string> {

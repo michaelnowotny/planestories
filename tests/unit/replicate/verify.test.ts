@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ApplyOptions, applySnapshot } from "../../../src/replicate/apply.ts";
+import { Journal } from "../../../src/replicate/journal.ts";
 import { computeSnapshotDigest } from "../../../src/replicate/snapshot.ts";
 import { verifySnapshot } from "../../../src/replicate/verify.ts";
 import { type FakeItem, FakePlane } from "./fake-plane.ts";
@@ -173,6 +174,91 @@ describe("replicate verify", () => {
 			expect(
 				report.findings.some(
 					(finding) => finding.check === "state" && /casing/.test(finding.message),
+				),
+			).toBeTrue();
+		} finally {
+			ctx.cleanup();
+		}
+	});
+
+	test("rejects a journal whose comment mapping is not one-to-one (X2)", async () => {
+		const ctx = await applied();
+		try {
+			// Forge a second source comment mapped to an ALREADY-USED target id.
+			const journal = Journal.open(ctx.journalPath, {
+				snapshotDigest: ctx.snapshot.digest,
+				targetBaseUrl: ctx.fake.baseUrl,
+				targetWorkspaceSlug: ctx.fake.workspaceSlug,
+			});
+			const existing = journal.entries.find(
+				(entry): entry is Extract<(typeof journal.entries)[number], { type: "comment-created" }> =>
+					entry.type === "comment-created",
+			)!;
+			journal.append({
+				type: "comment-created",
+				sourceCommentId: "forged-source",
+				targetCommentId: existing.targetCommentId,
+			});
+			journal.close();
+			await expect(
+				verifySnapshot(ctx.fake, ctx.snapshot, { journalPath: ctx.journalPath }),
+			).rejects.toThrow(/one-to-one/);
+		} finally {
+			ctx.cleanup();
+		}
+	});
+
+	test("a native comment whose real content ends footer-shaped is not mutilated (X3)", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "planestories-verify-"));
+		const fake = new FakePlane();
+		const snapshot = sampleSnapshot();
+		const item1 = snapshot.items.find((item) => item.sequenceId === 1)!;
+		snapshot.comments[item1.id] = [
+			{
+				id: "comment-footerish",
+				commentHtml:
+					"<p>real content</p><p><em>— replicated from LEGACY; original author Bob, 2020-01-01</em></p>",
+				createdAt: "2024-01-01T00:00:00Z",
+				createdBy: "source-mapped", // native path: apply writes NO footer
+			},
+		];
+		snapshot.digest = computeSnapshotDigest(snapshot);
+		const journalPath = join(dir, "apply.jsonl");
+		try {
+			await applySnapshot(fake, snapshot, {
+				yes: true,
+				flags,
+				journalPath,
+				toolVersion: "test",
+				runId: "verify-test",
+				sleep: async () => {},
+			});
+			const report = await verifySnapshot(fake, snapshot, { journalPath });
+			expect(
+				report.findings.filter(
+					(finding) => finding.check === "comments" && finding.severity === "failure",
+				),
+			).toEqual([]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("state GROUP differences are failures even when only casing differs (X4)", async () => {
+		const ctx = await applied();
+		try {
+			for (const state of ctx.project.states.values()) {
+				if (state.name === "Backlog") state.group = "Backlog".toUpperCase();
+			}
+			const report = await verifySnapshot(ctx.fake, ctx.snapshot, {
+				journalPath: ctx.journalPath,
+			});
+			expect(
+				report.findings.some(
+					(finding) =>
+						finding.check === "state" &&
+						finding.severity === "failure" &&
+						/group/i.test(finding.message),
 				),
 			).toBeTrue();
 		} finally {
