@@ -68,8 +68,9 @@ reaches Plane.
   click empty space / ✕ / Esc to unlock. Drag pans; dragging a node moves it (the layout gently
   reheats); wheel zooms (never past fit).
 - **Minimap** (top right): the whole field with the viewport rectangle; click or drag to navigate.
-- **Chips row**: status groups (✦ in their world hue), labels, and ▲ flagged-only — all wired, plus one chip per assignee (`@name` / `@ unassigned`).
-  filters that dim non-matching planets.
+- **Chips row**: status groups (✦ in their world hue), labels, one chip per assignee
+  (`@name` / `@ unassigned`), and ▲ flagged-only — all wired filters that dim
+  non-matching planets.
 
 ## The sidebar
 

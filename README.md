@@ -401,11 +401,12 @@ Reconcile a project (dry-run by default; `--yes` to apply). Keeps a board tidy a
 completes on it:
 
 ```
-planestories groom --project <name> [--yes] [--write-back stories/]
+planestories groom --project <name> [--yes]
+planestories groom --project <name> --write-back stories/*.md [--yes]
 ```
 
-`--write-back` also pulls board-side acceptance-criteria checkbox state back into the
-given story files.
+`--write-back <files…>` is a separate, file-only mode: INSTEAD of board grooming, it
+pulls board-side acceptance-criteria checkbox state back into the given story files.
 
 - **Closes orphaned criterion sub-items** — an open `--sync-criteria` sub-item whose parent
   is Done/Cancelled is moved to a completed state, with an idempotent "auto-closed with parent"
