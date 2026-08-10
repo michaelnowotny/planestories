@@ -21,14 +21,16 @@ config-file entries); omitted = the bare `PLANE_*` environment.
 
 ## What the snapshot is
 
-Everything needed to rebuild the project — project settings, states, labels,
-members (for email mapping), every work item (including archived) with raw
-`description_html`, relations of all kinds, comments, and the **sequence map**
-(present numbers + gaps) — under a content sha256 **digest**. It is deterministic
-and diff-stable, so it doubles as a **full project backup**. It contains all board
-content: treat it as data; don't commit it to shared repos by default. `apply`
-recomputes the digest and refuses edited/corrupted files — re-snapshot instead of
-hand-editing.
+Everything replicate carries (see Fidelity below for exactly what that is) —
+project settings, states, labels, members (for email mapping), every work item
+(including archived) with raw `description_html`, relations of all kinds,
+comments, and the **sequence map** (present numbers + gaps) — under a content
+sha256 **digest**. It is deterministic and diff-stable, so it doubles as a
+**backup of everything it carries** (NOT of attachments, cycles, modules, pages,
+activity history, or reactions — those are outside snapshot schema v1). It holds
+board content: treat it as data; don't commit it to shared repos by default.
+`apply` recomputes the digest and refuses edited/corrupted files — re-snapshot
+instead of hand-editing.
 
 Snapshot reads are paced (two-phase sweep) and **fail hard on any partial read**:
 a snapshot missing relations or comments is never written.

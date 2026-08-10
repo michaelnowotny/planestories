@@ -173,6 +173,22 @@ export class Journal {
 		if (this.closed) {
 			throw new ReplicateError(`Cannot append to closed journal ${this.path}`);
 		}
+		// Ownership backstop: the rename-steal narrows but cannot fully close the
+		// two-delayed-stealers race without kernel flock (unavailable without
+		// native deps). Re-checking the lock before EVERY durable fact means a
+		// process on the losing side of a steal stops at its next append instead
+		// of continuing to mutate a journal another process now owns.
+		let holder: string;
+		try {
+			holder = readFileSync(this.lockPath, "utf8").trim();
+		} catch {
+			holder = "";
+		}
+		if (holder !== String(process.pid)) {
+			throw new ReplicateError(
+				`Journal lock for ${this.path} is no longer held by this process (holder: ${holder || "none"}) — refusing to write.`,
+			);
+		}
 		writeSync(this.fd, `${JSON.stringify(entry)}\n`);
 		fsyncSync(this.fd);
 		this.entries.push(entry);
@@ -317,6 +333,24 @@ function acquireLock(path: string, warn?: (message: string) => void): string {
 			try {
 				renameSync(lockPath, staleName);
 			} catch {
+				continue;
+			}
+			// rename operates by PATH, so a delayed stealer can grab a lock that
+			// was REPLACED since it read the stale pid. Verify we renamed the lock
+			// we examined; if not, restore it and retry. (The remaining sub-ms
+			// third-party window is why append() re-checks ownership per fact.)
+			let stolen: string;
+			try {
+				stolen = readFileSync(staleName, "utf8").trim();
+			} catch {
+				stolen = "";
+			}
+			if (stolen !== raw) {
+				try {
+					renameSync(staleName, lockPath);
+				} catch {
+					// The victim may have re-created its lock; leave the debris.
+				}
 				continue;
 			}
 			warn?.(`Replacing stale replication journal lock ${lockPath} (pid ${raw || "unknown"})`);

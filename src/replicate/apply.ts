@@ -320,7 +320,14 @@ async function createOrAdoptProject(
 		);
 		if (existing) {
 			const items = await client.listWorkItems<RawItem>(existing.id);
-			if (existing.name === destName && items.length === 0) {
+			// The emptiness proof must include the ARCHIVED inventory: a foreign
+			// same-name project can look empty on the live list while holding
+			// archived history that adoption would mutate and --recreate-target
+			// would later delete. An unavailable archived endpoint cannot prove
+			// emptiness — fail closed (the operator removes the orphan manually).
+			const archived = await client.listArchivedWorkItems<RawItem>(existing.id);
+			const provablyEmpty = items.length === 0 && archived !== null && archived.length === 0;
+			if (existing.name === destName && provablyEmpty) {
 				journal.append({
 					type: "project-created",
 					projectId: existing.id,
@@ -332,8 +339,9 @@ async function createOrAdoptProject(
 			throw new ReplicateError(
 				`Project ${existing.id} holds identifier ${destIdentifier} but does not fingerprint as ` +
 					`this run's ambiguous create (name ${JSON.stringify(existing.name ?? "")} vs ` +
-					`${JSON.stringify(destName)}, ${items.length} item(s)). Refusing to adopt it — ` +
-					"remove it manually or pick a different --dest-identifier.",
+					`${JSON.stringify(destName)}, ${items.length} live item(s), ` +
+					`${archived === null ? "archived inventory unavailable" : `${archived.length} archived item(s)`}). ` +
+					"Refusing to adopt it — remove it manually or pick a different --dest-identifier.",
 			);
 		}
 	} else {
@@ -798,7 +806,10 @@ async function createCommentA10(
 			let found: RawComment | null;
 			try {
 				found = await findComment(client, projectId, itemId, comment, built);
-			} catch {
+			} catch (reconcileError) {
+				// An ambiguity verdict from reconciliation is a real finding;
+				// only reconcile-READ failures fall back to the original error.
+				if (reconcileError instanceof ReplicateError) throw reconcileError;
 				throw error;
 			}
 			if (found) return { id: found.id };
@@ -824,11 +835,23 @@ async function findComment(
 		// created_at when it is a durable (natively preserved) key.
 	}
 	if (built.createdAtNative) {
-		// Every comment on a run-created item is ours, and source timestamps are
-		// unique per item, so a natively preserved created_at identifies the
-		// comment regardless of how the target rewrote the HTML.
-		return (
-			comments.find((comment) => sameNullableInstant(comment.created_at, built.createdAt)) ?? null
+		// A natively preserved created_at identifies the comment regardless of
+		// how the target rewrote the HTML — but ONLY while it is unique among
+		// the item's comments. Nothing enforces per-item timestamp uniqueness in
+		// the source, so ambiguity is narrowed by the surviving content prefix
+		// and otherwise FAILS CLOSED: guessing could journal the wrong comment
+		// as created and silently swallow its sibling.
+		const byInstant = comments.filter((comment) =>
+			sameNullableInstant(comment.created_at, built.createdAt),
+		);
+		if (byInstant.length <= 1) return byInstant[0] ?? null;
+		const narrowed = byInstant.filter((comment) =>
+			(comment.comment_html ?? "").startsWith(built.htmlPrefix),
+		);
+		if (narrowed.length === 1) return narrowed[0] ?? null;
+		throw new ReplicateError(
+			`Cannot distinguish the committed comment among ${byInstant.length} comments sharing ` +
+				`created_at ${built.createdAt} — refusing to guess. Recover with --recreate-target.`,
 		);
 	}
 	if (built.marker) return null;

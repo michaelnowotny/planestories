@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PlaneApiError } from "../../../src/errors.ts";
 import { type ApplyOptions, applySnapshot } from "../../../src/replicate/apply.ts";
 import { Journal } from "../../../src/replicate/journal.ts";
+import { computeSnapshotDigest } from "../../../src/replicate/snapshot.ts";
 import { type FakeItem, FakePlane } from "./fake-plane.ts";
 import { sampleSnapshot } from "./fixtures.ts";
 
@@ -335,6 +336,104 @@ describe("replication apply", () => {
 			expect(
 				[...fake.projectByIdentifier("SRC")!.items.values()].map((item) => item.sequence_id).sort(),
 			).toEqual([1, 3, 5, 6, 7]);
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("refuses to adopt a same-name project whose only items are archived", async () => {
+		// The zero-items fingerprint must include the ARCHIVED inventory: a
+		// foreign project can look empty on the live list while holding archived
+		// history that adoption would silently mutate and --recreate-target
+		// would later delete.
+		const ctx = context();
+		const fake = new FakePlane();
+		const snapshot = sampleSnapshot();
+		fake.failProjectCreateCommittedFor = "SRC";
+		try {
+			await expect(applySnapshot(fake, snapshot, ctx.options)).rejects.toThrow(/ambiguous/);
+			// Plant archived history in the orphan before the resume.
+			const orphan = fake.projectByIdentifier("SRC")!;
+			const ghost = await fake.createWorkItem<{ id: string }>(orphan.id, { name: "history" });
+			await fake.archiveWorkItem(orphan.id, ghost.id);
+			await expect(applySnapshot(fake, snapshot, ctx.options)).rejects.toThrow(/Refusing to adopt/);
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("comment adoption fails closed when two source comments share a timestamp", async () => {
+		// created_at is only a durable adoption key while it is UNIQUE among the
+		// item's comments. With a duplicate timestamp, adopting "whichever
+		// matched first" could journal the WRONG comment as created and silently
+		// swallow the other.
+		const ctx = context();
+		const fake = new FakePlane();
+		fake.sanitizeCommentHtml = true;
+		const snapshot = sampleSnapshot();
+		const item1 = snapshot.items.find((item) => item.sequenceId === 1)!;
+		snapshot.comments[item1.id] = [
+			{
+				id: "comment-dup-a",
+				commentHtml: "<p>first twin</p>",
+				createdAt: "2024-03-03T03:03:03Z",
+				createdBy: "source-missing",
+			},
+			{
+				id: "comment-dup-b",
+				commentHtml: "<p>second twin</p>",
+				createdAt: "2024-03-03T03:03:03Z",
+				createdBy: "source-missing",
+			},
+		];
+		snapshot.digest = computeSnapshotDigest(snapshot);
+		fake.failCommentCreateCommittedMatch = "second twin";
+		fake.failCommentListMatch = "second twin";
+		try {
+			await expect(applySnapshot(fake, snapshot, ctx.options)).rejects.toThrow(/ambiguous/);
+			// Resume: created_at matches BOTH twins; the surviving content prefix
+			// disambiguates → correct adoption, no duplicate, no guess.
+			const resumed = await applySnapshot(fake, snapshot, ctx.options);
+			expect(resumed.complete).toBeTrue();
+			const allComments = [...fake.projectByIdentifier("SRC")!.comments.values()].flat();
+			expect(allComments).toHaveLength(3);
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("comment adoption fails closed on truly indistinguishable twins", async () => {
+		// Same created_at AND same content: no field can say which stored
+		// comment is which source comment — guessing could journal the wrong
+		// one as created and silently swallow its sibling.
+		const ctx = context();
+		const fake = new FakePlane();
+		fake.sanitizeCommentHtml = true;
+		const snapshot = sampleSnapshot();
+		const item1 = snapshot.items.find((item) => item.sequenceId === 1)!;
+		snapshot.comments[item1.id] = [
+			{
+				id: "comment-clone-a",
+				commentHtml: "<p>identical clone</p>",
+				createdAt: "2024-03-03T03:03:03Z",
+				createdBy: "source-missing",
+			},
+			{
+				id: "comment-clone-b",
+				commentHtml: "<p>identical clone</p>",
+				createdAt: "2024-03-03T03:03:03Z",
+				createdBy: "source-missing",
+			},
+		];
+		snapshot.digest = computeSnapshotDigest(snapshot);
+		fake.failCommentCreateCommittedMatch = "identical clone";
+		fake.failCommentCreateCommittedSkip = 1; // first clone lands; the SECOND is ambiguous
+		fake.failCommentListMatch = "identical clone";
+		try {
+			await expect(applySnapshot(fake, snapshot, ctx.options)).rejects.toThrow(/ambiguous/);
+			await expect(applySnapshot(fake, snapshot, ctx.options)).rejects.toThrow(
+				/[Cc]annot distinguish/,
+			);
 		} finally {
 			rmSync(ctx.dir, { recursive: true, force: true });
 		}

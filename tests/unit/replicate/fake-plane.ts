@@ -70,6 +70,8 @@ export class FakePlane {
 	failProjectCreateCommittedFor: string | null = null;
 	/** Comment create whose HTML contains THIS substring commits, response lost (once). */
 	failCommentCreateCommittedMatch: string | null = null;
+	/** Skip this many matching creates before failCommentCreateCommittedMatch fires. */
+	failCommentCreateCommittedSkip = 0;
 	/**
 	 * Comment list fails transiently (once) when the item's stored comments
 	 * contain THIS substring — simulates dying inside the reconciliation read
@@ -407,8 +409,12 @@ export class FakePlane {
 			this.failCommentCreateCommittedMatch !== null &&
 			rawHtml.includes(this.failCommentCreateCommittedMatch)
 		) {
-			this.failCommentCreateCommittedMatch = null;
-			throw new PlaneApiError("ambiguous network failure after comment commit");
+			if (this.failCommentCreateCommittedSkip > 0) {
+				this.failCommentCreateCommittedSkip--;
+			} else {
+				this.failCommentCreateCommittedMatch = null;
+				throw new PlaneApiError("ambiguous network failure after comment commit");
+			}
 		}
 		return { ...comment } as T;
 	}

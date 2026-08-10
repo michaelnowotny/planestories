@@ -120,6 +120,22 @@ describe("replication journal", () => {
 		}
 	});
 
+	test("append aborts when the lock has been stolen (ownership re-checked per fact)", () => {
+		// The rename-steal narrows but cannot eliminate the two-delayed-stealers
+		// race without kernel flock. The backstop: every append re-reads the lock
+		// and refuses to write a fact once another pid holds it, so a process on
+		// the losing side of a steal stops at its next durable operation.
+		const temp = tempJournal();
+		try {
+			const journal = Journal.create(temp.path, header());
+			writeFileSync(`${temp.path}.lock`, "99999999");
+			expect(() => journal.append({ type: "cleanup-started" })).toThrow(/lock/);
+			journal.close();
+		} finally {
+			rmSync(temp.dir, { recursive: true, force: true });
+		}
+	});
+
 	test("derives intents, placeholders, and one-way latches", () => {
 		const temp = tempJournal();
 		try {
