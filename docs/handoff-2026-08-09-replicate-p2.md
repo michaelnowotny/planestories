@@ -44,9 +44,17 @@ core**, then P3 (verify + relink), P4 (rehearsals).
 
 ## 3. P2 — what to build (the design doc is authoritative; these are the load-bearing bits)
 
-`replicate --from <ctx> --to <ctx> --project P [--yes] [--limit N] [--dest-name X]
-[--dest-identifier Y]`, dry-run default. Phases: probe → plan/manifests → shell → items →
-parents → relations → comments → verify+cleanup. Non-negotiable commitments (operator- and
+**⚠ AMENDED 2026-08-09 (operator, after this handoff was first written): the pipeline is
+TWO commands around an on-disk SNAPSHOT FILE** — `replicate snapshot --from <ctx> -o f.json`
+(the one expensive paced read; versioned, self-contained, diff-stable JSON incl. sequence
+map, archived inventory, dialect, digest) and `replicate apply --to <ctx> --snapshot f.json`
+(the entire phased writer, ZERO source reads — retries and writer iteration are free against
+the rate limiter; dry-run = file + target probe only). `replicate --from --to` remains as
+the one-shot chaining both (file persisted + path printed). Journal binds to the snapshot
+digest; freeze is only needed DURING snapshot; a cheap freshness check (counts + max
+updated_at vs snapshot) gates CUTOVER, with verify-vs-file as the workhorse. Full rationale:
+design doc Addendum 2. Phases within apply: probe → manifests → shell → items → parents →
+relations → comments → verify+cleanup. Non-negotiable commitments (operator- and
 review-locked):
 
 - **Fail-closed pre-write gate (operator Q5):** feasibility of exact identifiers is decided
