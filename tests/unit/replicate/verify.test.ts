@@ -156,6 +156,30 @@ describe("replicate verify", () => {
 		}
 	});
 
+	test("state name casing differences warn instead of failing (C5)", async () => {
+		const ctx = await applied();
+		try {
+			for (const state of ctx.project.states.values()) {
+				state.name = state.name.toUpperCase();
+			}
+			const report = await verifySnapshot(ctx.fake, ctx.snapshot, {
+				journalPath: ctx.journalPath,
+			});
+			expect(
+				report.findings.filter(
+					(finding) => finding.check === "state" && finding.severity === "failure",
+				),
+			).toEqual([]);
+			expect(
+				report.findings.some(
+					(finding) => finding.check === "state" && /casing/.test(finding.message),
+				),
+			).toBeTrue();
+		} finally {
+			ctx.cleanup();
+		}
+	});
+
 	test("still refuses live-only verify when the snapshot carries archived items", async () => {
 		const ctx = await applied((fake) => {
 			fake.archivedEndpointAvailable = false;
@@ -386,7 +410,11 @@ describe("replicate verify", () => {
 			const exportFile = join(dir, "export.md");
 			writeFileSync(exportFile, "## Item 1\n```yaml\nplane_identifier: SRC-1\n```\nbody\n");
 			const happy = await verifySnapshot(fake, snapshot, { journalPath, exportFile });
-			expect(happy.findings.some((finding) => finding.check === "export-file")).toBeFalse();
+			// A one-story export of a five-item board: no absence/title findings,
+			// only the advisory partial-coverage note.
+			const happyExport = happy.findings.filter((finding) => finding.check === "export-file");
+			expect(happyExport).toHaveLength(1);
+			expect(happyExport[0]?.message).toContain("not present in the export file");
 			writeFileSync(exportFile, "## Wrong title\n```yaml\nplane_identifier: SRC-1\n```\nbody\n");
 			const report = await verifySnapshot(fake, snapshot, { journalPath, exportFile });
 			expect(report.counts.assets.sourceInstance).toBe(1);

@@ -4,9 +4,9 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
 	renameSync,
 	rmSync,
-	statSync,
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
@@ -25,6 +25,12 @@ export interface RelinkOptions {
 	paths: string[];
 	journalPath: string;
 	yes: boolean;
+	/**
+	 * Overrides the journal header's destination identifier for the
+	 * plane_identifier rewrites — required after `rename-project --identifier`
+	 * on the target, whose new prefix the immutable journal cannot know.
+	 */
+	destIdentifierOverride?: string;
 }
 
 export interface RelinkFileResult {
@@ -63,7 +69,12 @@ export function relinkMarkdownCorpus(
 ): RelinkResult {
 	const files = collectMarkdownFiles(options.paths);
 	const entries = readJournal(options.journalPath);
-	const { header, mapping } = buildMapping(entries, target, snapshot);
+	const { header, mapping } = buildMapping(
+		entries,
+		target,
+		snapshot,
+		options.destIdentifierOverride,
+	);
 	const prepared: PreparedFile[] = files.map((path) => prepareFile(path, mapping, header));
 	if (options.yes) {
 		for (const file of prepared) {
@@ -85,6 +96,7 @@ function buildMapping(
 	entries: JournalEntry[],
 	target: RelinkTarget,
 	snapshot: ProjectSnapshot,
+	destIdentifierOverride?: string,
 ): { header: JournalHeader; projectId: string; mapping: Map<string, Mapping> } {
 	const header = entries[0];
 	if (!header || header.type !== "header") throw new ReplicateError("Relink journal has no header");
@@ -114,7 +126,7 @@ function buildMapping(
 		}
 		mapping.set(entry.sourceItemId, {
 			targetId: entry.targetItemId,
-			identifier: `${header.destIdentifier}-${entry.seq}`,
+			identifier: `${destIdentifierOverride ?? header.destIdentifier}-${entry.seq}`,
 			url: target.workItemWebUrl(projectId, entry.targetItemId),
 		});
 	}
@@ -153,7 +165,9 @@ function prepareFile(
 				["plane_url", story.planeUrl, target.url],
 			] as const) {
 				if (oldValue === null) continue;
-				yaml = yaml.replace(new RegExp(`^(\\s*${field}:\\s*)(.*)$`, "m"), (line, prefix, raw) => {
+				// TOP-LEVEL keys only (column 0): an indented nested mapping line
+				// carrying the same value must never be the rewrite target.
+				yaml = yaml.replace(new RegExp(`^(${field}:\\s*)(.*)$`, "m"), (line, prefix, raw) => {
 					if (!scalarEquals(String(raw), oldValue)) return line;
 					rewrites++;
 					return `${prefix}${newValue}`;
@@ -188,22 +202,37 @@ function scalarEquals(raw: string, expected: string): boolean {
 
 function collectMarkdownFiles(paths: string[]): string[] {
 	const out = new Set<string>();
-	const visit = (path: string): void => {
-		let stat: ReturnType<typeof statSync>;
+	const visitedDirs = new Set<string>();
+	const visit = (path: string, explicit: boolean): void => {
+		let lstat: ReturnType<typeof lstatSync>;
 		try {
-			stat = statSync(path);
+			lstat = lstatSync(path);
 		} catch {
 			throw new ReplicateError(`Relink path does not exist: ${path}`);
 		}
-		if (stat.isFile()) {
+		if (lstat.isSymbolicLink()) {
+			// A rename-over-symlink would replace the LINK with a regular file and
+			// leave the referent untouched — silent corruption of intent. Explicit
+			// symlink arguments fail loudly; ones found during traversal are skipped.
+			if (explicit) {
+				throw new ReplicateError(
+					`Relink refuses symlink ${path}: pass the resolved target path instead.`,
+				);
+			}
+			return;
+		}
+		if (lstat.isFile()) {
 			if (extname(path).toLowerCase() === ".md") out.add(path);
 			return;
 		}
-		if (!stat.isDirectory())
+		if (!lstat.isDirectory())
 			throw new ReplicateError(`Relink path is not a file or directory: ${path}`);
-		for (const entry of readdirSync(path).sort()) visit(join(path, entry));
+		const real = realpathSync(path);
+		if (visitedDirs.has(real)) return;
+		visitedDirs.add(real);
+		for (const entry of readdirSync(path).sort()) visit(join(path, entry), false);
 	};
-	for (const path of paths) visit(path);
+	for (const path of paths) visit(path, true);
 	return [...out].sort();
 }
 

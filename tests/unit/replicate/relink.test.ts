@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JournalEntry } from "../../../src/replicate/journal.ts";
@@ -147,6 +147,72 @@ describe("replicate relink", () => {
 			});
 			expect(result.filesChanged).toBe(1);
 			expect(readFileSync(path, "utf8")).toContain("plane_id: target-1");
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("codex P3 relink fixes", () => {
+	test("an indented nested line with the same value is never the rewrite target (C2)", () => {
+		const ctx = fixture();
+		const path = join(ctx.dir, "nested.md");
+		writeFileSync(
+			path,
+			"## Story\n```yaml\nmeta:\n  plane_id: source-1\nplane_id: source-1\n```\n",
+		);
+		try {
+			relinkMarkdownCorpus(target, ctx.snapshot, {
+				paths: [path],
+				journalPath: ctx.journalPath,
+				yes: true,
+			});
+			const actual = readFileSync(path, "utf8");
+			expect(actual).toContain("  plane_id: source-1");
+			expect(actual).toContain("\nplane_id: target-1");
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("--dest-identifier override wins over the journal header prefix (C4)", () => {
+		const ctx = fixture();
+		const path = join(ctx.dir, "stories.md");
+		writeFileSync(path, "## Story\n```yaml\nplane_id: source-1\nplane_identifier: SRC-1\n```\n");
+		try {
+			relinkMarkdownCorpus(target, ctx.snapshot, {
+				paths: [path],
+				journalPath: ctx.journalPath,
+				yes: true,
+				destIdentifierOverride: "RENAMED",
+			});
+			expect(readFileSync(path, "utf8")).toContain("plane_identifier: RENAMED-1");
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("explicit symlink arguments are refused; traversal skips symlinks (C6)", () => {
+		const ctx = fixture();
+		const realFile = join(ctx.dir, "real.md");
+		writeFileSync(realFile, "## Story\n```yaml\nplane_id: source-1\n```\n");
+		const link = join(ctx.dir, "link.md");
+		symlinkSync(realFile, link);
+		try {
+			expect(() =>
+				relinkMarkdownCorpus(target, ctx.snapshot, {
+					paths: [link],
+					journalPath: ctx.journalPath,
+					yes: false,
+				}),
+			).toThrow(/symlink/);
+			const result = relinkMarkdownCorpus(target, ctx.snapshot, {
+				paths: [ctx.dir],
+				journalPath: ctx.journalPath,
+				yes: false,
+			});
+			expect(result.files.map((file) => file.path)).toContain(realFile);
+			expect(result.files.map((file) => file.path)).not.toContain(link);
 		} finally {
 			rmSync(ctx.dir, { recursive: true, force: true });
 		}

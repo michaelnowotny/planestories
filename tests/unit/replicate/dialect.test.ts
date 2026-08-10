@@ -189,3 +189,31 @@ describe("relation reference normalization", () => {
 		expect(snapshot.relations["item-a"]?.blocked_by).toEqual(["item-b"]);
 	});
 });
+
+describe("codex P3 round fixes", () => {
+	test("duplicate attribute names disable sort-normalization (order stays semantic)", async () => {
+		const { normalizeHtmlForCompare } = await import("../../../src/replicate/verify.ts");
+		// <a href=safe href=evil> vs reversed: browsers honor the FIRST href, so
+		// sorting would erase a real semantic difference.
+		const a = '<a href="safe" href="evil">x</a>';
+		const b = '<a href="evil" href="safe">x</a>';
+		expect(normalizeHtmlForCompare(a)).not.toBe(normalizeHtmlForCompare(b));
+		// Duplicate-free tags still normalize order-insensitively.
+		expect(normalizeHtmlForCompare('<a b="1" a="2">x</a>')).toBe(
+			normalizeHtmlForCompare('<a a="2" b="1">x</a>'),
+		);
+	});
+
+	test("microsecond-precision instants are not conflated by millisecond parsing", async () => {
+		const { sameNullableInstant } = await import("../../../src/replicate/instants.ts");
+		expect(sameNullableInstant("2026-01-01T00:00:00.123456Z", "2026-01-01T00:00:00.123999Z")).toBe(
+			false,
+		);
+		expect(sameNullableInstant("2026-01-01T00:00:00.123Z", "2026-01-01T00:00:00.123000Z")).toBe(
+			true,
+		);
+		expect(sameNullableInstant("2026-01-01T00:00:00Z", "2026-01-01T00:00:00.000Z")).toBe(true);
+		expect(sameNullableInstant(null, null)).toBe(true);
+		expect(sameNullableInstant("2026-01-01T00:00:00Z", null)).toBe(false);
+	});
+});

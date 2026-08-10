@@ -365,6 +365,10 @@ export function registerReplicateCommand(program: Command) {
 		.requiredOption("--snapshot <file>", "Snapshot file produced by `replicate snapshot`")
 		.option("--journal <path>", "Apply journal path (default: derived from snapshot)")
 		.option("--yes", "Apply rewrites (default: dry-run)")
+		.option(
+			"--dest-identifier <id>",
+			"Override the journal's destination identifier for plane_identifier rewrites (use after rename-project)",
+		)
 		.argument("<paths...>", "Markdown files and/or directories")
 		.action(async (paths: string[], options) => {
 			try {
@@ -375,6 +379,7 @@ export function registerReplicateCommand(program: Command) {
 				const result = relinkMarkdownCorpus(client, snapshot, {
 					paths,
 					journalPath,
+					destIdentifierOverride: options.destIdentifier,
 					yes: options.yes === true,
 				});
 				console.log(formatRelinkResult(result));
@@ -390,6 +395,8 @@ export function registerReplicateCommand(program: Command) {
 		.requiredOption("--from <ctx>", `Source: ${CONTEXT_HELP}`)
 		.requiredOption("--snapshot <file>", "Snapshot file produced by `replicate snapshot`")
 		.option("--json", "Machine-readable report")
+		.option("--deep", "Also compare comments and relations (paced per-item reads)")
+		.option("--concurrency <n>", "Paced read concurrency for --deep (default 4)")
 		.action(async (options) => {
 			try {
 				const snapshot = await readSnapshotFile(options.snapshot);
@@ -402,7 +409,10 @@ export function registerReplicateCommand(program: Command) {
 						"Freshness source context does not match snapshot.source base URL and workspace",
 					);
 				}
-				const report = await checkFreshness(withDialect(base, snapshot.source.dialect), snapshot);
+				const report = await checkFreshness(withDialect(base, snapshot.source.dialect), snapshot, {
+					deep: options.deep === true,
+					concurrency: parseConcurrency(options.concurrency),
+				});
 				console.log(formatFreshnessReport(report, options.json === true));
 				if (!report.fresh) process.exitCode = 1;
 			} catch (error) {

@@ -348,7 +348,7 @@ function buildSequenceMap(items: SnapshotItem[]): SequenceMap {
 	return { max, present, gaps };
 }
 
-function compactRelations(value: PlaneIssueRelations): SnapshotRelations | null {
+export function compactRelations(value: PlaneIssueRelations): SnapshotRelations | null {
 	const compact: SnapshotRelations = {};
 	let any = false;
 	for (const kind of RELATION_KINDS) {

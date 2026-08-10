@@ -9,6 +9,7 @@ import {
 } from "../plane/client.ts";
 import { sweepFetch } from "../utils/sweep.ts";
 import { canonicalRelations } from "./apply.ts";
+import { sameNullableInstant } from "./instants.ts";
 import { type JournalEntry, type JournalHeader, readJournal } from "./journal.ts";
 import type { TargetProbeResult } from "./probe.ts";
 import type { ProjectSnapshot, SnapshotComment, SnapshotItem } from "./types.ts";
@@ -114,6 +115,8 @@ interface JournalFacts {
 	projectId: string;
 	targetBySource: Map<string, { id: string; seq: number }>;
 	sourceByTarget: Map<string, string>;
+	/** Source comment UUID -> target comment UUID (journal comment-created facts). */
+	commentTargetBySource: Map<string, string>;
 }
 
 /** Normalize harmless HTML serialization differences before exact comparison. */
@@ -122,11 +125,19 @@ export function normalizeHtmlForCompare(html: string): string {
 		.replace(/<([A-Za-z][\w:-]*)([^<>]*?)>/g, (_tag, name: string, raw: string) => {
 			if (raw.trim().startsWith("/")) return `<${name}${raw}>`;
 			const selfClosing = /\/\s*$/.test(raw);
-			const attrs = [...raw.matchAll(/([^\s=/>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?/g)]
-				.filter((match) => !match[1]?.toLowerCase().startsWith("data-psrepl-"))
+			const parsed = [...raw.matchAll(/([^\s=/>]+)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?/g)].filter(
+				(match) => !match[1]?.toLowerCase().startsWith("data-psrepl-"),
+			);
+			// Duplicate attribute names change effective browser semantics by ORDER
+			// (<a href=safe href=evil>): sorting would erase that difference, so a
+			// duplicate-carrying tag keeps its original attribute order and compares
+			// raw (fail-closed on reordering).
+			const names = parsed.map((match) => match[1]?.toLowerCase());
+			const hasDuplicates = new Set(names).size !== names.length;
+			const rendered = parsed
 				.map((match) => (match[2] === undefined ? match[1] : `${match[1]}=${match[2]}`))
-				.filter((value): value is string => value !== undefined)
-				.sort((a, b) => a.localeCompare(b));
+				.filter((value): value is string => value !== undefined);
+			const attrs = hasDuplicates ? rendered : [...rendered].sort((a, b) => a.localeCompare(b));
 			return `<${name}${attrs.length > 0 ? ` ${attrs.join(" ")}` : ""}${selfClosing ? " /" : ""}>`;
 		})
 		.replace(/>\s+</g, "><")
@@ -319,12 +330,21 @@ function journalFacts(
 			`Verify journal item mapping is incomplete or foreign (${missing.length} missing, ${foreign.length} foreign)`,
 		);
 	}
+	const commentTargetBySource = new Map<string, string>();
+	for (const entry of entries) {
+		if (entry.type !== "comment-created") continue;
+		if (commentTargetBySource.has(entry.sourceCommentId)) {
+			throw new ReplicateError("Verify journal has duplicate comment mappings");
+		}
+		commentTargetBySource.set(entry.sourceCommentId, entry.targetCommentId);
+	}
 	return {
 		header,
 		probe: probeEntries[0]!.probe,
 		projectId: projectEntries[0]!.projectId,
 		targetBySource,
 		sourceByTarget,
+		commentTargetBySource,
 	};
 }
 
@@ -363,10 +383,15 @@ function compareScalars(
 	const sourceState = snapshot.states.find((state) => state.id === source.stateId);
 	const targetStateId = referenceId(target.state);
 	const targetState = targetStateId ? statesById.get(targetStateId) : undefined;
-	if ((sourceState?.name ?? null) !== (targetState?.name ?? null)) {
+	// Apply ADOPTS states case-insensitively by (name, group) without patching
+	// casing — verify must mirror that rule or a legitimate apply cannot pass.
+	const lower = (value: string | null | undefined) => value?.toLowerCase() ?? null;
+	if (lower(sourceState?.name) !== lower(targetState?.name)) {
 		add(itemFinding("state", "failure", source, target.id, "State name mismatch"));
+	} else if ((sourceState?.name ?? null) !== (targetState?.name ?? null)) {
+		add(itemFinding("state", "warning", source, target.id, "State name casing differs"));
 	}
-	if ((sourceState?.group ?? null) !== (targetState?.group ?? null)) {
+	if (lower(sourceState?.group) !== lower(targetState?.group)) {
 		add(itemFinding("state", "failure", source, target.id, "State group mismatch"));
 	}
 	if (sourceState && targetState && sourceState.color !== (targetState.color ?? "")) {
@@ -541,21 +566,28 @@ async function compareComments(
 				),
 			);
 		}
+		const targetById = new Map(targetComments.map((comment) => [comment.id, comment]));
 		for (const comment of sourceComments) {
-			const matches = matchComments(comment, targetComments, facts.probe);
-			if (matches.length !== 1) {
+			// The journal recorded exactly which target comment each source comment
+			// became — deterministic, immune to duplicate timestamps and sanitized
+			// markers (which the apply-side reconcile heuristics exist for; verify
+			// never needs to guess).
+			const mappedId = facts.commentTargetBySource.get(comment.id);
+			const target = mappedId ? targetById.get(mappedId) : undefined;
+			if (!mappedId || !target) {
 				add(
 					itemFinding(
 						"comments",
 						"failure",
 						item,
 						facts.targetBySource.get(item.id)!.id,
-						`Comment ${comment.id} matched ${matches.length} target comments`,
+						mappedId
+							? `Journal-mapped comment ${comment.id} -> ${mappedId} is missing on the target`
+							: `Comment ${comment.id} has no journal mapping`,
 					),
 				);
 				continue;
 			}
-			const target = matches[0]!;
 			compareHtml(
 				"comments",
 				item,
@@ -576,33 +608,6 @@ async function compareComments(
 			);
 		}
 	}
-}
-
-function matchComments(
-	source: SnapshotComment,
-	targets: RawComment[],
-	probe: TargetProbeResult,
-): RawComment[] {
-	if (probe.commentCreatedAtAccepted === true && source.createdAt !== null) {
-		return targets.filter((target) =>
-			sameNullableInstant(source.createdAt, target.created_at ?? null),
-		);
-	}
-	const marker = `data-psrepl-comment="${source.id.replace(/[&<>"']/g, escapeHtmlChar)}"`;
-	const byMarker = targets.filter((target) => (target.comment_html ?? "").includes(marker));
-	if (byMarker.length > 0) return byMarker;
-	// No durable key survived: the target may strip data-* attributes (marker
-	// gone) or the source comment may carry no created_at (nothing was sent).
-	// Fall back to CONTENT matching against the footer-stripped stored HTML —
-	// the caller still enforces exactly-one, so ambiguity stays a failure.
-	const expected = normalizeHtmlForCompare(source.commentHtml);
-	const expectedMarkdown = htmlToMarkdown(source.commentHtml);
-	return targets.filter((target) => {
-		const stored = stripCommentFooter(target.comment_html ?? "");
-		return (
-			normalizeHtmlForCompare(stored) === expected || htmlToMarkdown(stored) === expectedMarkdown
-		);
-	});
 }
 
 function compareCommentAuthorship(
@@ -787,8 +792,10 @@ function compareExport(
 			item,
 		]),
 	);
+	const seen = new Set<string>();
 	for (const story of parsed.stories) {
 		if (!story.planeIdentifier) continue;
+		seen.add(story.planeIdentifier.toUpperCase());
 		const target = byIdentifier.get(story.planeIdentifier.toUpperCase());
 		if (!target) {
 			add({
@@ -806,6 +813,14 @@ function compareExport(
 				targetItemId: target.id,
 			});
 		}
+	}
+	const uncovered = [...byIdentifier.keys()].filter((identifier) => !seen.has(identifier));
+	if (uncovered.length > 0) {
+		add({
+			check: "export-file",
+			severity: "warning",
+			message: `${uncovered.length} target item(s) not present in the export file (advisory: the export may be a partial corpus)`,
+		});
 	}
 }
 
@@ -871,11 +886,6 @@ function referenceId(value: unknown): string | null {
 
 function sameSet(a: Set<string>, b: Set<string>): boolean {
 	return a.size === b.size && [...a].every((value) => b.has(value));
-}
-
-function sameNullableInstant(a: string | null, b: string | null): boolean {
-	if (a === null || b === null) return a === b;
-	return Date.parse(a) === Date.parse(b);
 }
 
 function mappedCreator(

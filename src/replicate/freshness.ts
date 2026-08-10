@@ -1,11 +1,22 @@
 import { ReplicateError } from "../errors.ts";
-import type { PlaneEndpointDialect } from "../plane/client.ts";
-import type { ProjectSnapshot } from "./types.ts";
+import type { PlaneEndpointDialect, PlaneIssueRelations } from "../plane/client.ts";
+import { sweepFetch } from "../utils/sweep.ts";
+import { sameNullableInstant } from "./instants.ts";
+import { compactRelations } from "./snapshot.ts";
+import type { ProjectSnapshot, SnapshotRelations } from "./types.ts";
 
 export interface FreshnessClient {
 	readonly dialect: PlaneEndpointDialect;
 	listWorkItems<T>(projectId: string): Promise<T[]>;
 	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
+	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]>;
+	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
+}
+
+interface RawComment {
+	id: string;
+	comment_html?: string;
+	created_at?: string | null;
 }
 
 interface RawItem {
@@ -28,12 +39,18 @@ export interface FreshnessReport {
 	}>;
 	added: Array<{ id: string; sequenceId: number }>;
 	deleted: Array<{ id: string; sequenceId: number }>;
+	/** Items whose COMMENTS changed (deep mode only; same-instance id-exact). */
+	commentDrift: Array<{ id: string; sequenceId: number; detail: string }>;
+	/** Items whose RELATIONS changed (deep mode only). */
+	relationDrift: Array<{ id: string; sequenceId: number; detail: string }>;
+	deep: boolean;
 	notes: string[];
 }
 
 export async function checkFreshness(
 	client: FreshnessClient,
 	snapshot: ProjectSnapshot,
+	options: { deep?: boolean; concurrency?: number } = {},
 ): Promise<FreshnessReport> {
 	if (client.dialect !== snapshot.source.dialect) {
 		throw new ReplicateError(
@@ -78,10 +95,77 @@ export async function checkFreshness(
 	const sourceSequence = actual.map((item) => item.sequence_id).sort((a, b) => a - b);
 	const snapshotMax = maxInstant(expected.map((item) => item.updatedAt));
 	const sourceMax = maxInstant(actual.map((item) => item.updated_at ?? null));
+
+	// Plane creates comments and relations WITHOUT saving the parent issue, so
+	// comment/relation-only edits never bump item updated_at (verified against
+	// Plane's API source in review). The item-level check is therefore blind to
+	// them — state that always, and offer --deep to actually compare them.
+	const commentDrift: FreshnessReport["commentDrift"] = [];
+	const relationDrift: FreshnessReport["relationDrift"] = [];
+	if (options.deep) {
+		const present = expected.filter((item) => actualById.has(item.id));
+		const commentSweep = await sweepFetch(
+			present,
+			(item) => client.listWorkItemComments<RawComment>(snapshot.source.projectId, item.id),
+			options.concurrency ?? 4,
+		);
+		if (commentSweep.failures.length > 0) {
+			throw new ReplicateError(
+				`Freshness --deep incomplete: comment fetch failed for ${commentSweep.failures.length} item(s)`,
+			);
+		}
+		for (const { item, value } of commentSweep.results) {
+			const expectedComments = snapshot.comments[item.id] ?? [];
+			const expectedById = new Map(expectedComments.map((comment) => [comment.id, comment]));
+			const actualIds = new Set(value.map((comment) => comment.id));
+			const addedComments = value.filter((comment) => !expectedById.has(comment.id));
+			const deletedComments = expectedComments.filter((comment) => !actualIds.has(comment.id));
+			const editedComments = value.filter((comment) => {
+				const prior = expectedById.get(comment.id);
+				return prior !== undefined && (comment.comment_html ?? "") !== prior.commentHtml;
+			});
+			if (addedComments.length + deletedComments.length + editedComments.length > 0) {
+				commentDrift.push({
+					id: item.id,
+					sequenceId: item.sequenceId,
+					detail: `${addedComments.length} added, ${deletedComments.length} deleted, ${editedComments.length} edited comment(s)`,
+				});
+			}
+		}
+		const relationSweep = await sweepFetch(
+			present,
+			(item) => client.getRelations(snapshot.source.projectId, item.id),
+			options.concurrency ?? 4,
+		);
+		if (relationSweep.failures.length > 0) {
+			throw new ReplicateError(
+				`Freshness --deep incomplete: relation fetch failed for ${relationSweep.failures.length} item(s)`,
+			);
+		}
+		for (const { item, value } of relationSweep.results) {
+			const current = compactRelations(value);
+			const prior = snapshot.relations[item.id] ?? null;
+			if (!sameRelations(current, prior)) {
+				relationDrift.push({
+					id: item.id,
+					sequenceId: item.sequenceId,
+					detail: "relation set changed",
+				});
+			}
+		}
+	} else {
+		notes.push(
+			"Item-level check only: comment/relation-only edits do not bump item updated_at " +
+				"(Plane API behavior) and are invisible here — run with --deep for full coverage.",
+		);
+	}
+
 	const fresh =
 		added.length === 0 &&
 		deleted.length === 0 &&
 		drifted.length === 0 &&
+		commentDrift.length === 0 &&
+		relationDrift.length === 0 &&
 		sameNumbers(snapshotSequence, sourceSequence) &&
 		sameNullableInstant(snapshotMax, sourceMax);
 	return {
@@ -97,8 +181,22 @@ export async function checkFreshness(
 		drifted,
 		added,
 		deleted,
+		commentDrift,
+		relationDrift,
+		deep: options.deep === true,
 		notes,
 	};
+}
+
+function sameRelations(a: SnapshotRelations | null, b: SnapshotRelations | null): boolean {
+	const canonical = (value: SnapshotRelations | null): string => {
+		const entries = Object.entries(value ?? {})
+			.filter((entry): entry is [string, string[]] => (entry[1] as string[]).length > 0)
+			.map(([kind, ids]) => [kind, [...ids].sort()] as const)
+			.sort((x, y) => x[0].localeCompare(y[0]));
+		return JSON.stringify(Object.fromEntries(entries));
+	};
+	return canonical(a) === canonical(b);
 }
 
 export function formatFreshnessReport(report: FreshnessReport, json = false): string {
@@ -109,12 +207,21 @@ export function formatFreshnessReport(report: FreshnessReport, json = false): st
 		);
 	}
 	const lines = [
-		`Stale since ${report.takenAt}: ${report.added.length} added, ${report.deleted.length} deleted, ${report.drifted.length} edited.`,
+		`Stale since ${report.takenAt}: ${report.added.length} added, ${report.deleted.length} deleted, ${report.drifted.length} edited` +
+			(report.deep
+				? `, ${report.commentDrift.length} comment-drifted, ${report.relationDrift.length} relation-drifted.`
+				: "."),
 	];
 	for (const item of report.added) lines.push(`  ADDED: ${item.id} (#${item.sequenceId})`);
 	for (const item of report.deleted) lines.push(`  DELETED: ${item.id} (#${item.sequenceId})`);
 	for (const item of report.drifted) {
 		lines.push(`  EDITED: ${item.id} (#${item.sequenceId}) ${item.snapshot} -> ${item.source}`);
+	}
+	for (const item of report.commentDrift) {
+		lines.push(`  COMMENTS: ${item.id} (#${item.sequenceId}) ${item.detail}`);
+	}
+	for (const item of report.relationDrift) {
+		lines.push(`  RELATIONS: ${item.id} (#${item.sequenceId}) ${item.detail}`);
 	}
 	lines.push(...report.notes.map((note) => `Note: ${note}`));
 	return lines.join("\n");
@@ -126,11 +233,6 @@ function maxInstant(values: Array<string | null>): string | null {
 		if (value !== null && (max === null || Date.parse(value) > Date.parse(max))) max = value;
 	}
 	return max;
-}
-
-function sameNullableInstant(a: string | null, b: string | null): boolean {
-	if (a === null || b === null) return a === b;
-	return Date.parse(a) === Date.parse(b);
 }
 
 function sameNumbers(a: number[], b: number[]): boolean {
