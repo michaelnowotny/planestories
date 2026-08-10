@@ -189,6 +189,10 @@ export class FakePlane {
 		return this.members as T[];
 	}
 
+	async listProjectMembers<T>(_projectId: string): Promise<T[]> {
+		return this.members as T[];
+	}
+
 	async createWorkItem<T>(
 		projectId: string,
 		body: Record<string, unknown>,

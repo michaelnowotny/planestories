@@ -10,6 +10,7 @@ import {
 	type PlaneEndpointDialect,
 } from "../../plane/client.ts";
 import { applySnapshot } from "../../replicate/apply.ts";
+import { runBackup } from "../../replicate/backup.ts";
 import { checkFreshness, formatFreshnessReport } from "../../replicate/freshness.ts";
 import { readJournal } from "../../replicate/journal.ts";
 import { detectDialect, detectSourceDialect } from "../../replicate/probe.ts";
@@ -282,6 +283,63 @@ export function registerReplicateCommand(program: Command) {
 					force: options.force === true,
 					concurrency: parseConcurrency(options.concurrency),
 				});
+			} catch (error) {
+				handleError(error);
+			}
+		});
+
+	replicate
+		.command("backup")
+		.description("Write a dated snapshot backup, self-check it, and prune old backups")
+		.option("-c, --config <path>", "Config file path")
+		.option("--from <context>", `Source: ${CONTEXT_HELP}`)
+		.requiredOption("-p, --project <name>", "Source project name or identifier")
+		.requiredOption("--dir <directory>", "Backup directory")
+		.option("--retain <n>", "Backups to keep for this project", "14")
+		.option("--concurrency <n>", "Paced read concurrency (default 4)")
+		.option("--no-check-fresh", "Skip the post-write freshness self-check")
+		.option("--json", "Machine-readable result")
+		.action(async (options) => {
+			try {
+				const retain = Number(options.retain);
+				if (!Number.isInteger(retain) || retain < 1) {
+					throw new ReplicateError(`--retain must be a positive integer, got "${options.retain}"`);
+				}
+				const source = await sourceFor(options.from, options.config, options.project);
+				const result = await runBackup(
+					source.client,
+					{ projectId: source.projectId },
+					{
+						dir: options.dir,
+						retain,
+						toolVersion: TOOL_VERSION,
+						concurrency: parseConcurrency(options.concurrency),
+						checkFresh: options.checkFresh !== false,
+						onProgress: options.json ? undefined : (message) => console.log(chalk.dim(message)),
+					},
+				);
+				if (options.json) {
+					console.log(JSON.stringify(result, null, 1));
+					if (result.fresh === false) console.error("Self-check: STALE");
+					return;
+				}
+				const snapshot = await readSnapshotFile(result.file);
+				console.log(formatSnapshotSummary(snapshot));
+				console.log(`Backup written to ${result.file}`);
+				if (result.fresh === null) {
+					console.log("Self-check: SKIPPED");
+				} else if (result.fresh) {
+					console.log("Self-check: FRESH");
+					for (const note of result.freshnessNotes) console.log(`Note: ${note}`);
+				} else {
+					const verdict =
+						"Self-check: STALE — board changed during the read; tonight's file is usable but not point-consistent";
+					console.log(verdict);
+					console.error(verdict);
+					for (const note of result.freshnessNotes) console.log(note);
+				}
+				console.log(`Pruned ${result.pruned.length} old backup(s)`);
+				for (const file of result.pruned) console.log(`  ${file.split(/[\\/]/).pop()}`);
 			} catch (error) {
 				handleError(error);
 			}

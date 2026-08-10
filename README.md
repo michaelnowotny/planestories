@@ -473,6 +473,7 @@ Migrate a whole project between Plane instances with exact `PROJECT-N` preservat
 
 ```
 planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json
+planestories replicate backup --from cloud -p "Data Platform" --dir backups --retain 14
 planestories replicate apply --to ce --snapshot data.snapshot.json          # dry-run
 planestories replicate apply --to ce --snapshot data.snapshot.json --yes    # real, journaled, resumable
 planestories replicate verify --to ce --snapshot data.snapshot.json         # field-complete gate
@@ -485,6 +486,8 @@ Apply is dry-run by default, fail-closed before any destination write, and resum
 its fsync'd journal after any crash; `--no-exact-identifiers` accepts renumbering,
 `--recreate-target` drops and rebuilds a run-created target. Full contract, guarantees,
 and honest limitations: [`docs/REPLICATE.md`](docs/REPLICATE.md).
+`replicate backup` creates nightly dated backups with per-project retention; see the
+scheduled-backup recipe in [`docs/REPLICATE.md`](docs/REPLICATE.md).
 
 ## Rating story quality — `/rate-userstories`
 

@@ -165,6 +165,9 @@ bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
 # (a blocked_by/blocks/relates_to whose target work item was deleted / left the project).
 bun run src/cli/index.ts doctor --project "My Project"
 
+# Replicate: take a dated, self-checked backup and retain the newest 14 files.
+bun run src/cli/index.ts replicate backup --from cloud -p "My Project" --dir backups --retain 14
+
 # Atlas: render the interactive, self-contained offline "Cockpit" HTML map — status as a
 # terraforming ladder (rock/ice/Mars/Earth/cinder), planet size = dev-day effort, per-cluster
 # nebula LOD, dependency supply lanes, SCAN/intercept search, epic dossier (docs/ATLAS.md).

@@ -145,6 +145,26 @@ blindness in its output. `--deep` closes it: a paced per-item pass compares each
 comments (by id and content) and relation sets against the snapshot — the full
 pre-cutover check.
 
+## Scheduled backups
+
+`replicate backup` writes a dated snapshot, performs a cheap item-level freshness
+self-check to flag changes made during the read, and retains only the requested number
+of backups for that project. For example, run it nightly from cron:
+
+```cron
+17 4 * * * cd $HOME/PycharmProjects/planestories && $HOME/.bun/bin/bun run src/cli/index.ts replicate backup --from cloud -p "Data Platform" --dir $HOME/plane-replication/backups --retain 14 >> $HOME/plane-replication/backups/backup.log 2>&1
+```
+
+The working directory must be the repository root because Bun auto-loads `.env` from
+the current working directory. The log is append-only, so truncate or rotate it
+occasionally.
+
+A backup is a snapshot. Restore one with `replicate apply --to <ctx> --snapshot <file>`.
+It contains the same snapshot scope described above: project settings, states, labels,
+members, work items, relations, comments, and the sequence map, but not attachments,
+cycles, modules, pages, activity, or reactions. Backup files contain full board content;
+keep the backup directory out of shared repositories.
+
 ## Rename the destination project
 
 Project renames are single-project and dry-run by default:
