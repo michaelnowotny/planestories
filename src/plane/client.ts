@@ -27,6 +27,14 @@ export interface PlaneClientOptions {
 	sleep?: (ms: number) => Promise<void>;
 	/** Work-item REST path family. Default "issues" (see PlaneEndpointDialect). */
 	dialect?: PlaneEndpointDialect;
+	/**
+	 * Invoked before EVERY HTTP attempt of a non-GET request — including each
+	 * internal retry after backoff, which a caller-side wrapper cannot see. A
+	 * throw aborts the request. Replication wires this to its journal-lock
+	 * ownership check so a process that lost its lock during a retry sleep
+	 * cannot land further writes.
+	 */
+	beforeWriteAttempt?: () => void;
 }
 
 export type PlaneDependencyRelationType = "blocked_by" | "blocking" | "relates_to";
@@ -109,8 +117,11 @@ export class PlaneClient {
 	readonly maxRetryDelayMs: number;
 	readonly dialect: PlaneEndpointDialect;
 	private readonly sleep: (ms: number) => Promise<void>;
+	private readonly beforeWriteAttempt?: () => void;
+	private readonly options: PlaneClientOptions;
 
 	constructor(options: PlaneClientOptions) {
+		this.options = options;
 		this.apiKey = options.apiKey;
 		this.workspaceSlug = options.workspaceSlug;
 		this.baseUrl = (options.baseUrl ?? DEFAULT_PLANE_BASE_URL).replace(/\/+$/, "");
@@ -120,6 +131,12 @@ export class PlaneClient {
 		this.maxRetryDelayMs = options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
 		this.dialect = options.dialect ?? "issues";
 		this.sleep = options.sleep ?? defaultSleep;
+		this.beforeWriteAttempt = options.beforeWriteAttempt;
+	}
+
+	/** A sibling client whose every non-GET HTTP attempt first runs `hook`. */
+	withBeforeWriteAttempt(hook: () => void): PlaneClient {
+		return new PlaneClient({ ...this.options, beforeWriteAttempt: hook });
 	}
 
 	/** The work-item API path segment for this instance's endpoint dialect. */
@@ -174,6 +191,11 @@ export class PlaneClient {
 		let attempt = 0;
 		while (true) {
 			attempt++;
+			// Per-ATTEMPT write hook: a caller-side guard only sees the method
+			// call, not the retries after backoff sleeps inside this loop.
+			if (this.beforeWriteAttempt && method !== "GET") {
+				this.beforeWriteAttempt();
+			}
 
 			let response: Response;
 			try {

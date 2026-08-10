@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -134,6 +141,20 @@ describe("replication journal", () => {
 			const journal = Journal.create(temp.path, header());
 			writeFileSync(`${temp.path}.lock`, "99999999");
 			expect(() => journal.append({ type: "cleanup-started" })).toThrow(/lock/);
+			journal.close();
+		} finally {
+			rmSync(temp.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("archivePoisoned refuses to rename a journal whose lock another process holds", () => {
+		const temp = tempJournal();
+		try {
+			const journal = Journal.create(temp.path, header());
+			writeFileSync(`${temp.path}.lock`, "99999999");
+			expect(() => journal.archivePoisoned(123)).toThrow(/lock/);
+			expect(existsSync(temp.path)).toBeTrue();
+			expect(existsSync(`${temp.path}.poisoned-123`)).toBeFalse();
 			journal.close();
 		} finally {
 			rmSync(temp.dir, { recursive: true, force: true });

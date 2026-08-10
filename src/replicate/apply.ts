@@ -29,6 +29,13 @@ export interface ApplyClient extends ProbeClient, A10CreateClient {
 	readonly baseUrl: string;
 	readonly workspaceSlug: string;
 	readonly dialect: PlaneEndpointDialect;
+	/**
+	 * Optional capability (PlaneClient implements it): a sibling client whose
+	 * every non-GET HTTP ATTEMPT — including internal retries — first runs
+	 * `hook`. When present, the ownership guard uses it so a lock lost during a
+	 * retry backoff stops the very next attempt, not just the next method call.
+	 */
+	withBeforeWriteAttempt?(hook: () => void): ApplyClient;
 	getProject<T>(projectId: string): Promise<T>;
 	listStates<T>(projectId: string): Promise<T[]>;
 	listLabels<T>(projectId: string): Promise<T[]>;
@@ -380,8 +387,11 @@ async function createOrAdoptProject(
  * already in flight can still land — unavoidable without server-side leases).
  * Reads intentionally pass through unguarded.
  */
-function ownershipGuardedClient(client: ApplyClient, journal: Journal): ApplyClient {
+function ownershipGuardedClient(base: ApplyClient, journal: Journal): ApplyClient {
 	const own = (): void => journal.assertOwnership();
+	// Prefer the per-ATTEMPT hook when the client supports it: method-level
+	// guarding alone cannot see the client's internal retries after backoff.
+	const client = base.withBeforeWriteAttempt ? base.withBeforeWriteAttempt(own) : base;
 	return {
 		baseUrl: client.baseUrl,
 		workspaceSlug: client.workspaceSlug,

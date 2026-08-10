@@ -312,6 +312,9 @@ export class Journal {
 
 	/** Close and move a poisoned generation out of the active journal path. */
 	archivePoisoned(timestamp = Date.now()): string {
+		// Renaming a journal another contender now owns would yank its ledger
+		// out from under it — ownership is required like any other mutation.
+		this.assertOwnership();
 		this.close();
 		const archived = `${this.path}.poisoned-${timestamp}`;
 		renameSync(this.path, archived);

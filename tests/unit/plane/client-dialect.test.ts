@@ -114,6 +114,59 @@ describe("replication endpoints", () => {
 		expect(captured.methods).toEqual(["POST", "DELETE"]);
 	});
 
+	test("beforeWriteAttempt runs before EVERY write attempt, including internal retries", async () => {
+		// A caller-side guard sees only the method call; the retry loop's later
+		// attempts happen after backoff sleeps it cannot observe. The hook must
+		// run per HTTP attempt, and a hook throw must abort with no further
+		// fetches — this is what lets a lost journal lock stop mid-retry writes.
+		const calls: number[] = [];
+		let fetches = 0;
+		globalThis.fetch = (async () => {
+			fetches++;
+			return new Response("{}", {
+				status: fetches < 3 ? 503 : 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+		const base = new PlaneClient({
+			apiKey: "k",
+			workspaceSlug: "ws",
+			maxRetries: 5,
+			retryBaseDelayMs: 1,
+			sleep: async () => {},
+		});
+		const hooked = base.withBeforeWriteAttempt(() => calls.push(fetches));
+		await hooked.createWorkItem("p1", { name: "x" });
+		expect(fetches).toBe(3);
+		expect(calls).toEqual([0, 1, 2]); // before attempts 1, 2 AND 3
+
+		// GET requests are not write-guarded.
+		calls.length = 0;
+		fetches = 0;
+		globalThis.fetch = (async () =>
+			new Response("{}", {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			})) as unknown as typeof fetch;
+		await hooked.getWorkItem("p1", "i1");
+		expect(calls).toEqual([]);
+
+		// A hook throw aborts the retry loop immediately: attempt 1 fails 503,
+		// the hook throws before attempt 2 — no second fetch happens.
+		fetches = 0;
+		globalThis.fetch = (async () => {
+			fetches++;
+			return new Response("{}", { status: 503 });
+		}) as unknown as typeof fetch;
+		let armed = false;
+		const tripwire = base.withBeforeWriteAttempt(() => {
+			if (armed) throw new Error("lock lost");
+			armed = true;
+		});
+		await expect(tripwire.createWorkItem("p1", { name: "x" })).rejects.toThrow("lock lost");
+		expect(fetches).toBe(1);
+	});
+
 	test("createWorkItem honors a per-call maxRetries of 0 (A10 discipline)", async () => {
 		// Client default allows retries; the per-call override must win so an
 		// ambiguous create is NEVER blindly replayed.
