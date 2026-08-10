@@ -141,7 +141,8 @@ export async function verifySnapshot(
 	const findings: VerifyFinding[] = [];
 	const skipped: VerifySkipped[] = [];
 	const add = (finding: VerifyFinding) => findings.push(finding);
-	const facts = journalFacts(readJournal(options.journalPath), snapshot, client);
+	const entries = readJournal(options.journalPath);
+	const facts = journalFacts(entries, snapshot, client);
 
 	const [live, archived, states, labels, members] = await Promise.all([
 		client.listWorkItems<RawItem>(facts.projectId),
@@ -151,12 +152,35 @@ export async function verifySnapshot(
 		client.listWorkspaceMembers<RawMember>(),
 	]);
 	if (archived === null) {
-		throw new ReplicateError(
-			"Verify cannot prove live+archived set equality: the target archived-items endpoint is unavailable.",
-		);
+		// Live-only verification is provable ONLY when nothing was ever archived:
+		// no snapshot item is archived and the journal archived nothing. Then a
+		// post-apply archival of OUR items surfaces as a missing mapped item; the
+		// single invisible case (a FOREIGN item archived on the run-created
+		// project after apply) is stated as a warning. With archived content in
+		// play, equality genuinely cannot be proven — fail closed. This is the
+		// operational reality of the acceptance target: the operator's CE serves
+		// no archived-items endpoint at all (observed live 2026-08-09).
+		const snapshotArchived = snapshot.items.filter((item) => item.archived).length;
+		const journalArchived = entries.filter((entry) => entry.type === "item-archived").length;
+		if (snapshotArchived > 0 || journalArchived > 0) {
+			throw new ReplicateError(
+				"Verify cannot prove live+archived set equality: the target archived-items endpoint " +
+					`is unavailable and archived content is in play (${snapshotArchived} snapshot / ` +
+					`${journalArchived} journaled archived item(s)).`,
+			);
+		}
+		add({
+			check: "set-equality",
+			severity: "warning",
+			message:
+				"Archived-items endpoint unavailable on the target; verification is live-only — a " +
+				"foreign item archived on the target after apply would be invisible to this check.",
+		});
 	}
-	const archivedIds = new Set(archived.map((item) => item.id));
-	const targetItems = [...new Map([...live, ...archived].map((item) => [item.id, item])).values()];
+	const archivedIds = new Set((archived ?? []).map((item) => item.id));
+	const targetItems = [
+		...new Map([...live, ...(archived ?? [])].map((item) => [item.id, item])).values(),
+	];
 	const targetById = new Map(targetItems.map((item) => [item.id, item]));
 
 	for (const source of snapshot.items) {

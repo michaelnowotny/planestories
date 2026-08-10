@@ -40,7 +40,71 @@ async function applied(configure?: (fake: FakePlane) => void) {
 	};
 }
 
+async function appliedNoArchived() {
+	// The cloud/CE reality for the DATA rehearsal: NEITHER side serves the
+	// archived-items endpoint, and the snapshot contains no archived items.
+	const dir = mkdtempSync(join(tmpdir(), "planestories-verify-"));
+	const fake = new FakePlane();
+	fake.archivedEndpointAvailable = false;
+	const snapshot = sampleSnapshot();
+	for (const item of snapshot.items) item.archived = false;
+	snapshot.source.archivedInventory = "unavailable";
+	snapshot.digest = computeSnapshotDigest(snapshot);
+	const journalPath = join(dir, "apply.jsonl");
+	await applySnapshot(fake, snapshot, {
+		yes: true,
+		flags: { ...flags, assumeGapsDeleted: true },
+		journalPath,
+		toolVersion: "test",
+		runId: "verify-test",
+		sleep: async () => {},
+	});
+	return {
+		dir,
+		fake,
+		snapshot,
+		journalPath,
+		cleanup: () => rmSync(dir, { recursive: true, force: true }),
+	};
+}
+
 describe("replicate verify", () => {
+	test("runs live-only with a warning when nothing was archived and the endpoint is absent", async () => {
+		// Hard-refusing here would make verify unusable against the actual
+		// acceptance target (the operator's CE serves no archived endpoint).
+		// With zero archived items in snapshot AND journal, live-only equality
+		// is provable except for a foreign post-apply archived item — which is
+		// exactly what the warning states.
+		const ctx = await appliedNoArchived();
+		try {
+			const report = await verifySnapshot(ctx.fake, ctx.snapshot, {
+				journalPath: ctx.journalPath,
+			});
+			expect(report.summary.failures).toBe(0);
+			expect(report.summary.ok).toBeTrue();
+			expect(
+				report.findings.some(
+					(finding) => finding.severity === "warning" && /live-only/.test(finding.message),
+				),
+			).toBeTrue();
+		} finally {
+			ctx.cleanup();
+		}
+	});
+
+	test("still refuses live-only verify when the snapshot carries archived items", async () => {
+		const ctx = await applied((fake) => {
+			fake.archivedEndpointAvailable = false;
+		});
+		try {
+			await expect(
+				verifySnapshot(ctx.fake, ctx.snapshot, { journalPath: ctx.journalPath }),
+			).rejects.toThrow(/archived/);
+		} finally {
+			ctx.cleanup();
+		}
+	});
+
 	test("a clean apply has zero failures and strips provenance footers", async () => {
 		const ctx = await applied();
 		try {
