@@ -1,0 +1,1023 @@
+import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { PlaneApiError, ReplicateError } from "../errors.ts";
+import type { PlaneEndpointDialect, PlaneRelationKind } from "../plane/client.ts";
+import {
+	type A10CreateClient,
+	createItemA10,
+	type ExpectedIdentity,
+	isTransientPlaneError,
+	reconcileExpectedItem,
+} from "./create.ts";
+import { decideGate, type GateFlags } from "./gate.ts";
+import { Journal, type JournalEntry, type JournalHeader } from "./journal.ts";
+import {
+	type ProbeClient,
+	probeTargetEmpirical,
+	probeTargetReadOnly,
+	type TargetProbeResult,
+} from "./probe.ts";
+import type {
+	ApplyManifests,
+	IdentifierMode,
+	ProjectSnapshot,
+	SnapshotComment,
+	SnapshotItem,
+} from "./types.ts";
+
+export interface ApplyClient extends ProbeClient, A10CreateClient {
+	readonly baseUrl: string;
+	readonly workspaceSlug: string;
+	readonly dialect: PlaneEndpointDialect;
+	getProject<T>(projectId: string): Promise<T>;
+	listStates<T>(projectId: string): Promise<T[]>;
+	listLabels<T>(projectId: string): Promise<T[]>;
+	createLabel<T>(projectId: string, body: Record<string, unknown>): Promise<T>;
+	updateLabel<T>(projectId: string, labelId: string, body: Record<string, unknown>): Promise<T>;
+	updateWorkItem<T>(
+		projectId: string,
+		workItemId: string,
+		body: Record<string, unknown>,
+	): Promise<T>;
+}
+
+export interface ApplyOptions {
+	yes: boolean;
+	destName?: string;
+	destIdentifier?: string;
+	flags: GateFlags;
+	journalPath: string;
+	limit?: number;
+	onProgress?: (msg: string) => void;
+	sleep?: (ms: number) => Promise<void>;
+	runId?: string;
+	toolVersion: string;
+}
+
+export interface ApplyResult {
+	mode: IdentifierMode;
+	dryRun: boolean;
+	projectId: string | null;
+	itemsCreated: number;
+	itemsSkipped: number;
+	placeholdersCreated: number;
+	placeholdersDeleted: number;
+	parentsSet: number;
+	relationsCreated: number;
+	commentsCreated: number;
+	archivedCount: number;
+	manifests: ApplyManifests;
+	complete: boolean;
+	probe: TargetProbeResult;
+}
+
+interface RawProject {
+	id: string;
+	identifier?: string;
+	name?: string;
+}
+
+interface RawState {
+	id: string;
+	name?: string;
+	group?: string;
+	color?: string;
+	description?: string;
+	default?: boolean;
+}
+
+interface RawLabel {
+	id: string;
+	name?: string;
+	parent?: string | null;
+}
+
+interface RawItem {
+	id: string;
+	sequence_id: number;
+	name?: string;
+	external_id?: string | null;
+	archived_at?: string | null;
+}
+
+interface RawComment {
+	id: string;
+	comment_html?: string;
+	created_at?: string | null;
+}
+
+export async function applySnapshot(
+	client: ApplyClient,
+	snapshot: ProjectSnapshot,
+	options: ApplyOptions,
+): Promise<ApplyResult> {
+	const progress = options.onProgress ?? (() => {});
+	const destName = options.destName ?? snapshot.project.name;
+	const destIdentifier = options.destIdentifier ?? snapshot.project.identifier;
+	const initialMode: IdentifierMode = options.flags.noExactIdentifiers ? "renumber" : "exact";
+
+	if (!options.yes) {
+		const probe = await probeTargetReadOnly(client, destIdentifier);
+		const gate = decideGate({
+			snapshot,
+			probe,
+			flags: options.flags,
+			resume: { journalOwnsProject: null },
+			destIdentifier,
+		});
+		progress(formatGateProgress(gate.errors, gate.warnings, snapshot, true));
+		if (!gate.ok) throw new ReplicateError(gate.errors.join("\n"));
+		return emptyResult(gate.mode, true, null, gate.manifests, probe);
+	}
+
+	let journal: Journal | null = null;
+	try {
+		if (existsSync(options.journalPath)) {
+			journal = Journal.open(
+				options.journalPath,
+				{
+					snapshotDigest: snapshot.digest,
+					targetBaseUrl: client.baseUrl,
+					targetWorkspaceSlug: client.workspaceSlug,
+				},
+				{ warn: options.onProgress },
+			);
+			validateResumeOptions(journal, destName, destIdentifier, initialMode);
+
+			if (options.flags.recreateTarget) {
+				// Explicit drop-and-rebuild: delete the run-created project (if any)
+				// and retire this journal generation. The run then continues as a
+				// fresh one — including a fresh empirical probe of the target.
+				await recreateOwnedTarget(client, journal);
+				journal.archivePoisoned();
+				journal = null;
+			} else if (journal.isPoisoned) {
+				throw new ReplicateError(
+					"Replication journal is poisoned; recovery requires --recreate-target so the run-created project can be dropped and rebuilt.",
+				);
+			} else if (journal.isComplete) {
+				const probe = journal.probeEntry?.probe;
+				if (!probe) throw new ReplicateError("Completed journal is missing its probe entry");
+				const gate = decideGate({
+					snapshot,
+					probe,
+					flags: options.flags,
+					resume: { journalOwnsProject: journal.projectCreated?.projectId ?? null },
+					destIdentifier,
+				});
+				return resultFromJournal(journal, gate.mode, false, gate.manifests, probe, 0);
+			}
+		}
+
+		let probe = journal?.probeEntry?.probe;
+		if (!probe) {
+			const readOnly = await probeTargetReadOnly(client, destIdentifier);
+			progress("Running empirical target capability probe in a temporary project...");
+			probe = await probeTargetEmpirical(client, readOnly, snapshotNeeds(snapshot), {
+				warn: progress,
+			});
+			journal?.append({ type: "probe", probe });
+		}
+
+		const gate = decideGate({
+			snapshot,
+			probe,
+			flags: options.flags,
+			resume: { journalOwnsProject: journal?.projectCreated?.projectId ?? null },
+			destIdentifier,
+		});
+		progress(formatGateProgress(gate.errors, gate.warnings, snapshot, false));
+		// On a FRESH run the journal must not exist yet when the gate fails: a
+		// gate-failed run that left a journal pinning identifierMode would block
+		// its own suggested rerun flags with a resume-mode mismatch.
+		if (!gate.ok) throw new ReplicateError(gate.errors.join("\n"));
+		if (!journal) {
+			journal = Journal.create(
+				options.journalPath,
+				makeHeader(client, snapshot, options, destName, destIdentifier, initialMode),
+				{ warn: progress },
+			);
+			journal.append({ type: "probe", probe });
+		}
+
+		let projectId = journal.projectCreated?.projectId ?? null;
+		if (projectId) {
+			await verifyOwnedProject(client, journal, projectId);
+		}
+
+		if (journal.cleanupStarted) {
+			assertCleanupCanContinue(journal, snapshot, gate.mode);
+			if (!projectId)
+				throw new ReplicateError("Cleanup-started journal has no run-created project");
+			await cleanupPlaceholders(client, journal, projectId, gate.mode);
+			await lightVerify(client, snapshot, projectId, gate.mode, journal);
+			journal.append({ type: "apply-complete" });
+			return resultFromJournal(journal, gate.mode, false, gate.manifests, probe, 0);
+		}
+
+		if (!projectId) {
+			const project = await client.createProject<RawProject>({
+				name: destName,
+				identifier: destIdentifier,
+				description: snapshot.project.description,
+			});
+			projectId = project.id;
+			journal.append({
+				type: "project-created",
+				projectId,
+				identifier: destIdentifier,
+				name: destName,
+			});
+		}
+
+		const stateMap = await replicateStates(client, journal, projectId, snapshot, gate.manifests);
+		const labelMap = await replicateLabels(client, journal, projectId, snapshot);
+		const itemPhase = await replicateItems(
+			client,
+			journal,
+			projectId,
+			snapshot,
+			probe,
+			gate.mode,
+			stateMap,
+			labelMap,
+			options,
+		);
+		if (itemPhase.limited) {
+			return resultFromJournal(journal, gate.mode, false, gate.manifests, probe, itemPhase.skipped);
+		}
+
+		await replicateParents(client, journal, projectId, snapshot);
+		await replicateRelations(client, journal, projectId, snapshot, probe);
+		await replicateComments(client, journal, projectId, snapshot, probe, options.sleep);
+		await cleanupPlaceholders(client, journal, projectId, gate.mode);
+		await lightVerify(client, snapshot, projectId, gate.mode, journal);
+		journal.append({ type: "apply-complete" });
+		return resultFromJournal(journal, gate.mode, false, gate.manifests, probe, itemPhase.skipped);
+	} finally {
+		journal?.close();
+	}
+}
+
+function makeHeader(
+	client: ApplyClient,
+	snapshot: ProjectSnapshot,
+	options: ApplyOptions,
+	destName: string,
+	destIdentifier: string,
+	mode: IdentifierMode,
+): JournalHeader {
+	return {
+		type: "header",
+		runId: options.runId ?? randomUUID(),
+		createdAt: new Date().toISOString(),
+		toolVersion: options.toolVersion,
+		snapshotDigest: snapshot.digest,
+		target: { baseUrl: client.baseUrl, workspaceSlug: client.workspaceSlug },
+		destName,
+		destIdentifier,
+		identifierMode: mode,
+	};
+}
+
+function validateResumeOptions(
+	journal: Journal,
+	destName: string,
+	destIdentifier: string,
+	mode: IdentifierMode,
+): void {
+	if (journal.header.destIdentifier !== destIdentifier) {
+		throw new ReplicateError(
+			`Resume destination identifier mismatch: journal has ${journal.header.destIdentifier}, options request ${destIdentifier}`,
+		);
+	}
+	if (journal.header.destName !== destName) {
+		throw new ReplicateError(
+			`Resume destination name mismatch: journal has ${journal.header.destName}, options request ${destName}`,
+		);
+	}
+	if (journal.header.identifierMode !== mode) {
+		throw new ReplicateError(
+			`Resume identifier mode mismatch: journal has ${journal.header.identifierMode}, options request ${mode}`,
+		);
+	}
+}
+
+async function recreateOwnedTarget(client: ApplyClient, journal: Journal): Promise<void> {
+	const owned = journal.projectCreated;
+	if (!owned) return;
+	let project: RawProject;
+	try {
+		project = await client.getProject<RawProject>(owned.projectId);
+	} catch (error) {
+		// Already gone (e.g. poisoned because the project vanished): nothing to
+		// delete — recreation proceeds on a fresh journal.
+		if (isNotFound(error)) return;
+		throw new ReplicateError(
+			`Refusing --recreate-target: journal-owned project ${owned.projectId} could not be verified (${describeError(error)}).`,
+		);
+	}
+	if (project.identifier !== owned.identifier) {
+		throw new ReplicateError(
+			`Refusing --recreate-target: project ${owned.projectId} identifier is ${String(project.identifier)}, not journaled ${owned.identifier}.`,
+		);
+	}
+	await client.deleteProject(owned.projectId);
+}
+
+async function verifyOwnedProject(client: ApplyClient, journal: Journal, projectId: string) {
+	const owned = journal.projectCreated;
+	if (!owned) throw new ReplicateError("Journal project ownership entry is missing");
+	let project: RawProject;
+	try {
+		project = await client.getProject<RawProject>(projectId);
+	} catch (error) {
+		if (isNotFound(error)) {
+			const reason = `Journal-owned project ${projectId} no longer exists`;
+			journal.append({ type: "poisoned", reason });
+			throw new ReplicateError(`${reason}; recover with --recreate-target after investigation.`);
+		}
+		// Transient/unknown failure: durable state is unknown — surface it so the
+		// operator can simply retry. Poisoning here would demand the destructive
+		// --recreate-target recovery over what may be a network blip.
+		throw error;
+	}
+	if (project.identifier !== owned.identifier) {
+		const reason = `Journal-owned project fingerprint mismatch for ${projectId}`;
+		journal.append({ type: "poisoned", reason });
+		throw new ReplicateError(`${reason}; recover with --recreate-target after investigation.`);
+	}
+}
+
+async function replicateStates(
+	client: ApplyClient,
+	journal: Journal,
+	projectId: string,
+	snapshot: ProjectSnapshot,
+	manifests: ApplyManifests,
+): Promise<Map<string, string>> {
+	const stateMap = mappedStates(journal.entries);
+	const targetStates = await client.listStates<RawState>(projectId);
+	for (const source of snapshot.states) {
+		if (stateMap.has(source.id)) continue;
+		const match = targetStates.find(
+			(target) =>
+				target.name?.toLowerCase() === source.name.toLowerCase() && target.group === source.group,
+		);
+		let target: RawState;
+		let action: "matched" | "created" | "patched";
+		if (match) {
+			target = match;
+			const patch: Record<string, unknown> = {};
+			if (match.color !== source.color) patch.color = source.color;
+			if ((match.description ?? "") !== source.description) patch.description = source.description;
+			if (Object.keys(patch).length > 0) {
+				target = await client.updateState<RawState>(projectId, match.id, patch);
+				action = "patched";
+			} else action = "matched";
+		} else {
+			target = await client.createState<RawState>(projectId, {
+				name: source.name,
+				group: source.group,
+				color: source.color,
+				description: source.description,
+			});
+			targetStates.push(target);
+			action = "created";
+		}
+		stateMap.set(source.id, target.id);
+		journal.append({
+			type: "state-mapped",
+			sourceStateId: source.id,
+			targetStateId: target.id,
+			action,
+		});
+		if (source.isDefault) {
+			try {
+				await client.updateState(projectId, target.id, { default: true });
+			} catch (error) {
+				manifests.warnings.push(
+					`Could not make state ${source.name} the default: ${describeError(error)}`,
+				);
+			}
+		}
+	}
+	const mappedTargetIds = new Set(stateMap.values());
+	const extras = targetStates.filter((state) => state.default && !mappedTargetIds.has(state.id));
+	if (extras.length > 0) {
+		manifests.degradations.push({
+			feature: "extra target default states",
+			detail: `Left target-created default states in place: ${extras.map((state) => state.name).join(", ")}`,
+			count: extras.length,
+		});
+	}
+	return stateMap;
+}
+
+async function replicateLabels(
+	client: ApplyClient,
+	journal: Journal,
+	projectId: string,
+	snapshot: ProjectSnapshot,
+): Promise<Map<string, string>> {
+	const labelMap = mappedLabels(journal.entries);
+	for (const source of [...snapshot.labels].sort((a, b) => a.name.localeCompare(b.name))) {
+		if (labelMap.has(source.id)) continue;
+		const target = await client.createLabel<RawLabel>(projectId, {
+			name: source.name,
+			color: source.color,
+			description: source.description,
+		});
+		labelMap.set(source.id, target.id);
+		journal.append({
+			type: "label-mapped",
+			sourceLabelId: source.id,
+			targetLabelId: target.id,
+			action: "created",
+		});
+	}
+	for (const source of snapshot.labels) {
+		if (!source.parentId) continue;
+		const targetId = labelMap.get(source.id);
+		const parentId = labelMap.get(source.parentId);
+		if (!targetId || !parentId) {
+			throw new ReplicateError(`Label parent mapping is incomplete for ${source.name}`);
+		}
+		await client.updateLabel(projectId, targetId, { parent: parentId });
+	}
+	return labelMap;
+}
+
+async function replicateItems(
+	client: ApplyClient,
+	journal: Journal,
+	projectId: string,
+	snapshot: ProjectSnapshot,
+	probe: TargetProbeResult,
+	mode: IdentifierMode,
+	stateMap: Map<string, string>,
+	labelMap: Map<string, string>,
+	options: ApplyOptions,
+): Promise<{ limited: boolean; skipped: number }> {
+	const bySequence = new Map(snapshot.items.map((item) => [item.sequenceId, item]));
+	let createCalls = 0;
+	let skipped = 0;
+	for (let seq = 1; seq <= snapshot.sequence.max; seq++) {
+		const source = bySequence.get(seq) ?? null;
+		if (!source && mode === "renumber") continue;
+		let created = journal.createdBySeq.get(seq);
+		const body = source
+			? buildItemBody(source, snapshot, probe, stateMap, labelMap)
+			: { name: placeholderName(journal.header.runId, seq) };
+		const expectedSequence =
+			mode === "exact"
+				? seq
+				: [...journal.createdBySeq.values()].filter((entry) => entry.sourceItemId !== null).length +
+					1;
+		const expected: ExpectedIdentity = {
+			sequence: expectedSequence,
+			name: String(body.name),
+			externalId: source?.externalId,
+		};
+		if (!created) {
+			const intent = journal.pendingIntent(seq);
+			if (intent) {
+				const adopted = await reconcileExpectedItem(client, projectId, expected);
+				if (adopted) {
+					journal.append({
+						type: "item-created",
+						seq,
+						sourceItemId: source?.id ?? null,
+						targetItemId: adopted.id,
+					});
+					created = { targetItemId: adopted.id, sourceItemId: source?.id ?? null };
+				}
+			}
+			if (!created) {
+				if (options.limit !== undefined && options.limit >= 0 && createCalls >= options.limit) {
+					return { limited: true, skipped };
+				}
+				if (!intent) journal.append({ type: "item-intent", seq, sourceItemId: source?.id ?? null });
+				const result = await createItemA10(client, projectId, body, expected, {
+					sleep: options.sleep,
+				});
+				createCalls++;
+				journal.append({
+					type: "item-created",
+					seq,
+					sourceItemId: source?.id ?? null,
+					targetItemId: result.id,
+				});
+				created = { targetItemId: result.id, sourceItemId: source?.id ?? null };
+				if (mode === "exact" && result.sequenceId !== seq) {
+					const reason = `Sequence drift at ${seq}: target assigned ${result.sequenceId}`;
+					journal.append({ type: "poisoned", reason });
+					throw new ReplicateError(
+						`${reason}. Stop all writers and recover with --recreate-target; patching around drift is unsafe.`,
+					);
+				}
+			} else {
+				skipped++;
+			}
+		} else {
+			skipped++;
+		}
+
+		if (source?.archived && probe.archiveVerbAccepted === true) {
+			const archived = journal.entries.some(
+				(entry) => entry.type === "item-archived" && entry.targetItemId === created?.targetItemId,
+			);
+			if (!archived) {
+				await client.archiveWorkItem(projectId, created.targetItemId);
+				journal.append({ type: "item-archived", targetItemId: created.targetItemId });
+			}
+		}
+	}
+	return { limited: false, skipped };
+}
+
+function buildItemBody(
+	item: SnapshotItem,
+	snapshot: ProjectSnapshot,
+	probe: TargetProbeResult,
+	stateMap: Map<string, string>,
+	labelMap: Map<string, string>,
+): Record<string, unknown> {
+	const body: Record<string, unknown> = { name: item.name };
+	if (item.descriptionHtml !== null) body.description_html = item.descriptionHtml;
+	if (item.priority !== null) body.priority = item.priority;
+	if (item.point !== null) body.point = item.point;
+	if (item.stateId !== null) {
+		const state = stateMap.get(item.stateId);
+		if (!state)
+			throw new ReplicateError(`No target state mapping for source state ${item.stateId}`);
+		body.state = state;
+	}
+	const labels = item.labelIds.map((id) => labelMap.get(id)).filter((id): id is string => !!id);
+	if (labels.length > 0) body.labels = labels;
+	const assignees = item.assigneeIds
+		.map((id) => mappedMemberId(id, snapshot, probe))
+		.filter((id): id is string => !!id);
+	if (assignees.length > 0) body.assignees = assignees;
+	if (item.startDate !== null) body.start_date = item.startDate;
+	if (item.targetDate !== null) body.target_date = item.targetDate;
+	if (item.externalId !== null) body.external_id = item.externalId;
+	if (item.externalSource !== null) body.external_source = item.externalSource;
+	if (probe.createdAtAccepted === true && item.createdAt !== null) body.created_at = item.createdAt;
+	const creator = mappedMemberId(item.createdBy, snapshot, probe);
+	if (probe.createdByAccepted === true && creator) body.created_by = creator;
+	return body;
+}
+
+async function replicateParents(
+	client: ApplyClient,
+	journal: Journal,
+	projectId: string,
+	snapshot: ProjectSnapshot,
+): Promise<void> {
+	const bySource = targetBySource(journal);
+	for (const item of snapshot.items) {
+		if (!item.parentId) continue;
+		const target = bySource.get(item.id);
+		const parent = bySource.get(item.parentId);
+		if (!target || !parent) throw new ReplicateError(`Parent mapping incomplete for ${item.id}`);
+		if (journal.parentSet.has(target)) continue;
+		await client.updateWorkItem(projectId, target, { parent });
+		journal.append({ type: "parent-set", targetItemId: target });
+	}
+}
+
+async function replicateRelations(
+	client: ApplyClient,
+	journal: Journal,
+	projectId: string,
+	snapshot: ProjectSnapshot,
+	probe: TargetProbeResult,
+): Promise<void> {
+	const edges = canonicalRelations(snapshot);
+	const accepted = new Set(probe.relationKindsAccepted ?? []);
+	const targetMap = targetBySource(journal);
+	for (const edge of edges) {
+		if (!accepted.has(edge.kind)) continue;
+		if (journal.relationKeys.has(edge.key)) continue;
+		const from = targetMap.get(edge.lowerId);
+		const to = targetMap.get(edge.higherId);
+		if (!from || !to) continue;
+		try {
+			await client.createRelation(projectId, from, edge.kind as PlaneRelationKind, [to]);
+		} catch (error) {
+			if (!isPermanentAlreadyExists(error)) throw error;
+		}
+		journal.append({ type: "relation-created", key: edge.key });
+	}
+}
+
+async function replicateComments(
+	client: ApplyClient,
+	journal: Journal,
+	projectId: string,
+	snapshot: ProjectSnapshot,
+	probe: TargetProbeResult,
+	sleepOverride?: (ms: number) => Promise<void>,
+): Promise<void> {
+	const targetMap = targetBySource(journal);
+	for (const item of snapshot.items) {
+		const targetItemId = targetMap.get(item.id);
+		if (!targetItemId) continue;
+		for (const comment of snapshot.comments[item.id] ?? []) {
+			if (journal.commentsCreated.has(comment.id)) continue;
+			const built = buildCommentBody(comment, item, snapshot, probe);
+			const hasIntent = journal.commentIntents.some(
+				(intent) => intent.sourceCommentId === comment.id,
+			);
+			if (hasIntent) {
+				const adopted = await findComment(client, projectId, targetItemId, comment, built);
+				if (adopted) {
+					journal.append({
+						type: "comment-created",
+						sourceCommentId: comment.id,
+						targetCommentId: adopted.id,
+					});
+					continue;
+				}
+			} else {
+				journal.append({
+					type: "comment-intent",
+					sourceCommentId: comment.id,
+					sourceItemId: item.id,
+				});
+			}
+			const created = await createCommentA10(
+				client,
+				projectId,
+				targetItemId,
+				comment,
+				built,
+				sleepOverride,
+			);
+			journal.append({
+				type: "comment-created",
+				sourceCommentId: comment.id,
+				targetCommentId: created.id,
+			});
+		}
+	}
+}
+
+interface BuiltComment {
+	body: Record<string, unknown>;
+	marker: string | null;
+	htmlPrefix: string;
+	createdAt: string | null;
+}
+
+function buildCommentBody(
+	comment: SnapshotComment,
+	item: SnapshotItem,
+	snapshot: ProjectSnapshot,
+	probe: TargetProbeResult,
+): BuiltComment {
+	const creator = mappedMemberId(comment.createdBy, snapshot, probe);
+	const nativeAuthor = probe.commentCreatedByAccepted === true && creator !== null;
+	const needsFooter = !nativeAuthor || probe.commentCreatedAtAccepted !== true;
+	const marker = needsFooter ? `data-psrepl-comment="${escapeHtml(comment.id)}"` : null;
+	let html = comment.commentHtml;
+	if (needsFooter) {
+		const member = snapshot.members.find((candidate) => candidate.id === comment.createdBy);
+		const author = member?.displayName ?? member?.email ?? "unknown";
+		const createdAt = comment.createdAt ?? "date unavailable";
+		html += `<p ${marker}><em>— replicated from ${escapeHtml(snapshot.project.identifier)}; original author ${escapeHtml(author)}, ${escapeHtml(createdAt)}</em></p>`;
+	}
+	const body: Record<string, unknown> = { comment_html: html };
+	if (probe.commentCreatedAtAccepted === true && comment.createdAt !== null) {
+		body.created_at = comment.createdAt;
+	}
+	if (nativeAuthor) body.created_by = creator;
+	return { body, marker, htmlPrefix: comment.commentHtml, createdAt: comment.createdAt };
+}
+
+async function createCommentA10(
+	client: ApplyClient,
+	projectId: string,
+	itemId: string,
+	comment: SnapshotComment,
+	built: BuiltComment,
+	sleepOverride?: (ms: number) => Promise<void>,
+): Promise<{ id: string }> {
+	const sleep =
+		sleepOverride ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const attempts = Math.max(1, client.maxRetries + 1);
+	for (let attempt = 1; ; attempt++) {
+		try {
+			return await client.createWorkItemComment<{ id: string }>(projectId, itemId, built.body, {
+				maxRetries: 0,
+			});
+		} catch (error) {
+			let found: RawComment | null;
+			try {
+				found = await findComment(client, projectId, itemId, comment, built);
+			} catch {
+				throw error;
+			}
+			if (found) return { id: found.id };
+			if (!isTransientPlaneError(error) || attempt >= attempts) throw error;
+			await sleep(error.retryAfterMs ?? Math.min(500 * 2 ** (attempt - 1), 5000));
+		}
+	}
+}
+
+async function findComment(
+	client: ApplyClient,
+	projectId: string,
+	itemId: string,
+	_comment: SnapshotComment,
+	built: BuiltComment,
+): Promise<RawComment | null> {
+	const comments = await client.listWorkItemComments<RawComment>(projectId, itemId);
+	if (built.marker) {
+		return comments.find((comment) => comment.comment_html?.includes(built.marker!)) ?? null;
+	}
+	return (
+		comments.find(
+			(comment) =>
+				(comment.comment_html ?? "").startsWith(built.htmlPrefix) &&
+				sameNullableInstant(comment.created_at, built.createdAt),
+		) ?? null
+	);
+}
+
+async function cleanupPlaceholders(
+	client: ApplyClient,
+	journal: Journal,
+	projectId: string,
+	mode: IdentifierMode,
+): Promise<void> {
+	if (mode !== "exact") return;
+	if (!journal.cleanupStarted) journal.append({ type: "cleanup-started" });
+	const deleted = new Set(
+		journal.entries
+			.filter((entry) => entry.type === "placeholder-deleted")
+			.map((entry) => entry.targetItemId),
+	);
+	for (const placeholder of journal.placeholders()) {
+		if (deleted.has(placeholder.targetItemId)) continue;
+		try {
+			await client.deleteWorkItem(projectId, placeholder.targetItemId);
+		} catch (error) {
+			if (!isNotFound(error)) throw error;
+		}
+		journal.append({
+			type: "placeholder-deleted",
+			targetItemId: placeholder.targetItemId,
+			seq: placeholder.seq,
+		});
+	}
+}
+
+function assertCleanupCanContinue(
+	journal: Journal,
+	snapshot: ProjectSnapshot,
+	mode: IdentifierMode,
+): void {
+	const created = journal.createdBySeq;
+	const missing = snapshot.items.filter((item) => !created.has(item.sequenceId));
+	if (mode === "exact") {
+		for (const gap of snapshot.sequence.gaps) {
+			if (!created.has(gap)) {
+				throw new ReplicateError(
+					`Cleanup already started but sequence ${gap} was never created; item creation can never resume for this journal. Recover with --recreate-target.`,
+				);
+			}
+		}
+	}
+	if (missing.length > 0) {
+		throw new ReplicateError(
+			`Cleanup already started but ${missing.length} source item(s) are missing; item creation can never resume for this journal. Recover with --recreate-target.`,
+		);
+	}
+}
+
+async function lightVerify(
+	client: ApplyClient,
+	snapshot: ProjectSnapshot,
+	projectId: string,
+	mode: IdentifierMode,
+	journal: Journal,
+): Promise<void> {
+	const live = await client.listWorkItems<RawItem>(projectId);
+	const archivedInventory = await client.listArchivedWorkItems<RawItem>(projectId);
+	const archived: RawItem[] = archivedInventory ?? [];
+	if (archivedInventory === null) {
+		const liveIds = new Set(live.map((item) => item.id));
+		const targetMap = targetBySource(journal);
+		for (const source of snapshot.items.filter((item) => item.archived)) {
+			const targetId = targetMap.get(source.id);
+			if (!targetId || liveIds.has(targetId)) continue;
+			archived.push(await client.getWorkItem<RawItem>(projectId, targetId));
+		}
+	}
+	const items = [...new Map([...live, ...archived].map((item) => [item.id, item])).values()];
+	if (items.length !== snapshot.items.length) {
+		throw new ReplicateError(
+			`Light verification failed: target has ${items.length} items, expected ${snapshot.items.length}`,
+		);
+	}
+	if (mode === "exact") {
+		const actual = items.map((item) => item.sequence_id).sort((a, b) => a - b);
+		const expected = snapshot.items.map((item) => item.sequenceId);
+		if (actual.length !== expected.length || actual.some((seq, index) => seq !== expected[index])) {
+			throw new ReplicateError(
+				`Light verification failed: target sequence set [${actual.join(",")}] does not equal source [${expected.join(",")}]`,
+			);
+		}
+	}
+}
+
+function resultFromJournal(
+	journal: Journal,
+	mode: IdentifierMode,
+	dryRun: boolean,
+	manifests: ApplyManifests,
+	probe: TargetProbeResult,
+	itemsSkipped: number,
+): ApplyResult {
+	const entries = journal.entries;
+	const itemCreated = entries.filter((entry) => entry.type === "item-created");
+	return {
+		mode,
+		dryRun,
+		projectId: journal.projectCreated?.projectId ?? null,
+		itemsCreated: itemCreated.filter((entry) => entry.sourceItemId !== null).length,
+		itemsSkipped,
+		placeholdersCreated: itemCreated.filter((entry) => entry.sourceItemId === null).length,
+		placeholdersDeleted: entries.filter((entry) => entry.type === "placeholder-deleted").length,
+		parentsSet: entries.filter((entry) => entry.type === "parent-set").length,
+		relationsCreated: entries.filter((entry) => entry.type === "relation-created").length,
+		commentsCreated: entries.filter((entry) => entry.type === "comment-created").length,
+		archivedCount: entries.filter((entry) => entry.type === "item-archived").length,
+		manifests,
+		complete: journal.isComplete,
+		probe,
+	};
+}
+
+function emptyResult(
+	mode: IdentifierMode,
+	dryRun: boolean,
+	projectId: string | null,
+	manifests: ApplyManifests,
+	probe: TargetProbeResult,
+): ApplyResult {
+	return {
+		mode,
+		dryRun,
+		projectId,
+		itemsCreated: 0,
+		itemsSkipped: 0,
+		placeholdersCreated: 0,
+		placeholdersDeleted: 0,
+		parentsSet: 0,
+		relationsCreated: 0,
+		commentsCreated: 0,
+		archivedCount: 0,
+		manifests,
+		complete: false,
+		probe,
+	};
+}
+
+function mappedStates(entries: readonly JournalEntry[]): Map<string, string> {
+	return new Map(
+		entries
+			.filter((entry) => entry.type === "state-mapped")
+			.map((entry) => [entry.sourceStateId, entry.targetStateId]),
+	);
+}
+
+function mappedLabels(entries: readonly JournalEntry[]): Map<string, string> {
+	return new Map(
+		entries
+			.filter((entry) => entry.type === "label-mapped")
+			.map((entry) => [entry.sourceLabelId, entry.targetLabelId]),
+	);
+}
+
+function targetBySource(journal: Journal): Map<string, string> {
+	const out = new Map<string, string>();
+	for (const entry of journal.createdBySeq.values()) {
+		if (entry.sourceItemId) out.set(entry.sourceItemId, entry.targetItemId);
+	}
+	return out;
+}
+
+function mappedMemberId(
+	sourceId: string | null,
+	snapshot: ProjectSnapshot,
+	probe: TargetProbeResult,
+): string | null {
+	if (!sourceId) return null;
+	const email = snapshot.members.find((member) => member.id === sourceId)?.email;
+	return email ? (probe.memberByEmail[email.toLowerCase()] ?? null) : null;
+}
+
+function placeholderName(runId: string, seq: number): string {
+	return `planestories:placeholder:${runId}:${seq}`;
+}
+
+function snapshotNeeds(snapshot: ProjectSnapshot) {
+	const relationKinds = new Set<string>();
+	for (const relations of Object.values(snapshot.relations)) {
+		for (const kind of Object.keys(relations)) relationKinds.add(kind);
+	}
+	return {
+		relationKinds: [...relationKinds].sort(),
+		archived: snapshot.items.some((item) => item.archived),
+		anyComments: Object.values(snapshot.comments).some((comments) => comments.length > 0),
+	};
+}
+
+function canonicalRelations(snapshot: ProjectSnapshot): Array<{
+	key: string;
+	kind: string;
+	lowerId: string;
+	higherId: string;
+}> {
+	const sequence = new Map(snapshot.items.map((item) => [item.id, item.sequenceId]));
+	const out = new Map<string, { key: string; kind: string; lowerId: string; higherId: string }>();
+	for (const [fromId, relations] of Object.entries(snapshot.relations)) {
+		const fromSeq = sequence.get(fromId);
+		if (fromSeq === undefined) continue;
+		for (const [rawKind, ids] of Object.entries(relations)) {
+			for (const toId of ids) {
+				const toSeq = sequence.get(toId);
+				if (toSeq === undefined || toSeq === fromSeq) continue;
+				const fromIsLower = fromSeq < toSeq;
+				const lowerId = fromIsLower ? fromId : toId;
+				const higherId = fromIsLower ? toId : fromId;
+				const kind = fromIsLower ? rawKind : inverseRelation(rawKind);
+				const key = `${kind}:${lowerId}:${higherId}`;
+				out.set(key, { key, kind, lowerId, higherId });
+			}
+		}
+	}
+	return [...out.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function inverseRelation(kind: string): string {
+	const inverse: Record<string, string> = {
+		blocked_by: "blocking",
+		blocking: "blocked_by",
+		start_before: "start_after",
+		start_after: "start_before",
+		finish_before: "finish_after",
+		finish_after: "finish_before",
+		relates_to: "relates_to",
+		duplicate: "duplicate",
+	};
+	return inverse[kind] ?? kind;
+}
+
+function isPermanentAlreadyExists(error: unknown): boolean {
+	return (
+		error instanceof PlaneApiError &&
+		error.status !== undefined &&
+		error.status >= 400 &&
+		error.status < 500 &&
+		/already|exist|duplicate/i.test(error.message)
+	);
+}
+
+function isNotFound(error: unknown): boolean {
+	return error instanceof PlaneApiError && error.status === 404;
+}
+
+function sameNullableInstant(actual: string | null | undefined, expected: string | null): boolean {
+	if (actual == null || expected == null) return actual == null && expected == null;
+	return Date.parse(actual) === Date.parse(expected);
+}
+
+function escapeHtml(value: string): string {
+	return value
+		.replaceAll("&", "&amp;")
+		.replaceAll('"', "&quot;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;");
+}
+
+function formatGateProgress(
+	errors: string[],
+	warnings: string[],
+	snapshot: ProjectSnapshot,
+	dryRun: boolean,
+): string {
+	const prefix = dryRun ? "Dry-run plan" : "Pre-write gate";
+	return [
+		`${prefix}: ${snapshot.items.length} real items, ${snapshot.sequence.gaps.length} gaps, ${Object.values(snapshot.comments).flat().length} comments.`,
+		...warnings.map((warning) => `WARNING: ${warning}`),
+		...errors.map((error) => `ERROR: ${error}`),
+	].join("\n");
+}
+
+function describeError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
