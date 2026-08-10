@@ -343,6 +343,24 @@ export class FakePlane {
 		}
 	}
 
+	async getRelations(projectId: string, workItemId: string) {
+		const project = this.project(projectId);
+		const rel: Record<string, string[]> = {
+			blocking: [],
+			blocked_by: [],
+			relates_to: [],
+			duplicate: [],
+			start_before: [],
+			start_after: [],
+			finish_before: [],
+			finish_after: [],
+		};
+		for (const relation of project.relations) {
+			if (relation.from === workItemId) rel[relation.kind]?.push(relation.to);
+		}
+		return rel as unknown as import("../../../src/plane/client.ts").PlaneIssueRelations;
+	}
+
 	async createWorkItemComment<T>(
 		projectId: string,
 		workItemId: string,

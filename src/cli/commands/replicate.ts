@@ -4,8 +4,13 @@ import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
 import { TOOL_VERSION } from "../../constants.ts";
 import { ConfigError, PlaneApiError, ReplicateError } from "../../errors.ts";
-import { createPlaneClient, type PlaneClient } from "../../plane/client.ts";
+import {
+	createPlaneClient,
+	type PlaneClient,
+	type PlaneEndpointDialect,
+} from "../../plane/client.ts";
 import { applySnapshot } from "../../replicate/apply.ts";
+import { detectDialect, detectSourceDialect } from "../../replicate/probe.ts";
 import { formatApplyReport, formatSnapshotSummary } from "../../replicate/report.ts";
 import { parseSnapshot, serializeSnapshot, takeSnapshot } from "../../replicate/snapshot.ts";
 import type { ProjectSnapshot } from "../../replicate/types.ts";
@@ -40,9 +45,50 @@ async function clientFor(context: string | undefined, configPath?: string): Prom
 	});
 }
 
+function withDialect(client: PlaneClient, dialect: PlaneEndpointDialect): PlaneClient {
+	if (client.dialect === dialect) return client;
+	return createPlaneClient({
+		apiKey: client.apiKey,
+		workspaceSlug: client.workspaceSlug,
+		baseUrl: client.baseUrl,
+		maxRetries: client.maxRetries,
+		dialect,
+	});
+}
+
+interface RawProjectRow {
+	id: string;
+	name?: string;
+	identifier?: string;
+}
+
+/**
+ * Resolve the source project and select the dialect that serves its full READ
+ * surface (observed live: the operator's CE serves relations only under
+ * /work-items/ while /issues/ still lists items — snapshotting through the
+ * wrong family would abort on every relation read). Zero writes to the source.
+ */
+async function sourceFor(
+	context: string | undefined,
+	configPath: string | undefined,
+	projectRef: string,
+): Promise<{ client: PlaneClient; projectId: string }> {
+	const base = await clientFor(context, configPath);
+	const projects = await base.listProjects<RawProjectRow>();
+	const match = projects.find((p) => p.name === projectRef || p.identifier === projectRef);
+	if (!match) {
+		throw new ReplicateError(
+			`Project "${projectRef}" not found in workspace ${base.workspaceSlug}. ` +
+				`Available: ${projects.map((p) => p.name).join(", ")}`,
+		);
+	}
+	const dialect = await detectSourceDialect((d) => withDialect(base, d), match.id);
+	return { client: withDialect(base, dialect), projectId: match.id };
+}
+
 interface SnapshotFlow {
 	client: PlaneClient;
-	project: string;
+	projectId: string;
 	out: string;
 	force: boolean;
 	concurrency?: number;
@@ -58,7 +104,7 @@ async function runSnapshot(flow: SnapshotFlow): Promise<ProjectSnapshot> {
 	}
 	const snapshot = await takeSnapshot(
 		flow.client,
-		{ projectName: flow.project },
+		{ projectId: flow.projectId },
 		{
 			toolVersion: TOOL_VERSION,
 			concurrency: flow.concurrency,
@@ -96,7 +142,20 @@ async function runApply(
 	if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
 		throw new ReplicateError(`--limit must be a non-negative integer, got "${options.limit}"`);
 	}
-	const result = await applySnapshot(client, snapshot, {
+	let applyClient = client;
+	if (options.yes === true) {
+		// Select the endpoint dialect that serves this TARGET's full surface
+		// (temp-project probe — a write, so real runs only; dry-run stays
+		// zero-write and reports under the default dialect).
+		const dialect = await detectDialect((d) => withDialect(client, d), {
+			warn: (message) => console.warn(chalk.yellow(message)),
+		});
+		if (dialect !== client.dialect) {
+			console.log(chalk.dim(`Target serves its full surface under /${dialect}/ — using it.`));
+		}
+		applyClient = withDialect(client, dialect);
+	}
+	const result = await applySnapshot(applyClient, snapshot, {
 		yes: options.yes === true,
 		destName: options.destName,
 		destIdentifier: options.destIdentifier,
@@ -131,6 +190,7 @@ export function registerReplicateCommand(program: Command) {
 			"Migrate a Plane project between instances with exact PROJECT-N preservation " +
 				"(one-shot: snapshot the source, then apply to the target)",
 		)
+		.enablePositionalOptions()
 		.option("-c, --config <path>", "Config file path")
 		.option("--from <context>", `Source: ${CONTEXT_HELP}`)
 		.option("--to <context>", `Target: ${CONTEXT_HELP}`)
@@ -164,14 +224,21 @@ export function registerReplicateCommand(program: Command) {
 				if (!options.project) {
 					throw new ConfigError("replicate needs --project <name>");
 				}
-				const source = await clientFor(String(options.from), options.config as string);
+				const source = await sourceFor(
+					String(options.from),
+					options.config as string,
+					String(options.project),
+				);
 				const target = await clientFor(String(options.to), options.config as string);
-				if (source.baseUrl === target.baseUrl && source.workspaceSlug === target.workspaceSlug) {
+				if (
+					source.client.baseUrl === target.baseUrl &&
+					source.client.workspaceSlug === target.workspaceSlug
+				) {
 					throw new ReplicateError(
 						"Source and target resolve to the same workspace — refusing to replicate onto the source.",
 					);
 				}
-				const snapshot = await takeSnapshotForOneShot(source, options);
+				const snapshot = await takeSnapshotForOneShot(source.client, source.projectId, options);
 				const out = String(options.out ?? defaultSnapshotPath(snapshot));
 				await runApply(target, snapshot, out, options);
 			} catch (error) {
@@ -191,10 +258,10 @@ export function registerReplicateCommand(program: Command) {
 		.action(async (options) => {
 			try {
 				if (!options.project) throw new ConfigError("snapshot needs --project <name>");
-				const client = await clientFor(options.from, options.config);
+				const source = await sourceFor(options.from, options.config, options.project);
 				await runSnapshot({
-					client,
-					project: options.project,
+					client: source.client,
+					projectId: source.projectId,
 					out: options.out,
 					force: options.force === true,
 					concurrency: parseConcurrency(options.concurrency),
@@ -245,6 +312,7 @@ export function registerReplicateCommand(program: Command) {
 
 async function takeSnapshotForOneShot(
 	source: PlaneClient,
+	projectId: string,
 	options: ApplyCliOptions & Record<string, string | boolean | undefined>,
 ): Promise<ProjectSnapshot> {
 	// The one-shot persists its snapshot BEFORE applying: if apply dies, the
@@ -259,7 +327,7 @@ async function takeSnapshotForOneShot(
 	}
 	const snapshot = await takeSnapshot(
 		source,
-		{ projectName: String(options.project) },
+		{ projectId },
 		{
 			toolVersion: TOOL_VERSION,
 			concurrency: parseConcurrency(options.concurrency as string | undefined),

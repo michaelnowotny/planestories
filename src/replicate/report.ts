@@ -25,7 +25,11 @@ export function formatApplyReport(result: ApplyResult, options: { json: boolean 
 		`  comment created_by  ${verdict(probe.commentCreatedByAccepted)}`,
 		`  archive verb        ${verdict(probe.archiveVerbAccepted)}`,
 		`  state writes        ${verdict(probe.stateWriteAccepted)}`,
-		`  relation kinds      ${probe.relationKindsAccepted?.join(", ") || "not probed"}`,
+		`  relation kinds      ${
+			probe.relationKindsAccepted === null
+				? "not probed"
+				: probe.relationKindsAccepted.join(", ") || "none accepted"
+		}`,
 	];
 	appendManifest(lines, "Degradations", result.manifests.degradations);
 	appendManifest(lines, "Losses", result.manifests.losses);

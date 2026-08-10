@@ -1,5 +1,9 @@
 import { PlaneApiError, ReplicateError } from "../errors.ts";
-import type { PlaneEndpointDialect, PlaneRelationKind } from "../plane/client.ts";
+import type {
+	PlaneEndpointDialect,
+	PlaneIssueRelations,
+	PlaneRelationKind,
+} from "../plane/client.ts";
 import { isTransientPlaneError } from "./create.ts";
 
 export interface ProbeClient {
@@ -27,6 +31,7 @@ export interface ProbeClient {
 		relationType: PlaneRelationKind,
 		issues: string[],
 	): Promise<void>;
+	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
 	archiveWorkItem(projectId: string, workItemId: string): Promise<void>;
 	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	createWorkItemComment<T>(
@@ -80,6 +85,146 @@ interface RawComment {
 	actor?: string | null;
 }
 
+/**
+ * Determine which endpoint dialect serves an instance's FULL work-item surface.
+ * Observed live (operator's CE, 2026-08-09): `/issues/` serves items and
+ * comments but 404s the RELATIONS endpoints, which exist only under
+ * `/work-items/` there — so a partial surface is a real failure mode, and the
+ * relations endpoint is the discriminator. `/issues/` is preferred whenever it
+ * serves fully (the whole tool is proven against it; cloud still serves it);
+ * `/work-items/` is the fallback. Runs inside a throwaway project, always
+ * deleted.
+ */
+export async function detectDialect(
+	factory: (dialect: PlaneEndpointDialect) => ProbeClient,
+	opts: EmpiricalProbeOptions = {},
+): Promise<PlaneEndpointDialect> {
+	const primary = factory("issues");
+	let projectId: string | null = null;
+	let failure: unknown;
+	let verdict: PlaneEndpointDialect | null = null;
+	try {
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			const suffix = (opts.randomDigits ?? randomFourDigits)();
+			try {
+				const project = await primary.createProject<RawProject>({
+					name: "planestories dialect probe",
+					identifier: `PSDLT${suffix}`,
+				});
+				projectId = project.id;
+				break;
+			} catch (error) {
+				if (!isIdentifierConflict(error) || attempt === 3) throw error;
+			}
+		}
+		if (!projectId)
+			throw new ReplicateError("Dialect probe could not create its temporary project");
+		verdict = (await dialectServesFully(primary, projectId)) ? "issues" : null;
+		if (!verdict) {
+			const alt = factory("work-items");
+			verdict = (await dialectServesFully(alt, projectId)) ? "work-items" : null;
+		}
+		if (!verdict) {
+			throw new ReplicateError(
+				"Neither the /issues/ nor the /work-items/ path family serves the full work-item " +
+					"surface (items + relations) on this instance — cannot replicate against it.",
+			);
+		}
+	} catch (error) {
+		failure = error;
+	} finally {
+		if (projectId) {
+			try {
+				await primary.deleteProject(projectId);
+			} catch (cleanupError) {
+				const message =
+					`Dialect probe could not delete temporary project ${projectId}; remove it manually: ` +
+					describeError(cleanupError);
+				opts.warn?.(message);
+				failure = failure
+					? new ReplicateError(`${describeError(failure)}; additionally, ${message}`)
+					: new ReplicateError(message);
+			}
+		}
+	}
+	if (failure) throw failure;
+	if (!verdict) throw new ReplicateError("Dialect probe reached an impossible state");
+	return verdict;
+}
+
+/** The read surface a SOURCE-side dialect check needs (zero writes). */
+export interface ReadDialectClient {
+	readonly dialect: PlaneEndpointDialect;
+	listWorkItems<T>(
+		projectId: string,
+		query?: Record<string, string | number | boolean | undefined>,
+	): Promise<T[]>;
+	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
+}
+
+/**
+ * Read-only dialect detection for the SNAPSHOT side: a snapshot must not write
+ * to the source, so the discriminator is the source project's own items — list
+ * under a dialect, then hit the relations endpoint of the first item. Without
+ * this, snapshotting a work-items-only instance through `/issues/` would abort
+ * on every relation read (fail-hard, but pointlessly). An empty project returns
+ * the first dialect that lists (relations are vacuous there).
+ */
+export async function detectSourceDialect(
+	factory: (dialect: PlaneEndpointDialect) => ReadDialectClient,
+	projectId: string,
+): Promise<PlaneEndpointDialect> {
+	for (const dialect of ["issues", "work-items"] as const) {
+		const client = factory(dialect);
+		let items: Array<{ id: string }>;
+		try {
+			items = await client.listWorkItems<{ id: string }>(projectId);
+		} catch (error) {
+			if (isNotFoundError(error)) continue;
+			throw error;
+		}
+		const first = items[0];
+		if (!first) return dialect;
+		try {
+			await client.getRelations(projectId, first.id);
+			return dialect;
+		} catch (error) {
+			if (isNotFoundError(error)) continue;
+			throw error;
+		}
+	}
+	throw new ReplicateError(
+		"Neither the /issues/ nor the /work-items/ path family serves the full read surface " +
+			"(items + relations) for this project — cannot snapshot it.",
+	);
+}
+
+/** Full surface = item create AND the relations endpoint respond under this dialect. */
+async function dialectServesFully(client: ProbeClient, projectId: string): Promise<boolean> {
+	let item: RawItem;
+	try {
+		item = await client.createWorkItem<RawItem>(
+			projectId,
+			{ name: `dialect-${client.dialect}` },
+			{ maxRetries: 0 },
+		);
+	} catch (error) {
+		if (isNotFoundError(error)) return false;
+		throw error;
+	}
+	try {
+		await client.getRelations(projectId, item.id);
+		return true;
+	} catch (error) {
+		if (isNotFoundError(error)) return false;
+		throw error;
+	}
+}
+
+function isNotFoundError(error: unknown): boolean {
+	return error instanceof PlaneApiError && error.status === 404;
+}
+
 export async function probeTargetReadOnly(
 	client: ProbeClient,
 	destIdentifier: string,
@@ -131,8 +276,10 @@ export async function probeTargetEmpirical(
 		for (let attempt = 1; attempt <= 3; attempt++) {
 			const suffix = (opts.randomDigits ?? randomFourDigits)();
 			try {
+				// Plain words only: some instances (observed on the operator's CE)
+				// reject project names containing special characters.
 				const project = await client.createProject<RawProject>({
-					name: "planestories probe (temporary)",
+					name: "planestories temporary probe",
 					identifier: `PSPRB${suffix}`,
 				});
 				projectId = project.id;

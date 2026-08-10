@@ -354,11 +354,30 @@ function compactRelations(value: PlaneIssueRelations): SnapshotRelations | null 
 	for (const kind of RELATION_KINDS) {
 		const list = value[kind];
 		if (Array.isArray(list) && list.length > 0) {
-			compact[kind] = [...list].sort();
-			any = true;
+			const ids = list
+				.map(normalizeRelationRef)
+				.filter((id): id is string => typeof id === "string" && id.length > 0);
+			if (ids.length > 0) {
+				compact[kind] = ids.sort();
+				any = true;
+			}
 		}
 	}
 	return any ? compact : null;
+}
+
+/**
+ * A relation reference is a bare work-item UUID on the `/issues/` dialect but an
+ * `{project_id, issue_id}` object on `/work-items/` (observed live on the
+ * operator's CE, 2026-08-09). Normalize both to the item UUID.
+ */
+function normalizeRelationRef(ref: unknown): string | null {
+	if (typeof ref === "string") return ref;
+	if (ref !== null && typeof ref === "object") {
+		const issueId = (ref as { issue_id?: unknown }).issue_id;
+		if (typeof issueId === "string") return issueId;
+	}
+	return null;
 }
 
 function describeError(error: unknown): string {
