@@ -65,6 +65,7 @@ export function registerExportCommand(program: Command) {
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
+					dialect: config.dialect,
 				});
 
 				const filters: ExportFilters = {};

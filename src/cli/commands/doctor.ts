@@ -48,6 +48,7 @@ export function registerDoctorCommand(program: Command) {
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
+					dialect: config.dialect,
 				});
 
 				// Read-only: groom without apply is a pure analysis.

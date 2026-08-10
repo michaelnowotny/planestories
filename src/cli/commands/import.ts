@@ -257,6 +257,7 @@ export function registerImportCommand(program: Command) {
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
+					dialect: config.dialect,
 				});
 
 				// Import

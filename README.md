@@ -58,9 +58,9 @@ Create `.planestoriesrc.json` in your project root for **non-secret** defaults. 
 }
 ```
 
-`PLANE_API_KEY`, `PLANE_WORKSPACE_SLUG`, and `PLANE_BASE_URL` from the environment override
+`PLANE_API_KEY`, `PLANE_WORKSPACE_SLUG`, `PLANE_BASE_URL`, and `PLANE_DIALECT` from the environment override
 config-file values **when no `--context` is selected**. A **named context** (`--context ce`)
-resolves only its own `PLANE_CTX_<NAME>_API_KEY` / `_WORKSPACE_SLUG` / `_BASE_URL` variables —
+resolves only its own `PLANE_CTX_<NAME>_API_KEY` / `_WORKSPACE_SLUG` / `_BASE_URL` / `_DIALECT` variables —
 the bare variables never apply to it, so working against two Plane instances (e.g. cloud +
 self-hosted) can never cross credentials. A context may exist purely in the environment
 (no config-file entry needed): setting `PLANE_CTX_CE_*` makes `--context ce` work as-is.
@@ -363,6 +363,10 @@ A config file may define named contexts; select one with `--context <name>`:
   ]
 }
 ```
+
+Set optional `dialect` to `"work-items"` (or `PLANE_CTX_<NAME>_DIALECT=work-items`) when a
+self-hosted Plane instance serves dependency relations under `/work-items/`. It defaults to
+`"issues"`; a present value other than those two choices is rejected.
 
 ## Development
 

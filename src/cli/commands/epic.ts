@@ -42,6 +42,7 @@ export function registerEpicCommand(program: Command) {
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
+					dialect: config.dialect,
 				});
 
 				const { text } = await rollupEpic(client, {

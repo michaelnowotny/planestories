@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ConfigError } from "../errors.ts";
+import type { PlaneEndpointDialect } from "../plane/client.ts";
 import { DEFAULT_MAX_RETRIES, DEFAULT_PLANE_BASE_URL } from "../plane/client.ts";
 import type { CliConfig, MultiContextConfig, ResolvedConfig } from "../types.ts";
 import { assertConfigFile, isMultiContextConfig } from "./schema.ts";
@@ -106,6 +107,7 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 				apiKey: entry.apiKey,
 				workspaceSlug: entry.workspaceSlug,
 				baseUrl: entry.baseUrl,
+				dialect: entry.dialect,
 				defaultProject: entry.defaultProject,
 				defaultLabels: entry.defaultLabels,
 				sourceLabel: entry.sourceLabel,
@@ -130,7 +132,9 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 
 	// Merge env vars. A NAMED context resolves ONLY its per-context vars; the
 	// bare PLANE_* vars apply ONLY on the default path (see doc comment above).
-	const envFor = (field: "API_KEY" | "WORKSPACE_SLUG" | "BASE_URL"): string | undefined =>
+	const envFor = (
+		field: "API_KEY" | "WORKSPACE_SLUG" | "BASE_URL" | "DIALECT",
+	): string | undefined =>
 		options?.context
 			? process.env[ctxEnvName(options.context, field)]
 			: process.env[`PLANE_${field}`];
@@ -145,6 +149,13 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 	const envBaseUrl = envFor("BASE_URL");
 	if (envBaseUrl) {
 		config.baseUrl = envBaseUrl;
+	}
+	const dialectVariable = options?.context
+		? ctxEnvName(options.context, "DIALECT")
+		: "PLANE_DIALECT";
+	const envDialect = envFor("DIALECT");
+	if (envDialect !== undefined) {
+		config.dialect = parseDialect(envDialect, dialectVariable);
 	}
 	if (process.env.PLANE_SOURCE_LABEL) {
 		config.sourceLabel = process.env.PLANE_SOURCE_LABEL;
@@ -250,11 +261,19 @@ function resolveConfig(config: CliConfig): ResolvedConfig {
 		apiKey: config.apiKey as string,
 		workspaceSlug: config.workspaceSlug as string,
 		baseUrl: config.baseUrl ?? DEFAULT_PLANE_BASE_URL,
+		dialect: config.dialect ?? "issues",
 		defaultProject: config.defaultProject ?? null,
 		defaultLabels: config.defaultLabels ?? [],
 		sourceLabel: config.sourceLabel ?? null,
 		maxRetries: parseMaxRetries(process.env.PLANE_MAX_RETRIES),
 	};
+}
+
+function parseDialect(raw: string, source: string): PlaneEndpointDialect {
+	if (raw === "issues" || raw === "work-items") return raw;
+	throw new ConfigError(
+		`Invalid ${source}: expected "issues" or "work-items", got ${JSON.stringify(raw)}`,
+	);
 }
 
 /**

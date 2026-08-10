@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
 	Journal,
 	type JournalHeader,
+	readJournal,
 	restoreDisplacedLock,
 } from "../../../src/replicate/journal.ts";
 
@@ -41,6 +42,19 @@ const binding = {
 };
 
 describe("replication journal", () => {
+	test("readJournal ignores a torn tail without locking or truncating the file", () => {
+		const temp = tempJournal();
+		try {
+			writeFileSync(temp.path, `${JSON.stringify(header())}\n{"type":"apply-complete"}`);
+			const before = readFileSync(temp.path, "utf8");
+			expect(readJournal(temp.path)).toEqual([header()]);
+			expect(readFileSync(temp.path, "utf8")).toBe(before);
+			expect(existsSync(`${temp.path}.lock`)).toBeFalse();
+		} finally {
+			rmSync(temp.dir, { recursive: true, force: true });
+		}
+	});
+
 	test("creates, opens, and validates its digest binding", () => {
 		const temp = tempJournal();
 		try {

@@ -107,6 +107,7 @@ export function registerDeleteCommand(program: Command) {
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
+					dialect: config.dialect,
 				});
 
 				const summary = await deleteStories(client, {

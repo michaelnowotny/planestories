@@ -186,9 +186,11 @@ bun run src/cli/index.ts epic DATA-1
 
 # Contexts / instance profiles: --context <name> selects a named Plane instance.
 # A context lives in the config file OR purely in env as PLANE_CTX_<NAME>_API_KEY /
-# _WORKSPACE_SLUG / _BASE_URL (e.g. PLANE_CTX_CE_* for a self-hosted CE). Bare
+# _WORKSPACE_SLUG / _BASE_URL / _DIALECT (e.g. PLANE_CTX_CE_* for a self-hosted CE). Bare
 # PLANE_API_KEY/... apply ONLY when no --context is given — a named context never
 # falls back to the bare vars, so dual-instance work cannot cross credentials.
+# Set PLANE_CTX_CE_DIALECT=work-items when CE serves relations under /work-items/;
+# the default dialect is issues, and invalid present values fail configuration loading.
 
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects

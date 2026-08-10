@@ -10,10 +10,14 @@ import {
 	type PlaneEndpointDialect,
 } from "../../plane/client.ts";
 import { applySnapshot } from "../../replicate/apply.ts";
+import { checkFreshness, formatFreshnessReport } from "../../replicate/freshness.ts";
+import { readJournal } from "../../replicate/journal.ts";
 import { detectDialect, detectSourceDialect } from "../../replicate/probe.ts";
+import { formatRelinkResult, relinkMarkdownCorpus } from "../../replicate/relink.ts";
 import { formatApplyReport, formatSnapshotSummary } from "../../replicate/report.ts";
 import { parseSnapshot, serializeSnapshot, takeSnapshot } from "../../replicate/snapshot.ts";
 import type { ProjectSnapshot } from "../../replicate/types.ts";
+import { formatVerifyReport, verifySnapshot } from "../../replicate/verify.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -42,6 +46,7 @@ async function clientFor(context: string | undefined, configPath?: string): Prom
 		workspaceSlug: config.workspaceSlug,
 		baseUrl: config.baseUrl,
 		maxRetries: config.maxRetries,
+		dialect: config.dialect,
 	});
 }
 
@@ -319,6 +324,97 @@ export function registerReplicateCommand(program: Command) {
 				}
 			},
 		);
+
+	replicate
+		.command("verify")
+		.description("Compare a snapshot against its applied target board (read-only)")
+		.option("-c, --config <path>", "Config file path")
+		.requiredOption("--to <ctx>", `Target: ${CONTEXT_HELP}`)
+		.requiredOption("--snapshot <file>", "Snapshot file produced by `replicate snapshot`")
+		.option("--journal <path>", "Apply journal path (default: derived from snapshot)")
+		.option("--json", "Machine-readable full report")
+		.option("-o, --out <file>", "Write the full JSON report in either output mode")
+		.option("--export-file <file>", "Cross-check a planestories markdown export")
+		.option("--concurrency <n>", "Paced read concurrency (default 4)")
+		.action(async (options) => {
+			try {
+				const snapshot = await readSnapshotFile(options.snapshot);
+				const base = await clientFor(options.to, options.config);
+				const journalPath =
+					options.journal ?? `${options.snapshot}.apply-${base.workspaceSlug}.journal.jsonl`;
+				const probe = readJournal(journalPath).find((entry) => entry.type === "probe");
+				const client = probe?.type === "probe" ? withDialect(base, probe.probe.dialect) : base;
+				const report = await verifySnapshot(client, snapshot, {
+					journalPath,
+					exportFile: options.exportFile,
+					concurrency: parseConcurrency(options.concurrency),
+				});
+				if (options.out) await Bun.write(options.out, `${JSON.stringify(report, null, 2)}\n`);
+				console.log(formatVerifyReport(report, options.json === true));
+				if (!report.summary.ok) process.exitCode = 1;
+			} catch (error) {
+				handleError(error);
+			}
+		});
+
+	replicate
+		.command("relink")
+		.description("Rewrite story plane_* fields from source ids to the applied target")
+		.option("-c, --config <path>", "Config file path")
+		.requiredOption("--to <ctx>", `Target: ${CONTEXT_HELP}`)
+		.requiredOption("--snapshot <file>", "Snapshot file produced by `replicate snapshot`")
+		.option("--journal <path>", "Apply journal path (default: derived from snapshot)")
+		.option("--yes", "Apply rewrites (default: dry-run)")
+		.argument("<paths...>", "Markdown files and/or directories")
+		.action(async (paths: string[], options) => {
+			try {
+				const snapshot = await readSnapshotFile(options.snapshot);
+				const client = await clientFor(options.to, options.config);
+				const journalPath =
+					options.journal ?? `${options.snapshot}.apply-${client.workspaceSlug}.journal.jsonl`;
+				const result = relinkMarkdownCorpus(client, snapshot, {
+					paths,
+					journalPath,
+					yes: options.yes === true,
+				});
+				console.log(formatRelinkResult(result));
+			} catch (error) {
+				handleError(error);
+			}
+		});
+
+	replicate
+		.command("freshness")
+		.description("Check whether the source has changed since a snapshot (read-only)")
+		.option("-c, --config <path>", "Config file path")
+		.requiredOption("--from <ctx>", `Source: ${CONTEXT_HELP}`)
+		.requiredOption("--snapshot <file>", "Snapshot file produced by `replicate snapshot`")
+		.option("--json", "Machine-readable report")
+		.action(async (options) => {
+			try {
+				const snapshot = await readSnapshotFile(options.snapshot);
+				const base = await clientFor(options.from, options.config);
+				if (
+					base.baseUrl !== snapshot.source.baseUrl ||
+					base.workspaceSlug !== snapshot.source.workspaceSlug
+				) {
+					throw new ReplicateError(
+						"Freshness source context does not match snapshot.source base URL and workspace",
+					);
+				}
+				const report = await checkFreshness(withDialect(base, snapshot.source.dialect), snapshot);
+				console.log(formatFreshnessReport(report, options.json === true));
+				if (!report.fresh) process.exitCode = 1;
+			} catch (error) {
+				handleError(error);
+			}
+		});
+}
+
+async function readSnapshotFile(path: string): Promise<ProjectSnapshot> {
+	const file = Bun.file(path);
+	if (!(await file.exists())) throw new ReplicateError(`Snapshot file not found: ${path}`);
+	return parseSnapshot(await file.text());
 }
 
 async function takeSnapshotForOneShot(

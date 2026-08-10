@@ -169,6 +169,22 @@ export class FakePlane {
 		if (!this.projects.delete(projectId)) throw new PlaneApiError("not found", 404);
 	}
 
+	async updateProject<T>(projectId: string, body: Record<string, unknown>): Promise<T> {
+		this.write();
+		const project = this.project(projectId);
+		if (
+			typeof body.identifier === "string" &&
+			[...this.projects.values()].some(
+				(candidate) => candidate.id !== projectId && candidate.identifier === body.identifier,
+			)
+		) {
+			throw new PlaneApiError("identifier already exists", 409);
+		}
+		if (typeof body.name === "string") project.name = body.name;
+		if (typeof body.identifier === "string") project.identifier = body.identifier;
+		return projectView(project) as T;
+	}
+
 	async listWorkspaceMembers<T>(): Promise<T[]> {
 		return this.members as T[];
 	}

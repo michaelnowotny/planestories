@@ -42,6 +42,7 @@ export function registerProjectsCommand(program: Command) {
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
+					dialect: config.dialect,
 				});
 
 				const projects = await client.listProjects<ProjectRow>();

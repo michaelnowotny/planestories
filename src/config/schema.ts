@@ -18,6 +18,9 @@ function hasValidConfigFields(obj: Record<string, unknown>): boolean {
 			return false;
 		}
 	}
+	if (obj.dialect !== undefined && obj.dialect !== "issues" && obj.dialect !== "work-items") {
+		return false;
+	}
 
 	if (obj.defaultLabels !== undefined) {
 		if (!Array.isArray(obj.defaultLabels)) {
@@ -34,7 +37,7 @@ function hasValidConfigFields(obj: Record<string, unknown>): boolean {
 }
 
 const SHAPE_MESSAGE =
-	"Invalid config shape: expected an object with optional apiKey (string), workspaceSlug (string), baseUrl (string), defaultProject (string), and defaultLabels (string[])";
+	"Invalid config shape: expected an object with optional apiKey (string), workspaceSlug (string), baseUrl (string), dialect (issues | work-items), defaultProject (string), and defaultLabels (string[])";
 
 /**
  * Type guard that checks whether a value conforms to the CliConfig shape.
@@ -116,6 +119,29 @@ export function assertConfigFile(value: unknown): asserts value is CliConfig | M
 	}
 
 	const obj = value as Record<string, unknown>;
+	if (
+		"dialect" in obj &&
+		obj.dialect !== undefined &&
+		obj.dialect !== "issues" &&
+		obj.dialect !== "work-items"
+	) {
+		throw new ConfigError(
+			`Invalid config field "dialect": expected "issues" or "work-items", got ${JSON.stringify(obj.dialect)}`,
+		);
+	}
+	if (Array.isArray(obj.contexts)) {
+		for (const entry of obj.contexts) {
+			if (entry !== null && typeof entry === "object" && "dialect" in entry) {
+				const dialect = (entry as Record<string, unknown>).dialect;
+				if (dialect !== undefined && dialect !== "issues" && dialect !== "work-items") {
+					const name = (entry as Record<string, unknown>).name;
+					throw new ConfigError(
+						`Invalid config field "contexts.${String(name)}.dialect": expected "issues" or "work-items", got ${JSON.stringify(dialect)}`,
+					);
+				}
+			}
+		}
+	}
 
 	if ("contexts" in obj) {
 		if (!isMultiContextConfig(value)) {

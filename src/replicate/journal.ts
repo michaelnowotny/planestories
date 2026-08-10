@@ -118,7 +118,7 @@ export class Journal {
 			if (!existsSync(path)) {
 				throw new ReplicateError(`Journal does not exist: ${path}`);
 			}
-			const entries = parseJournal(path);
+			const entries = parseJournal(path, true);
 			const header = entries[0];
 			if (!header || header.type !== "header") {
 				throw new ReplicateError(`Journal ${path} has no valid header`);
@@ -149,7 +149,7 @@ export class Journal {
 			if (!existsSync(path)) {
 				return null;
 			}
-			const entries = parseJournal(path);
+			const entries = parseJournal(path, true);
 			if (entries.length === 0) {
 				unlinkSync(path);
 				warningCallback(options)?.(
@@ -417,7 +417,19 @@ function releaseLock(lockPath: string): void {
 	}
 }
 
-function parseJournal(path: string): JournalEntry[] {
+/**
+ * Read committed journal facts without acquiring a lock or modifying the file.
+ * A final non-newline-terminated fragment is an uncommitted torn write and is
+ * ignored in memory; committed corruption still fails closed.
+ */
+export function readJournal(path: string): JournalEntry[] {
+	if (!existsSync(path)) {
+		throw new ReplicateError(`Journal does not exist: ${path}`);
+	}
+	return parseJournal(path, false);
+}
+
+function parseJournal(path: string, repair: boolean): JournalEntry[] {
 	const text = readFileSync(path, "utf8");
 	const lastNewline = text.lastIndexOf("\n");
 	// The trailing newline is each record's commit marker. Bytes past the final
@@ -425,7 +437,7 @@ function parseJournal(path: string): JournalEntry[] {
 	// happen to parse — `{...}\n` truncated by one byte is still valid JSON, but
 	// its fsync never completed. Drop them from disk so appends continue a clean
 	// committed stream.
-	if (lastNewline !== text.length - 1) {
+	if (repair && lastNewline !== text.length - 1) {
 		truncateSync(path, lastNewline < 0 ? 0 : Buffer.byteLength(text.slice(0, lastNewline + 1)));
 	}
 	const committed = lastNewline < 0 ? "" : text.slice(0, lastNewline);

@@ -86,6 +86,7 @@ describe("loadConfig", () => {
 			apiKey: "plane_api_test1234567890abcdef",
 			workspaceSlug: "engineering-ws",
 			baseUrl: "https://api.plane.so",
+			dialect: "issues",
 			defaultProject: "Q1 2026 Release",
 			defaultLabels: ["User Story"],
 			sourceLabel: null,

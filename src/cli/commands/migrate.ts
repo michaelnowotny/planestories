@@ -127,6 +127,7 @@ export function registerMigrateCriteriaCommand(program: Command) {
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
+					dialect: config.dialect,
 				});
 				const report = await migrateCriteria(client, {
 					config,

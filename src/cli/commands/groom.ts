@@ -150,6 +150,7 @@ export function registerGroomCommand(program: Command) {
 					workspaceSlug: config.workspaceSlug,
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
+					dialect: config.dialect,
 				});
 
 				const writeBackFiles: string[] = options.writeBack ?? [];

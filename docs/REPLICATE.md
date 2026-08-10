@@ -90,10 +90,63 @@ requires `--recreate-target`.
 
 `--limit N` pauses after N creates (resumable) — useful for rehearsals.
 
-## After apply
+## Cutover verification
 
-Apply ends with a light verification (live sequence set vs the snapshot's) and a
-report. The full field-by-field `verify` command, `--relink-files` (rewriting
-`plane_id`/`plane_url` in a markdown corpus for cutover), and the `rename-project`
-utility ship in P3 — until then, treat a green apply as board-level, not
-cutover-level, assurance.
+Apply ends with a light sequence/identity check. Before cutover, run the full
+read-only, bidirectional comparison:
+
+```bash
+planestories replicate verify --to ce --snapshot data.snapshot.json
+planestories replicate verify --to ce --snapshot data.snapshot.json --json -o verify.json
+planestories replicate verify --to ce --snapshot data.snapshot.json --export-file stories.md
+```
+
+Verify resolves the target project and every source→target item mapping from the
+completed apply journal. It checks the complete live+archived set, exact sequence
+numbers, scalar fields, state/label/parent resolution, probe-accepted authorship
+and timestamps, normalized HTML plus a markdown second opinion, comments,
+relations, and source-instance asset/cross-links. Any failure exits 1; warnings
+(including known probe-rejected relation kinds and markup-only transformations)
+exit 0. `-o` always writes the full JSON report, even with human console output.
+
+## Relink story files
+
+After verify is green, preview the offline corpus rewrite, then apply it:
+
+```bash
+planestories replicate relink --to ce --snapshot data.snapshot.json stories/ docs/story.md
+planestories replicate relink --to ce --snapshot data.snapshot.json --yes stories/ docs/story.md
+```
+
+Relink recursively scans directories for `*.md` and updates only parser-located
+story YAML values whose `plane_id` is mapped by the journal: UUID, destination
+prefix/sequence, and browser URL. Dry-run is the default. All files are parsed
+and transformed before any write; real writes use a same-directory temporary
+file and rename. Foreign/deleted IDs warn and remain untouched.
+
+## Snapshot freshness
+
+Immediately before cutover, cheaply confirm that the source has not changed:
+
+```bash
+planestories replicate freshness --from cloud --snapshot data.snapshot.json
+planestories replicate freshness --from cloud --snapshot data.snapshot.json --json
+```
+
+Freshness uses the snapshot's recorded endpoint dialect and compares item count,
+sequence set, maximum `updated_at`, and per-item `updated_at`. Any added, deleted,
+or edited item exits 1. If the source does not serve archived inventory, the live
+inventory is compared and the resulting limitation is reported explicitly.
+
+## Rename the destination project
+
+Project renames are single-project and dry-run by default:
+
+```bash
+planestories rename-project --context ce --project DST --name "Data Platform"
+planestories rename-project --context ce --project DST --identifier DATA --yes
+```
+
+The project resolves by case-insensitive identifier or exact name. Changing the
+identifier changes every work-item prefix workspace-visibly, so both preview and
+apply print a warning.

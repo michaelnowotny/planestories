@@ -93,6 +93,7 @@ export function registerAtlasCommand(program: Command) {
 						workspaceSlug: config.workspaceSlug,
 						baseUrl: config.baseUrl,
 						maxRetries: config.maxRetries,
+						dialect: config.dialect,
 					});
 					const resolver = new Resolver(client);
 					const project = await resolver.resolveProject(projectName);

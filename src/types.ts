@@ -1,3 +1,5 @@
+import type { PlaneEndpointDialect } from "./plane/client.ts";
+
 /** Plane work item priority values. */
 export type PlanePriority = "urgent" | "high" | "medium" | "low" | "none";
 
@@ -80,6 +82,7 @@ export interface CliConfig {
 	apiKey?: string;
 	workspaceSlug?: string;
 	baseUrl?: string;
+	dialect?: PlaneEndpointDialect;
 	defaultProject?: string;
 	defaultLabels?: string[];
 	/** When set, tag every created work item with this label (auto-created). Off by default. */
@@ -91,6 +94,7 @@ export interface ContextEntry {
 	apiKey?: string;
 	workspaceSlug?: string;
 	baseUrl?: string;
+	dialect?: PlaneEndpointDialect;
 	defaultProject?: string;
 	defaultLabels?: string[];
 	sourceLabel?: string;
@@ -104,6 +108,8 @@ export interface ResolvedConfig {
 	apiKey: string;
 	workspaceSlug: string;
 	baseUrl: string;
+	/** Always resolved by loadConfig; optional here for legacy constructed test configs. */
+	dialect?: PlaneEndpointDialect;
 	defaultProject: string | null;
 	defaultLabels: string[];
 	/** Source label to tag created items with, or null when disabled. */

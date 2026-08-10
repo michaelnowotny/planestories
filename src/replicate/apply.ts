@@ -1193,7 +1193,7 @@ function snapshotNeeds(snapshot: ProjectSnapshot) {
 	};
 }
 
-function canonicalRelations(snapshot: ProjectSnapshot): Array<{
+export function canonicalRelations(snapshot: ProjectSnapshot): Array<{
 	key: string;
 	kind: string;
 	lowerId: string;
