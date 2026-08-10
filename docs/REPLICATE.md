@@ -130,6 +130,7 @@ Immediately before cutover, cheaply confirm that the source has not changed:
 
 ```bash
 planestories replicate freshness --from cloud --snapshot data.snapshot.json
+planestories replicate freshness --from cloud --snapshot data.snapshot.json --deep
 planestories replicate freshness --from cloud --snapshot data.snapshot.json --json
 ```
 
@@ -137,6 +138,12 @@ Freshness uses the snapshot's recorded endpoint dialect and compares item count,
 sequence set, maximum `updated_at`, and per-item `updated_at`. Any added, deleted,
 or edited item exits 1. If the source does not serve archived inventory, the live
 inventory is compared and the resulting limitation is reported explicitly.
+
+Comment- or relation-only edits need not bump an item's `updated_at` (Plane creates
+those records without saving the parent issue), so the item-level check states that
+blindness in its output. `--deep` closes it: a paced per-item pass compares each item's
+comments (by id and content) and relation sets against the snapshot — the full
+pre-cutover check.
 
 ## Rename the destination project
 

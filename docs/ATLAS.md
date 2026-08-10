@@ -25,7 +25,8 @@ planestories atlas --project "Data Platform" -o atlas.html
 |---|---|
 | `[file]` | Markdown stories file. Omit it and pass `--project` to render the live board. |
 | `-p, --project <name>` | Render a live Plane project instead of a file. |
-| `-o, --output <file>` | Output path (default `./atlas.html`). |
+| `-o, --output <file>` | Output path (default `./atlas.html`; `./atlas.json` with `--json`). |
+| `--json` | Emit the graph as machine-readable JSON instead of HTML. |
 | `--open` | Open the generated file in your default browser. |
 | `--no-dependencies` | Board source: skip the per-item relation fetch (much faster, no supply lanes). |
 | `-c, --config <path>` | Config file (same resolution as other commands). |
@@ -67,7 +68,7 @@ reaches Plane.
   click empty space / ✕ / Esc to unlock. Drag pans; dragging a node moves it (the layout gently
   reheats); wheel zooms (never past fit).
 - **Minimap** (top right): the whole field with the viewport rectangle; click or drag to navigate.
-- **Chips row**: status groups (✦ in their world hue), labels, and ▲ flagged-only — all wired
+- **Chips row**: status groups (✦ in their world hue), labels, and ▲ flagged-only — all wired, plus one chip per assignee (`@name` / `@ unassigned`).
   filters that dim non-matching planets.
 
 ## The sidebar

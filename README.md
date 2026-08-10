@@ -130,7 +130,7 @@ planestories replicate freshness --from cloud --snapshot data.snapshot.json --de
   outside snapshot scope — is counted in explicit degradation/loss manifests rather than
   dropped without a trace.
 - **Cutover tooling included:** `replicate relink` rewrites your markdown corpus to the
-  new instance's ids/URLs atomically; `rename-project` frees or renames identifiers.
+  new instance's ids/URLs atomically; `rename-project` renames a project's name/identifier (freeing the old identifier for reuse).
 - **Snapshots are board backups.** A nightly `replicate snapshot` gives you versioned,
   restorable, diffable backups of everything the snapshot carries — items, hierarchy,
   dependencies, comments, states, labels (not attachments/modules/pages/activity; see
@@ -401,8 +401,11 @@ Reconcile a project (dry-run by default; `--yes` to apply). Keeps a board tidy a
 completes on it:
 
 ```
-planestories groom --project <name> [--yes]
+planestories groom --project <name> [--yes] [--write-back stories/]
 ```
+
+`--write-back` also pulls board-side acceptance-criteria checkbox state back into the
+given story files.
 
 - **Closes orphaned criterion sub-items** — an open `--sync-criteria` sub-item whose parent
   is Done/Cancelled is moved to a completed state, with an idempotent "auto-closed with parent"
@@ -450,7 +453,7 @@ planestories atlas --project "Data Platform" -o atlas.html   # from the live boa
 planestories atlas --project "Data Platform" --json -o g.json # the same graph as data
 ```
 
-Epics are ringed star systems (ring count = stories, hub size = rolled-up effort); stories
+Epics are ringed star systems (the ring counts stories and the hub grows with them); stories
 are planets whose color is the status terraforming ladder and whose size is log-scaled
 effort; orbits encode parent-child structure and supply lines draw dependencies. The
 telescopic LOD resolves nebulae into worlds as you approach. SCAN searches by title or id with
