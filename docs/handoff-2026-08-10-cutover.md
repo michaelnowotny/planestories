@@ -96,3 +96,16 @@ story) · scheduled nightly `replicate snapshot` backups (cron + retention; triv
 high value) · doctor house-rule lints (wishlist #5) · `import --dry-run` field diff
 (wishlist #7) · journal-less verify / snapshot diff+gzip · BLOOMR/DATA replica cleanup ·
 suggest the operator delete `~/plane access.txt` if it still exists.
+
+## Addendum (2026-08-10 afternoon) — backups live; two features shipped
+
+`main` @ `c31fe51`: `replicate backup` (fd3a25f) + `doctor --house-rules` + `import
+--dry-run` field diff (c31fe51), all double-APPROVED, all red-green. A NIGHTLY BACKUP
+CRON is installed on the dev box (user crontab, marker `# planestories-nightly-backup`,
+04:17, cloud DATA → ~/plane-replication/backups, retain 14). First live run banked
+`data.20260810-213628Z.snapshot.json` (2,508 items, seq 1..2524) — its STALE self-check
+correctly caught the finance session adding #2525 mid-read. **CUTOVER STEP ADDED: flip
+the cron's `--from cloud` to `--from ce` when the MCP switch happens (step 5 of §3).**
+The pre-cutover freshness/snapshot steps in §3 are unchanged. Parked-with-rationale:
+warm-story relation-reconciliation skip (reverted; breaks asymmetric dep removal —
+needs a passive-records design; see the finance wishlist response doc).
