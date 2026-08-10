@@ -1,6 +1,6 @@
 import { fetchRelationsWithSweep } from "../atlas/relations.ts";
 import { PlaneApiError } from "../errors.ts";
-import type { PlaneClient } from "../plane/client.ts";
+import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import type { FetchedWorkItem, ProjectIndex } from "../plane/issues.ts";
 import { isCriterionChild } from "./board-story.ts";
 
@@ -17,6 +17,8 @@ export interface DanglingRelation {
 export interface GraphCheckReport {
 	/** Relations pointing at a work item not present in this project (deleted / cross-project). */
 	dangling: DanglingRelation[];
+	/** The single paced relation sweep, shared with optional doctor checks. */
+	relations: Map<string, PlaneIssueRelations>;
 }
 
 /**
@@ -84,5 +86,5 @@ export async function checkDependencyGraph(
 		return dangling;
 	});
 
-	return { dangling: perItem.flat() };
+	return { dangling: perItem.flat(), relations: rel.relationsById };
 }

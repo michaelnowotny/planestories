@@ -1,5 +1,9 @@
 # Known limitations
 
+Dry-run field diffs mirror apply's name-to-ID resolution, while description diffs remain intentionally
+text-level at the canonical-markdown tier. Changes only to HTML attributes or formatting are invisible;
+unresolvable metadata is reported as a note rather than as a field change.
+
 ## Non-standard Acceptance-Criteria heading forms are not fully round-trip-stable
 
 **Status:** pre-existing (not introduced by any single feature); low priority.

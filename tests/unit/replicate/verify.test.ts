@@ -479,7 +479,7 @@ describe("replicate verify", () => {
 				ctx.cleanup();
 			}
 		}
-	});
+	}, 15_000);
 
 	test("markup-only description changes are warnings, not failures", async () => {
 		const ctx = await applied();

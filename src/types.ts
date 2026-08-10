@@ -163,6 +163,15 @@ export interface ImportResult {
 	wouldAction?: "create" | "update";
 	/** Free-form note, e.g. dry-run --check validation findings. */
 	note?: string;
+	/** Field-level dry-run explanation for a would-update result. */
+	diff?: import("./sync/story-diff.ts").StoryDiff;
+	/** Why a requested dry-run diff could not be computed. */
+	diffUnavailable?: string;
+	/**
+	 * Dry-run detected a condition apply fails on before any PATCH (unknown
+	 * parent). Excludes the story from the relation-reconciliation preview.
+	 */
+	applyWouldFail?: boolean;
 }
 
 export interface ImportSummary {

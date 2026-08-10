@@ -8,6 +8,7 @@ import { Resolver } from "../../plane/resolvers.ts";
 import { isOwnedCriterionChild } from "../../sync/board-story.ts";
 import { checkDependencyGraph } from "../../sync/graph_check.ts";
 import { groom } from "../../sync/groomer.ts";
+import { checkHouseRules, type HouseRuleFindings } from "../../sync/house_rules.ts";
 import { checkCriteriaMigration } from "../../sync/migrate.ts";
 
 function handleError(error: unknown): never {
@@ -26,6 +27,19 @@ function handleError(error: unknown): never {
 	process.exit(1);
 }
 
+export function assembleDoctorReport(
+	base: Record<string, unknown> & { findings: number },
+	houseRules?: HouseRuleFindings,
+): Record<string, unknown> & { findings: number } {
+	if (!houseRules) return base;
+	return {
+		...base,
+		findings:
+			base.findings + houseRules.missingEffort.length + houseRules.proseDepsWithoutRelation.length,
+		houseRules,
+	};
+}
+
 export function registerDoctorCommand(program: Command) {
 	program
 		.command("doctor")
@@ -39,6 +53,7 @@ export function registerDoctorCommand(program: Command) {
 		)
 		.option("-p, --project <name>", "Project to check (required if no defaultProject)")
 		.option("--no-fail-on-findings", "Report findings but always exit 0")
+		.option("--house-rules", "Check open-work effort and board-side dependency conventions", false)
 		.option("--json", "Emit the report as JSON (machine-readable acceptance gate)", false)
 		.action(async (options) => {
 			try {
@@ -65,6 +80,9 @@ export function registerDoctorCommand(program: Command) {
 				// Criteria-representation drift (legacy ::ac<n> children vs the
 				// description task-list model). Points the operator at `migrate-criteria`.
 				const criteria = checkCriteriaMigration(index, project.identifier);
+				const houseRules = options.houseRules
+					? checkHouseRules(index, graph.relations, project.identifier)
+					: undefined;
 
 				// Post-migration ledger: how many owned ::ac children sit closed on the
 				// board (migrate closes, never deletes — this is the residue count).
@@ -74,31 +92,30 @@ export function registerDoctorCommand(program: Command) {
 						(i.stateGroup === "completed" || i.stateGroup === "cancelled"),
 				).length;
 
-				const findings =
+				const baseFindings =
 					report.orphanedCriteria.length +
 					report.duplicateTitles.length +
 					report.parentlessCriteria.length +
 					graph.dangling.length +
 					criteria.unmigrated.length +
 					criteria.dual.length;
+				const reportObject = assembleDoctorReport(
+					{
+						project: project.identifier,
+						findings: baseFindings,
+						orphanedCriteria: report.orphanedCriteria,
+						duplicateTitles: report.duplicateTitles,
+						parentlessCriteria: report.parentlessCriteria,
+						danglingRelations: graph.dangling,
+						criteria,
+						ledger: { closedCriterionChildren },
+					},
+					houseRules,
+				);
+				const findings = reportObject.findings;
 
 				if (options.json) {
-					console.log(
-						JSON.stringify(
-							{
-								project: project.identifier,
-								findings,
-								orphanedCriteria: report.orphanedCriteria,
-								duplicateTitles: report.duplicateTitles,
-								parentlessCriteria: report.parentlessCriteria,
-								danglingRelations: graph.dangling,
-								criteria,
-								ledger: { closedCriterionChildren },
-							},
-							null,
-							1,
-						),
-					);
+					console.log(JSON.stringify(reportObject, null, 1));
 					if (findings > 0 && options.failOnFindings !== false) {
 						process.exit(1);
 					}
@@ -121,6 +138,14 @@ export function registerDoctorCommand(program: Command) {
 					`  Unmigrated criteria (::ac children, no list): ${criteria.unmigrated.length}`,
 				);
 				console.log(`  Dual criteria (list + open ::ac children):    ${criteria.dual.length}`);
+				if (houseRules) {
+					console.log(
+						`  Open stories missing effort:                   ${houseRules.missingEffort.length}`,
+					);
+					console.log(
+						`  Prose dependencies missing relations:          ${houseRules.proseDepsWithoutRelation.length}`,
+					);
+				}
 				console.log(
 					chalk.dim(`  Ledger: closed ::ac children on the board:    ${closedCriterionChildren}`),
 				);
@@ -151,6 +176,18 @@ export function registerDoctorCommand(program: Command) {
 				}
 				for (const d of graph.dangling) {
 					console.log(chalk.yellow(`    dangling: ${d.from} ${d.relation} -> ${d.targetId}`));
+				}
+				for (const item of houseRules?.missingEffort ?? []) {
+					console.log(chalk.yellow(`    missing effort: ${item.identifier} ${item.title}`));
+				}
+				for (const item of houseRules?.proseDepsWithoutRelation ?? []) {
+					const missing = item.missing.length ? item.missing.join(", ") : "—";
+					const unknown = item.unknownTargets.length ? item.unknownTargets.join(", ") : "—";
+					console.log(
+						chalk.yellow(
+							`    ${item.identifier}  ${item.title}  missing: ${missing}  unknown: ${unknown}`,
+						),
+					);
 				}
 
 				if (findings === 0) {

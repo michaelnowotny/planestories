@@ -76,7 +76,7 @@ function printRelationSummary(summary: ImportSummary, dryRun: boolean): void {
 }
 
 /** Print a dry-run preview: what WOULD happen, plus any validation findings. */
-function printDryRun(summary: ImportSummary, checked: boolean): void {
+export function printDryRun(summary: ImportSummary, checked: boolean): void {
 	const wouldCreate = summary.results.filter((r) => r.wouldAction === "create").length;
 	const wouldUpdate = summary.results.filter((r) => r.wouldAction === "update").length;
 	// Skipped-with-no-wouldAction = a duplicate that would be skipped (not created/updated).
@@ -113,6 +113,30 @@ function printDryRun(summary: ImportSummary, checked: boolean): void {
 		const verb = result.wouldAction === "update" ? "would update" : "would create";
 		const note = result.note ? chalk.yellow(` (⚠ ${result.note})`) : "";
 		console.log(`  ${mark} ${verb}: ${result.story.title}${note}`);
+		if (result.diffUnavailable) {
+			console.log(chalk.dim(`    diff unavailable (${result.diffUnavailable})`));
+		} else if (result.diff?.hashOnly) {
+			console.log(
+				chalk.dim(
+					"    hash mismatch only — e.g. relation encoding or hash-format change; a real apply would rewrite and re-warm",
+				),
+			);
+		} else if (result.diff) {
+			for (const change of result.diff.changes) {
+				if (change.field === "description") {
+					console.log("    description: differs (canonical text)");
+					for (const line of result.diff.descriptionPreview?.split("\n") ?? []) {
+						console.log(`      ${line}`);
+					}
+				} else if (change.field === "labels") {
+					console.log(`    labels: ${change.to}`);
+				} else {
+					console.log(
+						`    ${change.field}: ${JSON.stringify(change.from)} -> ${JSON.stringify(change.to)}`,
+					);
+				}
+			}
+		}
 	}
 
 	printLabelSummary(summary);
@@ -223,6 +247,7 @@ export function registerImportCommand(program: Command) {
 			false,
 		)
 		.option("--dry-run", "Preview without writing to Plane", false)
+		.option("--no-diff", "Suppress field-level differences in dry-run output")
 		.option(
 			"--check",
 			"With --dry-run, validate against Plane read-only (project/state/assignee/labels)",
@@ -275,6 +300,7 @@ export function registerImportCommand(program: Command) {
 					adoptDuplicates: options.adoptDuplicates,
 					forceCreate: options.forceCreate,
 					strict: options.strict,
+					diff: options.diff,
 					noWriteBack: !options.writeBack, // Commander converts --no-write-back to writeBack: false
 				});
 

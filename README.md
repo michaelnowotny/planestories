@@ -231,7 +231,7 @@ planestories import stories/*.md            # create/update work items, write id
 planestories import stories/*.md --dry-run  # preview: reports exactly what apply would do, no writes
 ```
 
-`--dry-run` is **faithful** — it consults the board read-only (one memoized listing) and reports the same per-story outcome apply would produce (`would create` / `would update` / `unchanged` / `would skip` a duplicate) — it just never writes. Add `--check` to also validate that each `status` / `assignee` / `label` / `parent` resolves.
+`--dry-run` mirrors apply's read-only resolution and reports the same per-story outcome (`would create` / `would update` / `unchanged` / `would skip` a duplicate) without writing. Update previews compare the fields apply would actually PATCH; values that cannot resolve are shown as notes instead. Description comparison is at the canonical-text tier, so formatting-only HTML changes are intentionally invisible. Relations remain in the existing relation summary because they are reconciled globally. Add `--check` for the broader validation report.
 
 After a successful import, `plane_id` (the work item UUID), `plane_identifier` (e.g. `ENG-42`), and `plane_url` are written back into each story's YAML block.
 
@@ -331,6 +331,7 @@ planestories import <files...> [options]
   --force-create          Create even when a same-title item exists (bypass the duplicate guard)
   --strict                Refuse headings with no YAML block and no acceptance criteria
   --dry-run               Preview without writing to Plane
+  --no-diff               Suppress field-level differences in dry-run output
   --check                 With --dry-run, validate read-only (project/state/assignee/labels)
   --no-write-back         Skip writing Plane ids back into the markdown
 ```
@@ -420,8 +421,11 @@ A read-only CI health check over the same analysis — prints board rot and **ex
 findings** (pass `--no-fail-on-findings` to just report):
 
 ```
-planestories doctor --project <name>
+planestories doctor --project <name> [--house-rules]
 ```
+
+`--house-rules` flags open non-epic stories without a valid `**Effort:** N dev-days` line,
+and open work whose board-authored `Depends on:` / `Blocks:` prose lacks the matching relation.
 
 ### `lint`
 

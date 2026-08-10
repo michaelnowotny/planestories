@@ -54,6 +54,7 @@ export class Resolver {
 	private client: PlaneClient;
 	private projectCache = new Map<string, ResolvedProject>();
 	private labelCache = new Map<string, string>();
+	private labelListCache = new Map<string, PlaneLabel[]>();
 	private stateCache = new Map<string, string | undefined>();
 	private rawStatesCache = new Map<string, PlaneState[]>();
 	private memberCache = new Map<string, NormalizedMember[]>();
@@ -99,6 +100,15 @@ export class Resolver {
 		return resolved;
 	}
 
+	/** One label-list read per project per Resolver lifetime; creations append. */
+	private async listLabelsCached(projectId: string): Promise<PlaneLabel[]> {
+		const cached = this.labelListCache.get(projectId);
+		if (cached) return cached;
+		const labels = await this.client.listLabels<PlaneLabel>(projectId);
+		this.labelListCache.set(projectId, labels);
+		return labels;
+	}
+
 	/**
 	 * Resolve label names to UUIDs within a project.
 	 * Labels not found are skipped with a warning, unless `createMissing` is set,
@@ -113,7 +123,7 @@ export class Resolver {
 			return [];
 		}
 
-		const labels = await this.client.listLabels<PlaneLabel>(projectId);
+		const labels = await this.listLabelsCached(projectId);
 		// Seed the cache (case-insensitive keys) from the project's labels.
 		for (const label of labels) {
 			this.labelCache.set(this.labelKey(projectId, label.name), label.id);
@@ -139,6 +149,8 @@ export class Resolver {
 			}
 
 			const created = await this.client.createLabel<PlaneLabel>(projectId, { name });
+			// Keep the memoized project label list coherent with the creation.
+			this.labelListCache.get(projectId)?.push(created);
 			this.labelCache.set(key, created.id);
 			this.createdLabelNames.add(name);
 			ids.push(created.id);
@@ -166,6 +178,36 @@ export class Resolver {
 			this.stateCache.set(key, undefined);
 		}
 		return this.stateCache.get(key);
+	}
+
+	/** Resolve a state and return both the UUID and Plane's canonical display name. */
+	async resolveState(
+		projectId: string,
+		name: string,
+	): Promise<{ id: string; name: string } | undefined> {
+		const states = await this.getStates(projectId);
+		const match = states.find((state) => state.name.toLowerCase() === name.toLowerCase());
+		return match ? { id: match.id, name: match.name } : undefined;
+	}
+
+	/**
+	 * Resolve label names without creating anything. Existing labels use Plane's
+	 * canonical spelling; missing labels are returned separately for preview notes.
+	 */
+	async resolveLabelNames(
+		projectId: string,
+		names: string[],
+	): Promise<{ resolved: string[]; missing: string[] }> {
+		const labels = await this.listLabelsCached(projectId);
+		const byName = new Map(labels.map((label) => [label.name.toLowerCase(), label]));
+		const resolved: string[] = [];
+		const missing: string[] = [];
+		for (const name of names) {
+			const match = byName.get(name.toLowerCase());
+			if (match) resolved.push(match.name);
+			else missing.push(name);
+		}
+		return { resolved, missing };
 	}
 
 	/**

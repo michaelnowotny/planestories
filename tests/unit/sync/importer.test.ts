@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseMarkdownFile } from "../../../src/markdown/parser.ts";
 import { importStories, makeExternalId } from "../../../src/sync/importer.ts";
+import { hashStoryPayload } from "../../../src/sync/story-hash.ts";
 import type { ResolvedConfig } from "../../../src/types.ts";
 import { type FakeData, makeFakeClient } from "../../helpers/fake-plane-client.ts";
 
@@ -304,6 +306,752 @@ describe("importStories", () => {
 		expect(summary.results[1]?.wouldAction).toBe("create");
 	});
 
+	test("--dry-run --no-diff omits diff results", async () => {
+		const filePath = writeTmpFile("no-diff.md", markdownExistingStory);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{ id: PLANE_UUID, sequence_id: 42, name: "Old title", state: { name: "Backlog" } },
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			diff: false,
+		});
+
+		expect(summary.results[0]?.wouldAction).toBe("update");
+		expect(summary.results[0]?.diff).toBeUndefined();
+		expect(summary.results[0]?.diffUnavailable).toBeUndefined();
+	});
+
+	test("--status-only dry-run diff contains only the status change", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## New title
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+status: In Progress
+priority: high
+labels: [Feature]
+estimate: 3
+\`\`\`
+
+New body.
+`;
+		const filePath = writeTmpFile("status-only-diff.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				states: {
+					[PROJECT_UUID]: [
+						{ id: "state-backlog", name: "Backlog" },
+						{ id: "state-progress", name: "In Progress" },
+					],
+				},
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: PLANE_UUID,
+							sequence_id: 42,
+							name: "Old title",
+							description_html: "<p>Old body.</p>",
+							priority: "low",
+							point: 1,
+							labels: [{ id: "old", name: "OldLabel" }],
+							state: { name: "Backlog" },
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			statusOnly: true,
+		});
+
+		const diff = summary.results[0]?.diff;
+		expect(diff?.changes.map((change) => change.field)).toEqual(["status"]);
+		expect(diff?.descriptionDiffers).toBe(false);
+	});
+
+	test("status-only no-change has no fields and never claims a hash mismatch", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## Same
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: stale
+status: Backlog
+\`\`\`
+`;
+		const filePath = writeTmpFile("status-only-same.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{ id: PLANE_UUID, sequence_id: 42, name: "Same", state: { name: "Backlog" } },
+					],
+				},
+			}),
+		);
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			statusOnly: true,
+		});
+		expect(summary.results[0]?.diff?.changes).toEqual([]);
+		expect(summary.results[0]?.diff?.hashOnly).toBe(false);
+	});
+
+	test("dry-run compares assignees by member id and notes unresolved values", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## Same member
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+assignee: jane
+\`\`\`
+
+Body.
+`;
+		const common = {
+			workItems: {
+				[PROJECT_UUID]: [
+					{
+						id: PLANE_UUID,
+						sequence_id: 42,
+						name: "Same member",
+						description_html: "<p>Body.</p>",
+						assignees: [{ id: "user-1", email: "jane@company.com", display_name: "Jane" }],
+					},
+				],
+			},
+		};
+		const sameFile = writeTmpFile("assignee-same.md", markdown);
+		const same = makeFakeClient(baseData(common));
+		const sameSummary = await importStories(same.client, {
+			files: [sameFile],
+			config: defaultConfig,
+			dryRun: true,
+		});
+		expect(sameSummary.results[0]?.diff?.changes.map((change) => change.field)).not.toContain(
+			"assignee",
+		);
+
+		const missingFile = writeTmpFile(
+			"assignee-missing.md",
+			markdown.replace("assignee: jane", "assignee: nobody"),
+		);
+		const missing = makeFakeClient(baseData(common));
+		const missingSummary = await importStories(missing.client, {
+			files: [missingFile],
+			config: defaultConfig,
+			dryRun: true,
+		});
+		expect(missingSummary.results[0]?.diff?.changes.map((change) => change.field)).not.toContain(
+			"assignee",
+		);
+		expect(missingSummary.results[0]?.note).toContain(
+			'assignee "nobody" not found — would not be written',
+		);
+	});
+
+	test("matching plane_hash process path performs no item writes and has no diff", async () => {
+		const withoutHash = `---
+project: "Q1 Release"
+---
+
+## Already warm
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+priority: high
+labels: [Feature]
+\`\`\`
+
+Same body.
+`;
+		const parsedStory = parseMarkdownFile(withoutHash, "warm.md").stories[0]!;
+		const planeHash = hashStoryPayload(parsedStory, { syncCriteria: false, labels: ["Feature"] });
+		const markdown = withoutHash.replace(
+			`plane_id: ${PLANE_UUID}`,
+			`plane_id: ${PLANE_UUID}\nplane_hash: ${planeHash}`,
+		);
+		const filePath = writeTmpFile("warm.md", markdown);
+		const { client, calls } = makeFakeClient(baseData());
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		expect(summary.results[0]?.action).toBe("unchanged");
+		expect(summary.results[0]?.diff).toBeUndefined();
+		expect(
+			calls.some((call) =>
+				["createWorkItem", "updateWorkItem", "createWorkItemComment"].includes(call.method),
+			),
+		).toBe(false);
+		// Warm unchanged stories still participate in the global relation phase so
+		// asymmetric declarations can be removed; its project/index reads are allowed.
+		expect(calls.some((call) => call.method === "listProjects")).toBe(true);
+		expect(calls.some((call) => call.method === "listWorkItems")).toBe(true);
+	});
+
+	test("an unknown parent never claims a hash-only rewrite — apply would fail", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## As a user, I want to log in
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: "0000000000000000"
+parent: ENG-999
+\`\`\`
+
+Same body.
+`;
+		const filePath = writeTmpFile("bad-parent.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: PLANE_UUID,
+							sequence_id: 42,
+							name: "As a user, I want to log in",
+							description_html: "<p>Same body.</p>",
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		const result = summary.results[0]!;
+		expect(result.wouldAction).toBe("update");
+		expect(result.note).toContain('parent "ENG-999" not found — apply would fail');
+		expect(result.diff?.changes ?? []).toEqual([]);
+		// The stale hash must NOT surface as "hash mismatch only — apply would
+		// rewrite and re-warm": apply fails before PATCH on the unknown parent.
+		expect(result.diff?.hashOnly).toBe(false);
+	});
+
+	test("dry-run resolves the label list once per project and never for empty label sets", async () => {
+		const twoChanged = `---
+project: "Q1 Release"
+---
+
+## First changed story
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: "0000000000000000"
+labels: [Feature]
+\`\`\`
+
+New body one.
+
+## Second changed story
+
+\`\`\`yaml
+plane_id: 22222222-2222-4222-8222-222222222222
+plane_hash: "0000000000000000"
+labels: [Feature]
+\`\`\`
+
+New body two.
+`;
+		const filePath = writeTmpFile("two-changed.md", twoChanged);
+		const { client, calls } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{ id: PLANE_UUID, sequence_id: 42, name: "First changed story" },
+						{
+							id: "22222222-2222-4222-8222-222222222222",
+							sequence_id: 43,
+							name: "Second changed story",
+						},
+					],
+				},
+			}),
+		);
+
+		await importStories(client, { files: [filePath], config: defaultConfig, dryRun: true });
+		const labelLists = calls.filter((call) => call.method === "listLabels").length;
+		expect(labelLists).toBe(1);
+
+		const noLabels = twoChanged.replace(/labels: \[Feature\]\n/g, "");
+		const filePath2 = writeTmpFile("two-changed-nolabels.md", noLabels);
+		const { client: client2, calls: calls2 } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{ id: PLANE_UUID, sequence_id: 42, name: "First changed story" },
+						{
+							id: "22222222-2222-4222-8222-222222222222",
+							sequence_id: 43,
+							name: "Second changed story",
+						},
+					],
+				},
+			}),
+		);
+		await importStories(client2, { files: [filePath2], config: defaultConfig, dryRun: true });
+		expect(calls2.filter((call) => call.method === "listLabels").length).toBe(0);
+	});
+
+	test("parent identifier case differences are not reported as changes", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## As a user, I want to log in
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: "0000000000000000"
+parent: eng-7
+\`\`\`
+
+Same body.
+`;
+		const filePath = writeTmpFile("parent-case.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: PLANE_UUID,
+							sequence_id: 42,
+							name: "As a user, I want to log in",
+							description_html: "<p>Same body.</p>",
+							parent: "33333333-3333-4333-8333-333333333333",
+						},
+						{
+							id: "33333333-3333-4333-8333-333333333333",
+							sequence_id: 7,
+							name: "The epic",
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		const fields = (summary.results[0]?.diff?.changes ?? []).map((change) => change.field);
+		expect(fields).not.toContain("parent");
+	});
+
+	test("--dry-run --check emits a single note per unresolved field", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## As a user, I want to log in
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: "0000000000000000"
+status: Nope
+\`\`\`
+
+Same body.
+`;
+		const filePath = writeTmpFile("dup-notes.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: PLANE_UUID,
+							sequence_id: 42,
+							name: "As a user, I want to log in",
+							description_html: "<p>Same body.</p>",
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			check: true,
+		});
+
+		const note = summary.results[0]?.note ?? "";
+		expect(note.match(/status "Nope" not found/g)?.length).toBe(1);
+	});
+
+	test("--dry-run --check emits single notes even with multiple unresolved fields", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## As a user, I want to log in
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: "0000000000000000"
+status: Nope
+assignee: ghost@company.com
+\`\`\`
+
+Same body.
+`;
+		const filePath = writeTmpFile("dup-notes-multi.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: PLANE_UUID,
+							sequence_id: 42,
+							name: "As a user, I want to log in",
+							description_html: "<p>Same body.</p>",
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			check: true,
+		});
+
+		const note = summary.results[0]?.note ?? "";
+		expect(note.match(/status "Nope" not found/g)?.length).toBe(1);
+		expect(note.match(/assignee "ghost@company.com" not found/g)?.length).toBe(1);
+	});
+
+	test("a would-create story with an unknown parent never previews relation changes", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## Brand new story
+
+\`\`\`yaml
+parent: ENG-999
+blocked_by: ENG-43
+\`\`\`
+
+New body.
+`;
+		const filePath = writeTmpFile("failing-create-relations.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: "44444444-4444-4444-8444-444444444444",
+							sequence_id: 43,
+							name: "The dependency",
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		const result = summary.results[0]!;
+		expect(result.wouldAction).toBe("create");
+		expect(result.note).toContain('parent "ENG-999" not found — apply would fail');
+		expect(summary.relationChanges).toEqual([]);
+		expect(summary.relationsCreated).toBe(0);
+	});
+
+	test("an index-missing update with an unknown parent never previews relation changes", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## As a user, I want to log in
+
+\`\`\`yaml
+plane_id: 55555555-5555-4555-8555-555555555555
+plane_hash: "0000000000000000"
+parent: ENG-999
+blocked_by: ENG-43
+\`\`\`
+
+Same body.
+`;
+		const filePath = writeTmpFile("failing-missing-index.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: "44444444-4444-4444-8444-444444444444",
+							sequence_id: 43,
+							name: "The dependency",
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		const result = summary.results[0]!;
+		expect(result.wouldAction).toBe("update");
+		expect(result.note).toContain('parent "ENG-999" not found — apply would fail');
+		expect(summary.relationChanges).toEqual([]);
+	});
+
+	test("duplicate-guard targets never claim apply-would-fail on an unknown parent", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## The dependency
+
+\`\`\`yaml
+parent: ENG-999
+\`\`\`
+
+Duplicate title body.
+`;
+		const filePath = writeTmpFile("dup-parent.md", markdown);
+		const dupItems = [
+			{ id: "44444444-4444-4444-8444-444444444444", sequence_id: 43, name: "The dependency" },
+		];
+		const { client } = makeFakeClient(baseData({ workItems: { [PROJECT_UUID]: dupItems } }));
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+		const skip = summary.results[0]!;
+		// Apply exits at the duplicate guard BEFORE parent validation — the skip
+		// preview must not carry a contradictory apply-would-fail verdict.
+		expect(skip.note ?? "").not.toContain("apply would fail");
+		expect(skip.applyWouldFail).toBeUndefined();
+
+		const multiItems = [
+			...dupItems,
+			{ id: "66666666-6666-4666-8666-666666666666", sequence_id: 44, name: "The dependency" },
+		];
+		const { client: client2 } = makeFakeClient(
+			baseData({ workItems: { [PROJECT_UUID]: multiItems } }),
+		);
+		const summary2 = await importStories(client2, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			adoptDuplicates: true,
+		});
+		const multi = summary2.results[0]!;
+		expect(multi.note ?? "").not.toContain("apply would fail");
+		expect(multi.applyWouldFail).toBeUndefined();
+	});
+
+	test("check notes containing the join delimiter never duplicate", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## As a user, I want to log in
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: "0000000000000000"
+status: "Ready; QA"
+\`\`\`
+
+Same body.
+`;
+		const filePath = writeTmpFile("delimiter-note.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: PLANE_UUID,
+							sequence_id: 42,
+							name: "As a user, I want to log in",
+							description_html: "<p>Same body.</p>",
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+			check: true,
+		});
+
+		const note = summary.results[0]?.note ?? "";
+		expect(note.match(/status "Ready; QA" not found/g)?.length).toBe(1);
+	});
+
+	test("a story apply would fail on never previews relation changes", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## As a user, I want to log in
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: "0000000000000000"
+parent: ENG-999
+blocked_by: ENG-43
+\`\`\`
+
+Same body.
+`;
+		const filePath = writeTmpFile("failing-relations.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: PLANE_UUID,
+							sequence_id: 42,
+							name: "As a user, I want to log in",
+							description_html: "<p>Same body.</p>",
+						},
+						{
+							id: "44444444-4444-4444-8444-444444444444",
+							sequence_id: 43,
+							name: "The dependency",
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		const result = summary.results[0]!;
+		expect(result.note).toContain('parent "ENG-999" not found — apply would fail');
+		// Apply fails before PATCH and before relation enrollment — the dry-run
+		// preview must not promise relation work that apply will never perform.
+		expect(summary.relationChanges).toEqual([]);
+		expect(summary.relationsCreated).toBe(0);
+	});
+
+	test("dry-run update missing from the board index marks the diff unavailable", async () => {
+		const filePath = writeTmpFile("missing-index.md", markdownExistingStory);
+		const { client } = makeFakeClient(baseData());
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		expect(summary.results[0]?.wouldAction).toBe("update");
+		expect(summary.results[0]?.diff).toBeUndefined();
+		expect(summary.results[0]?.diffUnavailable).toBe("item not in index");
+	});
+
+	test("dry-run update exposes the hash-only rendering result when board fields match", async () => {
+		const markdown = `---
+project: "Q1 Release"
+---
+
+## Same title
+
+\`\`\`yaml
+plane_id: ${PLANE_UUID}
+plane_hash: stale-hash
+priority: high
+labels: [Feature]
+estimate: 3
+status: Backlog
+\`\`\`
+
+Same body.
+`;
+		const filePath = writeTmpFile("hash-only.md", markdown);
+		const { client } = makeFakeClient(
+			baseData({
+				workItems: {
+					[PROJECT_UUID]: [
+						{
+							id: PLANE_UUID,
+							sequence_id: 42,
+							name: "Same title",
+							description_html: "<p>Same body.</p>",
+							priority: "high",
+							point: 3,
+							labels: [{ id: "lbl-feature", name: "Feature" }],
+							state: { name: "Backlog" },
+						},
+					],
+				},
+			}),
+		);
+
+		const summary = await importStories(client, {
+			files: [filePath],
+			config: defaultConfig,
+			dryRun: true,
+		});
+
+		expect(summary.results[0]?.diff).toMatchObject({
+			changes: [],
+			descriptionDiffers: false,
+			hashOnly: true,
+		});
+	});
+
 	test("--dry-run --check resolves read-only and notes bad metadata without writing", async () => {
 		// Project resolves, but the status state does not exist in the project.
 		const data = baseData({ states: { [PROJECT_UUID]: [{ id: "s-todo", name: "Todo" }] } });
@@ -579,5 +1327,82 @@ body two
 
 		expect(summary.failed).toBe(1);
 		expect(summary.results[0]?.error).toContain("No project specified");
+	});
+
+	test("removes an asymmetric dependency when changed A and warm unchanged B are re-imported", async () => {
+		const aId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+		const bId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+		const withoutHash = `---
+project: "Q1 Release"
+---
+
+## A
+
+\`\`\`yaml
+plane_id: ${aId}
+plane_identifier: ENG-1
+plane_hash: stale
+\`\`\`
+
+A no longer declares a blocker.
+
+## B
+
+\`\`\`yaml
+plane_id: ${bId}
+plane_identifier: ENG-2
+\`\`\`
+
+B body.
+`;
+		const bStory = parseMarkdownFile(withoutHash, "relations.md").stories[1]!;
+		const bHash = hashStoryPayload(bStory, { syncCriteria: false, labels: [] });
+		const markdown = withoutHash.replace(
+			`plane_identifier: ENG-2`,
+			`plane_identifier: ENG-2\nplane_hash: ${bHash}`,
+		);
+		const board = {
+			workItems: {
+				[PROJECT_UUID]: [
+					{
+						id: aId,
+						sequence_id: 1,
+						name: "A",
+						description_html: "<p>Old A body.</p>",
+						external_source: "planestories",
+					},
+					{
+						id: bId,
+						sequence_id: 2,
+						name: "B",
+						description_html: "<p>B body.</p>",
+						external_source: "planestories",
+					},
+				],
+			},
+			relations: { [aId]: { blocked_by: [bId] } },
+		};
+
+		const dryFile = writeTmpFile("relations-dry.md", markdown);
+		const dry = makeFakeClient(baseData(board));
+		const preview = await importStories(dry.client, {
+			files: [dryFile],
+			config: defaultConfig,
+			dryRun: true,
+		});
+		expect(preview.relationsRemoved).toBe(1);
+		expect(preview.relationChanges[0]?.removed).toEqual(["blocked_by ENG-2"]);
+
+		const applyFile = writeTmpFile("relations-apply.md", markdown);
+		const apply = makeFakeClient(baseData(board));
+		const result = await importStories(apply.client, {
+			files: [applyFile],
+			config: defaultConfig,
+			noWriteBack: true,
+		});
+		expect(result.relationsRemoved).toBe(1);
+		expect(apply.removedRelations).toEqual([
+			{ projectId: PROJECT_UUID, workItemId: aId, relationType: "blocked_by", relatedIssue: bId },
+		]);
 	});
 });

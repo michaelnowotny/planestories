@@ -52,6 +52,7 @@ export interface FetchedWorkItem {
 	stateName: string | undefined;
 	assigneeEmail: string | undefined;
 	assigneeDisplayName: string | undefined;
+	assigneeId?: string;
 	labels: string[];
 	externalSource: string | undefined;
 	externalId: string | undefined;
@@ -377,6 +378,7 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 		stateName,
 		assigneeEmail: firstAssignee?.email as string | undefined,
 		assigneeDisplayName: firstAssignee?.display_name as string | undefined,
+		assigneeId: firstAssignee?.id as string | undefined,
 		labels: labelNames,
 		externalSource: (item.external_source as string) || undefined,
 		externalId: (item.external_id as string) || undefined,

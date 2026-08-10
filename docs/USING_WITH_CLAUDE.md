@@ -94,6 +94,7 @@ export PATH="$HOME/.bun/bin:$PATH"
 
 # Faithful preview — reads the board read-only, reports exactly what apply would do
 # (would create / would update / unchanged / would skip a duplicate), makes NO writes:
+# Would-update entries include canonical-markdown field diffs; add --no-diff to suppress them.
 bun run src/cli/index.ts import /path/to/stories.md --dry-run
 
 # Also validate that status/assignee/label/parent resolve (adds read-only checks):
@@ -163,7 +164,7 @@ bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
 # Doctor: read-only CI check; exits non-zero on findings (board rot). Checks orphaned/
 # parentless criterion sub-items, duplicate titles, and DANGLING dependency relations
 # (a blocked_by/blocks/relates_to whose target work item was deleted / left the project).
-bun run src/cli/index.ts doctor --project "My Project"
+bun run src/cli/index.ts doctor --project "My Project" --house-rules
 
 # Replicate: take a dated, self-checked backup and retain the newest 14 files.
 bun run src/cli/index.ts replicate backup --from cloud -p "My Project" --dir backups --retain 14

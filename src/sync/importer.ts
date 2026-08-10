@@ -25,6 +25,7 @@ import {
 	type RelationSyncStory,
 	reconcileProjectRelations,
 } from "./relations.ts";
+import { diffStoryAgainstBoard } from "./story-diff.ts";
 import { hashStoryPayload } from "./story-hash.ts";
 
 /** Lazily fetch (and memoize) a project's work-item index — one list per project per run. */
@@ -66,6 +67,8 @@ export interface ImportOptions {
 	forceCreate?: boolean;
 	/** Refuse headings that look like design-doc sections (no yaml + no criteria). */
 	strict?: boolean;
+	/** Show field-level explanations for dry-run updates (default true). */
+	diff?: boolean;
 }
 
 /**
@@ -142,7 +145,11 @@ export async function importStories(
 				(result.action === "created" ||
 					result.action === "updated" ||
 					result.action === "unchanged" ||
-					(Boolean(options.dryRun) && result.wouldAction !== undefined));
+					// Apply fails before relation enrollment when e.g. the parent is
+					// unknown — a dry-run must not preview relation work for it.
+					(Boolean(options.dryRun) &&
+						result.wouldAction !== undefined &&
+						result.applyWouldFail !== true));
 			if (relationEligible) {
 				const projectName = options.project ?? story.project ?? options.config.defaultProject;
 				if (projectName) {
@@ -266,6 +273,8 @@ async function processStory(
 		syncCriteria: Boolean(options.syncCriteria),
 		labels: effectiveLabelNames(story, options),
 	});
+	const hashMismatch =
+		story.planeHash !== null && contentHash !== story.planeHash && !options.force;
 
 	if (story.planeId && story.planeHash && !options.force && contentHash === story.planeHash) {
 		return {
@@ -296,20 +305,43 @@ async function processStory(
 		// back plane_hash (only the state was synced, not the full payload — claiming
 		// a full sync would let a later import skip a genuinely-changed body).
 		if (options.statusOnly) {
-			const stateId = story.status
-				? await resolver.resolveStateId(project.id, story.status)
+			const resolvedState = story.status
+				? await resolver.resolveState(project.id, story.status)
 				: undefined;
+			const stateId = resolvedState?.id;
 
 			if (options.dryRun) {
 				const notes: string[] = [];
 				if (!story.planeId) notes.push("no plane_id — would be skipped");
-				if (story.status && !stateId) notes.push(`status "${story.status}" not found`);
-				return {
+				if (story.status && !stateId)
+					notes.push(`status "${story.status}" not found — would not be written`);
+				const result: ImportResult = {
 					story,
 					action: "skipped",
 					wouldAction: "update",
 					note: notes.join("; ") || undefined,
 				};
+				if (options.diff !== false && story.planeId) {
+					const index = await getIndex(project.id, project.identifier);
+					const boardItem = index.byId.get(story.planeId);
+					if (boardItem) {
+						result.diff = diffStoryAgainstBoard({
+							story: {
+								...story,
+								priority: null,
+								estimate: null,
+								labels: [],
+								assignee: null,
+								parent: null,
+							},
+							bodyForWrite: boardItem.description ?? "",
+							boardItem: { ...boardItem, name: story.title },
+							resolved: { stateName: resolvedState?.name, labels: [] },
+							hashMismatch: false,
+						});
+					} else result.diffUnavailable = "item not in index";
+				}
+				return result;
 			}
 
 			if (!story.planeId) {
@@ -390,24 +422,104 @@ async function processStory(
 
 		// Dry-run: report exactly what apply would do (+ --check validation notes), no writes.
 		if (options.dryRun) {
-			let note: string | undefined;
+			// Structured note collection shared by the check pass and the diff pass —
+			// the strings are only ever JOINED for display, never reparsed, so a
+			// field value containing the join delimiter cannot duplicate notes.
+			const dryRunNotes: string[] = [];
+			let parentKnownMissing = false;
 			if (options.check) {
-				const notes: string[] = [];
 				if (story.assignee && !(await resolver.resolveAssigneeId(project.id, story.assignee))) {
-					notes.push(`assignee "${story.assignee}" not found`);
+					dryRunNotes.push(`assignee "${story.assignee}" not found — would not be written`);
 				}
 				if (story.status && !(await resolver.resolveStateId(project.id, story.status))) {
-					notes.push(`status "${story.status}" not found`);
+					dryRunNotes.push(`status "${story.status}" not found — would not be written`);
 				}
-				if (story.parent) {
-					const idx = await getIndex(project.id, project.identifier);
-					if (!idx.byIdentifier.has(story.parent)) {
-						notes.push(`parent "${story.parent}" not found`);
+			}
+			// Parent validation runs for every WRITE-CAPABLE dry-run preview shape
+			// (would-create, would-update, index-missing update) whenever check or
+			// the default diff is active — apply fails on an unknown parent before
+			// any PATCH/create and before relation enrollment, so no preview may
+			// promise work for such a story. Duplicate-guard targets are exempt:
+			// real apply exits at the duplicate guard BEFORE parent validation.
+			// (--no-diff without --check deliberately opts out of this validation.)
+			const writeCapable = target.kind === "create" || target.kind === "update";
+			if (story.parent && writeCapable && (options.check || options.diff !== false)) {
+				const idx = await getIndex(project.id, project.identifier);
+				if (!idx.byIdentifier.has(normalizeIdentifier(story.parent))) {
+					dryRunNotes.push(`parent "${story.parent}" not found — apply would fail`);
+					parentKnownMissing = true;
+				}
+			}
+			const result = previewFromTarget(
+				story,
+				target,
+				project.identifier,
+				dryRunNotes.join("; ") || undefined,
+			);
+			if (parentKnownMissing) result.applyWouldFail = true;
+			if (options.diff !== false && target.kind === "update") {
+				const index = await getIndex(project.id, project.identifier);
+				const boardItem = target.item ?? index.byId.get(target.id);
+				if (!boardItem) {
+					result.diffUnavailable = "item not in index";
+				} else {
+					try {
+						const notes = [...dryRunNotes];
+						const state = story.status
+							? await resolver.resolveState(project.id, story.status)
+							: undefined;
+						if (story.status && !state)
+							notes.push(`status "${story.status}" not found — would not be written`);
+						const assigneeId = story.assignee
+							? await resolver.resolveAssigneeId(project.id, story.assignee)
+							: undefined;
+						if (story.assignee && !assigneeId)
+							notes.push(`assignee "${story.assignee}" not found — would not be written`);
+						const effectiveLabels = effectiveLabelNames(story, options);
+						// Apply skips the labels field entirely for an empty set — never
+						// spend a label-list read on it.
+						const labelResolution = effectiveLabels.length
+							? await resolver.resolveLabelNames(project.id, effectiveLabels)
+							: { resolved: [], missing: [] };
+						const sourceLabel = options.sourceLabel ?? options.config.sourceLabel;
+						const labels = [...labelResolution.resolved];
+						for (const missing of labelResolution.missing) {
+							if (options.createLabels || missing === sourceLabel) labels.push(missing);
+							else notes.push(`label "${missing}" not found — would not be written`);
+						}
+						const requestedParent = story.parent ? normalizeIdentifier(story.parent) : undefined;
+						const parentItem = requestedParent
+							? index.byIdentifier.get(requestedParent)
+							: undefined;
+						// Missing parents were already validated (and noted) before the
+						// preview was built; the hoisted flag is the single authority.
+						const parentMissing = parentKnownMissing;
+						const parent = boardItem.parent ? index.byId.get(boardItem.parent) : undefined;
+						result.note = [...new Set(notes)].join("; ") || undefined;
+						result.diff = diffStoryAgainstBoard({
+							story,
+							bodyForWrite: bodyForParent,
+							boardItem,
+							boardParentIdentifier: parent ? `${project.identifier}-${parent.sequenceId}` : null,
+							resolved: {
+								stateName: state?.name,
+								labels,
+								assigneeId,
+								assigneeDisplay: story.assignee,
+								parentIdentifier: parentItem ? requestedParent : undefined,
+							},
+							// An unresolvable parent means apply FAILS before any PATCH — a
+							// stale hash must not be presented as "would rewrite and re-warm".
+							hashMismatch: hashMismatch && !parentMissing,
+						});
+					} catch (error) {
+						result.diffUnavailable = `resolution failed: ${
+							error instanceof Error ? error.message : String(error)
+						}`;
 					}
 				}
-				note = notes.join("; ") || undefined;
 			}
-			return previewFromTarget(story, target, project.identifier, note);
+			return result;
 		}
 
 		// Apply — non-write outcomes first.
@@ -468,7 +580,7 @@ async function processStory(
 		// Cross-file nesting: `parent: DATA-N` -> the parent's UUID via the index.
 		if (story.parent) {
 			const index = await getIndex(project.id, project.identifier);
-			const parentItem = index.byIdentifier.get(story.parent);
+			const parentItem = index.byIdentifier.get(normalizeIdentifier(story.parent));
 			if (!parentItem) {
 				return {
 					story,
@@ -798,6 +910,11 @@ function effectiveLabelNames(story: UserStory, options: ImportOptions): string[]
 		labels.push(sourceLabel);
 	}
 	return labels;
+}
+
+/** Plane identifiers are case-insensitive at the markdown boundary. */
+function normalizeIdentifier(identifier: string): string {
+	return identifier.trim().toUpperCase();
 }
 
 /**
