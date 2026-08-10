@@ -7,3 +7,7 @@ export const ARCHIVE_LABEL = "archived";
  *  not in importer.ts, so value modules like board-story.ts can consult it without a
  *  circular import back through the importer. */
 export const EXTERNAL_SOURCE = "planestories";
+
+/** Tool version recorded in snapshots/journals. Keep in sync with package.json
+ *  and the program.version() call in cli/index.ts. */
+export const TOOL_VERSION = "0.3.1";

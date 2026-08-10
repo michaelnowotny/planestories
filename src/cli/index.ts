@@ -11,6 +11,7 @@ import { registerLintCommand } from "./commands/lint.ts";
 import { registerMigrateCriteriaCommand } from "./commands/migrate.ts";
 import { registerPacketCommand } from "./commands/packet.ts";
 import { registerProjectsCommand } from "./commands/projects.ts";
+import { registerReplicateCommand } from "./commands/replicate.ts";
 import { registerSetCommand } from "./commands/set.ts";
 
 const program = new Command();
@@ -32,5 +33,6 @@ registerAtlasCommand(program);
 registerLintCommand(program);
 registerPacketCommand(program);
 registerEpicCommand(program);
+registerReplicateCommand(program);
 
 program.parse();
