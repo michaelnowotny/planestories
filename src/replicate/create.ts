@@ -17,6 +17,7 @@ export interface ExpectedIdentity {
 	sequence: number;
 	name: string;
 	externalId?: string | null;
+	externalSource?: string | null;
 }
 
 interface RawCreatedItem {
@@ -24,6 +25,7 @@ interface RawCreatedItem {
 	sequence_id: number;
 	name?: string;
 	external_id?: string | null;
+	external_source?: string | null;
 }
 
 export function isTransientPlaneError(error: unknown): error is PlaneApiError {
@@ -33,7 +35,16 @@ export function isTransientPlaneError(error: unknown): error is PlaneApiError {
 	);
 }
 
-/** Find and fingerprint an expected sequence without making a write. */
+/**
+ * Find and fingerprint an expected sequence without making a write. The
+ * fingerprint is STRICT: name must match AND external identity must match
+ * including its ABSENCE — an expected-null external_id only matches an item
+ * with no external_id, so a foreign item that happens to share a title but
+ * carries its own external identity is never adopted. (A foreign board-native
+ * item sharing both the exact title and no external identity at exactly the
+ * expected number remains theoretically adoptable — no API-visible field can
+ * discriminate it; the target project being run-created bounds that risk.)
+ */
 export async function reconcileExpectedItem(
 	client: A10CreateClient,
 	projectId: string,
@@ -42,14 +53,14 @@ export async function reconcileExpectedItem(
 	const items = await client.listWorkItems<RawCreatedItem>(projectId);
 	const found = items.find((item) => item.sequence_id === expected.sequence);
 	if (!found) return null;
-	const externalMatches =
-		expected.externalId === undefined ||
-		expected.externalId === null ||
-		found.external_id === expected.externalId;
-	if (found.name !== expected.name || !externalMatches) {
+	const externalIdMatches = (found.external_id ?? null) === (expected.externalId ?? null);
+	const externalSourceMatches =
+		(found.external_source ?? null) === (expected.externalSource ?? null);
+	if (found.name !== expected.name || !externalIdMatches || !externalSourceMatches) {
 		throw new ReplicateError(
 			`Foreign item occupies expected sequence ${expected.sequence}; expected fingerprint ` +
-				`${JSON.stringify(expected.name)} but found ${JSON.stringify(found.name ?? "")}. ` +
+				`${JSON.stringify(expected.name)}/${String(expected.externalId ?? null)} but found ` +
+				`${JSON.stringify(found.name ?? "")}/${String(found.external_id ?? null)}. ` +
 				"Refusing to adopt it.",
 		);
 	}

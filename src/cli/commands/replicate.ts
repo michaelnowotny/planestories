@@ -142,6 +142,12 @@ async function runApply(
 	if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
 		throw new ReplicateError(`--limit must be a non-negative integer, got "${options.limit}"`);
 	}
+	if (options.recreateTarget === true && options.yes !== true) {
+		throw new ReplicateError(
+			"--recreate-target is a destructive recovery and only acts on a real apply; add --yes " +
+				"(a dry-run would silently ignore it).",
+		);
+	}
 	let applyClient = client;
 	if (options.yes === true) {
 		// Select the endpoint dialect that serves this TARGET's full surface
@@ -173,7 +179,12 @@ async function runApply(
 	console.log(formatApplyReport(result, { json: options.json === true }));
 	if (!options.json) {
 		if (result.dryRun) {
-			console.log(chalk.yellow("\nDry run — nothing was written. Re-run with --yes to apply."));
+			console.log(
+				chalk.yellow(
+					"\nDry run — nothing was written. Re-run with --yes to apply. " +
+						"(Endpoint-dialect selection and the empirical probe run only on the real apply.)",
+				),
+			);
 		} else if (!result.complete) {
 			console.log(chalk.yellow(`\nPaused (resumable). Journal: ${journalPath}`));
 		}

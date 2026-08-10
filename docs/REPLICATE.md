@@ -62,9 +62,11 @@ not implemented in this build, fails closed).
   states (matched by name+group; colors/descriptions patched onto Plane's defaults).
 - **Archived items are replicated as archived** (probe-gated verb).
 - **Degradation/loss manifests**: every fallback (unmappable authors, rejected
-  relation kinds, missing archive verb) and every v1-out entity (cycles, modules,
-  pages, attachments, `updated_at`, activity history, reactions) is counted in the
-  apply report — nothing silently dropped.
+  relation kinds, missing archive verb) is counted in the apply report. V1-out
+  entities are reported as losses: `updated_at`/`completed_at` counted per item;
+  cycles/modules/pages and attachments/activity/reactions as categorical notes
+  (they are not inventoried in snapshot v1 — description-embedded asset URLs
+  still point at the source instance).
 - If the source's archived inventory endpoint is unavailable, sequence gaps cannot
   be distinguished from invisible archived items: the gate fails closed until
   `--assume-gaps-deleted` is passed deliberately.

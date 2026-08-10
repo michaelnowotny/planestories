@@ -234,12 +234,27 @@ function collectLosses(snapshot: ProjectSnapshot, losses: DegradationEntry[]): v
 		detail: "Snapshot schema v1 does not carry cycles, modules, or pages.",
 		count: 1,
 	});
+	losses.push({
+		feature: "attachments/activity/reactions",
+		detail:
+			"Not inventoried in snapshot schema v1 — not carried and not counted per item " +
+			"(description-embedded asset URLs still point at the source instance).",
+		count: 1,
+	});
 	const updated = snapshot.items.filter((item) => item.updatedAt !== null).length;
 	if (updated > 0) {
 		losses.push({
 			feature: "updated_at",
 			detail: "Work-item updated_at is never preserved.",
 			count: updated,
+		});
+	}
+	const completed = snapshot.items.filter((item) => item.completedAt !== null).length;
+	if (completed > 0) {
+		losses.push({
+			feature: "completed_at",
+			detail: "Work-item completed_at is snapshotted but not writable on create.",
+			count: completed,
 		});
 	}
 }

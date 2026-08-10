@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Journal, type JournalHeader } from "../../../src/replicate/journal.ts";
@@ -101,6 +101,20 @@ describe("replication journal", () => {
 			});
 			expect(warnings[0]).toContain("stale");
 			stolen.close();
+		} finally {
+			rmSync(temp.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("release is ownership-checked: closing never unlinks a lock another process holds", () => {
+		// After our stale lock is legitimately stolen, our dying close() must not
+		// remove the NEW holder's lock — that would let a third contender in.
+		const temp = tempJournal();
+		try {
+			const journal = Journal.create(temp.path, header());
+			writeFileSync(`${temp.path}.lock`, "99999999"); // another process took over
+			journal.close();
+			expect(readFileSync(`${temp.path}.lock`, "utf8")).toBe("99999999");
 		} finally {
 			rmSync(temp.dir, { recursive: true, force: true });
 		}

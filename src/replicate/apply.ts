@@ -133,7 +133,7 @@ export async function applySnapshot(
 	let journal: Journal | null = null;
 	try {
 		if (existsSync(options.journalPath)) {
-			journal = Journal.open(
+			journal = Journal.openOrDiscardTorn(
 				options.journalPath,
 				{
 					snapshotDigest: snapshot.digest,
@@ -142,6 +142,8 @@ export async function applySnapshot(
 				},
 				{ warn: options.onProgress },
 			);
+		}
+		if (journal) {
 			validateResumeOptions(journal, destName, destIdentifier, initialMode);
 
 			if (options.flags.recreateTarget) {
@@ -179,11 +181,17 @@ export async function applySnapshot(
 			journal?.append({ type: "probe", probe });
 		}
 
+		// A pending project-create INTENT makes an identifier-holding project
+		// tentatively ours for gate purposes (the ambiguous-commit window); the
+		// shell phase fingerprint-verifies before actually adopting it.
+		const journalOwnsProject =
+			journal?.projectCreated?.projectId ??
+			(journal?.projectIntent ? (probe.existingProjectId ?? null) : null);
 		const gate = decideGate({
 			snapshot,
 			probe,
 			flags: options.flags,
-			resume: { journalOwnsProject: journal?.projectCreated?.projectId ?? null },
+			resume: { journalOwnsProject },
 			destIdentifier,
 		});
 		progress(formatGateProgress(gate.errors, gate.warnings, snapshot, false));
@@ -216,18 +224,7 @@ export async function applySnapshot(
 		}
 
 		if (!projectId) {
-			const project = await client.createProject<RawProject>({
-				name: destName,
-				identifier: destIdentifier,
-				description: snapshot.project.description,
-			});
-			projectId = project.id;
-			journal.append({
-				type: "project-created",
-				projectId,
-				identifier: destIdentifier,
-				name: destName,
-			});
+			projectId = await createOrAdoptProject(client, journal, destName, destIdentifier, snapshot);
 		}
 
 		const stateMap = await replicateStates(client, journal, projectId, snapshot, gate.manifests);
@@ -301,6 +298,64 @@ function validateResumeOptions(
 			`Resume identifier mode mismatch: journal has ${journal.header.identifierMode}, options request ${mode}`,
 		);
 	}
+}
+
+/**
+ * Create the destination project with the same ambiguity discipline as item
+ * creates: journal an INTENT first; on resume with a pending intent, an
+ * identifier-holding project is adopted only when it fingerprints as ours —
+ * our exact name AND zero items (we can only have crashed before any item
+ * create, because project-created is journaled before the item phase).
+ */
+async function createOrAdoptProject(
+	client: ApplyClient,
+	journal: Journal,
+	destName: string,
+	destIdentifier: string,
+	snapshot: ProjectSnapshot,
+): Promise<string> {
+	if (journal.projectIntent) {
+		const existing = (await client.listProjects<RawProject>()).find(
+			(project) => project.identifier?.toLowerCase() === destIdentifier.toLowerCase(),
+		);
+		if (existing) {
+			const items = await client.listWorkItems<RawItem>(existing.id);
+			if (existing.name === destName && items.length === 0) {
+				journal.append({
+					type: "project-created",
+					projectId: existing.id,
+					identifier: destIdentifier,
+					name: destName,
+				});
+				return existing.id;
+			}
+			throw new ReplicateError(
+				`Project ${existing.id} holds identifier ${destIdentifier} but does not fingerprint as ` +
+					`this run's ambiguous create (name ${JSON.stringify(existing.name ?? "")} vs ` +
+					`${JSON.stringify(destName)}, ${items.length} item(s)). Refusing to adopt it — ` +
+					"remove it manually or pick a different --dest-identifier.",
+			);
+		}
+	} else {
+		journal.append({ type: "project-intent", identifier: destIdentifier, name: destName });
+	}
+	const project = await client.createProject<RawProject>(
+		{
+			name: destName,
+			identifier: destIdentifier,
+			description: snapshot.project.description,
+		},
+		// Retries off: a blind replay of an ambiguous create would 409 on the
+		// identifier; the intent + adoption path above is the recovery story.
+		{ maxRetries: 0 },
+	);
+	journal.append({
+		type: "project-created",
+		projectId: project.id,
+		identifier: destIdentifier,
+		name: destName,
+	});
+	return project.id;
 }
 
 async function recreateOwnedTarget(client: ApplyClient, journal: Journal): Promise<void> {
@@ -392,14 +447,19 @@ async function replicateStates(
 			targetStateId: target.id,
 			action,
 		});
-		if (source.isDefault) {
-			try {
-				await client.updateState(projectId, target.id, { default: true });
-			} catch (error) {
-				manifests.warnings.push(
-					`Could not make state ${source.name} the default: ${describeError(error)}`,
-				);
-			}
+	}
+	// Re-assert the default state EVERY run (idempotent): tying it to the
+	// per-state create would skip it forever if a crash landed between the
+	// state-mapped journal line and the default update.
+	const sourceDefault = snapshot.states.find((state) => state.isDefault);
+	const defaultTargetId = sourceDefault ? stateMap.get(sourceDefault.id) : undefined;
+	if (sourceDefault && defaultTargetId) {
+		try {
+			await client.updateState(projectId, defaultTargetId, { default: true });
+		} catch (error) {
+			manifests.warnings.push(
+				`Could not make state ${sourceDefault.name} the default: ${describeError(error)}`,
+			);
 		}
 	}
 	const mappedTargetIds = new Set(stateMap.values());
@@ -421,19 +481,28 @@ async function replicateLabels(
 	snapshot: ProjectSnapshot,
 ): Promise<Map<string, string>> {
 	const labelMap = mappedLabels(journal.entries);
+	// Adopt-by-name before creating: a crash between a label POST and its
+	// journal line would otherwise re-create the label on resume (duplicate or
+	// uniqueness conflict). Label names are unique per project, and the project
+	// is run-created, so a name match is ours.
+	const existingLabels = await client.listLabels<RawLabel>(projectId);
+	const byName = new Map(existingLabels.map((label) => [label.name ?? "", label]));
 	for (const source of [...snapshot.labels].sort((a, b) => a.name.localeCompare(b.name))) {
 		if (labelMap.has(source.id)) continue;
-		const target = await client.createLabel<RawLabel>(projectId, {
-			name: source.name,
-			color: source.color,
-			description: source.description,
-		});
+		const adopted = byName.get(source.name);
+		const target =
+			adopted ??
+			(await client.createLabel<RawLabel>(projectId, {
+				name: source.name,
+				color: source.color,
+				description: source.description,
+			}));
 		labelMap.set(source.id, target.id);
 		journal.append({
 			type: "label-mapped",
 			sourceLabelId: source.id,
 			targetLabelId: target.id,
-			action: "created",
+			action: adopted ? "adopted" : "created",
 		});
 	}
 	for (const source of snapshot.labels) {
@@ -478,6 +547,7 @@ async function replicateItems(
 			sequence: expectedSequence,
 			name: String(body.name),
 			externalId: source?.externalId,
+			externalSource: source?.externalSource,
 		};
 		if (!created) {
 			const intent = journal.pendingIntent(seq);
@@ -502,6 +572,16 @@ async function replicateItems(
 					sleep: options.sleep,
 				});
 				createCalls++;
+				// Poison BEFORE recording the create: if item-created landed first
+				// and the process died before the poison line, resume would treat
+				// the drifted item as legitimately owning this sequence number.
+				if (mode === "exact" && result.sequenceId !== seq) {
+					const reason = `Sequence drift at ${seq}: target assigned ${result.sequenceId} (item ${result.id})`;
+					journal.append({ type: "poisoned", reason });
+					throw new ReplicateError(
+						`${reason}. Stop all writers and recover with --recreate-target; patching around drift is unsafe.`,
+					);
+				}
 				journal.append({
 					type: "item-created",
 					seq,
@@ -509,13 +589,6 @@ async function replicateItems(
 					targetItemId: result.id,
 				});
 				created = { targetItemId: result.id, sourceItemId: source?.id ?? null };
-				if (mode === "exact" && result.sequenceId !== seq) {
-					const reason = `Sequence drift at ${seq}: target assigned ${result.sequenceId}`;
-					journal.append({ type: "poisoned", reason });
-					throw new ReplicateError(
-						`${reason}. Stop all writers and recover with --recreate-target; patching around drift is unsafe.`,
-					);
-				}
 			} else {
 				skipped++;
 			}
@@ -669,6 +742,8 @@ interface BuiltComment {
 	marker: string | null;
 	htmlPrefix: string;
 	createdAt: string | null;
+	/** True when the target preserves our created_at natively — a durable key. */
+	createdAtNative: boolean;
 }
 
 function buildCommentBody(
@@ -689,11 +764,18 @@ function buildCommentBody(
 		html += `<p ${marker}><em>— replicated from ${escapeHtml(snapshot.project.identifier)}; original author ${escapeHtml(author)}, ${escapeHtml(createdAt)}</em></p>`;
 	}
 	const body: Record<string, unknown> = { comment_html: html };
-	if (probe.commentCreatedAtAccepted === true && comment.createdAt !== null) {
+	const createdAtNative = probe.commentCreatedAtAccepted === true && comment.createdAt !== null;
+	if (createdAtNative) {
 		body.created_at = comment.createdAt;
 	}
 	if (nativeAuthor) body.created_by = creator;
-	return { body, marker, htmlPrefix: comment.commentHtml, createdAt: comment.createdAt };
+	return {
+		body,
+		marker,
+		htmlPrefix: comment.commentHtml,
+		createdAt: comment.createdAt,
+		createdAtNative,
+	};
 }
 
 async function createCommentA10(
@@ -735,8 +817,21 @@ async function findComment(
 ): Promise<RawComment | null> {
 	const comments = await client.listWorkItemComments<RawComment>(projectId, itemId);
 	if (built.marker) {
-		return comments.find((comment) => comment.comment_html?.includes(built.marker!)) ?? null;
+		const byMarker = comments.find((comment) => comment.comment_html?.includes(built.marker!));
+		if (byMarker) return byMarker;
+		// The target may sanitize data-* attributes out of the stored HTML — the
+		// marker is then gone even though the write committed. Fall through to
+		// created_at when it is a durable (natively preserved) key.
 	}
+	if (built.createdAtNative) {
+		// Every comment on a run-created item is ours, and source timestamps are
+		// unique per item, so a natively preserved created_at identifies the
+		// comment regardless of how the target rewrote the HTML.
+		return (
+			comments.find((comment) => sameNullableInstant(comment.created_at, built.createdAt)) ?? null
+		);
+	}
+	if (built.marker) return null;
 	return (
 		comments.find(
 			(comment) =>
@@ -822,6 +917,19 @@ async function lightVerify(
 			`Light verification failed: target has ${items.length} items, expected ${snapshot.items.length}`,
 		);
 	}
+	// Identity containment in BOTH modes: a count can match while a replicated
+	// item was deleted and a foreign one appeared. Every journal-owned real
+	// item must still exist on the target.
+	const liveIds = new Set(items.map((item) => item.id));
+	const ownedIds = [...journal.createdBySeq.values()]
+		.filter((entry) => entry.sourceItemId !== null)
+		.map((entry) => entry.targetItemId);
+	const missingOwned = ownedIds.filter((id) => !liveIds.has(id));
+	if (missingOwned.length > 0) {
+		throw new ReplicateError(
+			`Light verification failed: ${missingOwned.length} replicated item(s) no longer exist on the target (first: ${missingOwned[0]})`,
+		);
+	}
 	if (mode === "exact") {
 		const actual = items.map((item) => item.sequence_id).sort((a, b) => a - b);
 		const expected = snapshot.items.map((item) => item.sequenceId);
@@ -829,6 +937,20 @@ async function lightVerify(
 			throw new ReplicateError(
 				`Light verification failed: target sequence set [${actual.join(",")}] does not equal source [${expected.join(",")}]`,
 			);
+		}
+	}
+	// Archived membership when the inventory endpoint serves: everything the
+	// JOURNAL says was archived must actually be archived. (Keyed off the
+	// journal, not the snapshot — when the archive verb is unaccepted, archived
+	// sources legitimately land unarchived as a gate-recorded degradation.)
+	if (archivedInventory !== null) {
+		const archivedIds = new Set(archivedInventory.map((item) => item.id));
+		for (const entry of journal.entries) {
+			if (entry.type === "item-archived" && !archivedIds.has(entry.targetItemId)) {
+				throw new ReplicateError(
+					`Light verification failed: item ${entry.targetItemId} was archived by this run but is not archived on the target`,
+				);
+			}
 		}
 	}
 }

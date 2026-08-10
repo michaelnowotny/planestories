@@ -399,8 +399,11 @@ export class PlaneClient {
 		return this.request<T>("GET", this.workspacePath(`/projects/${projectId}/`));
 	}
 
-	createProject<T>(body: Record<string, unknown>): Promise<T> {
-		return this.request<T>("POST", this.workspacePath("/projects/"), { body });
+	createProject<T>(body: Record<string, unknown>, opts?: { maxRetries?: number }): Promise<T> {
+		return this.request<T>("POST", this.workspacePath("/projects/"), {
+			body,
+			maxRetries: opts?.maxRetries,
+		});
 	}
 
 	updateProject<T>(projectId: string, body: Record<string, unknown>): Promise<T> {

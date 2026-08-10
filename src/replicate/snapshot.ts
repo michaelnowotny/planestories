@@ -354,13 +354,19 @@ function compactRelations(value: PlaneIssueRelations): SnapshotRelations | null 
 	for (const kind of RELATION_KINDS) {
 		const list = value[kind];
 		if (Array.isArray(list) && list.length > 0) {
-			const ids = list
-				.map(normalizeRelationRef)
-				.filter((id): id is string => typeof id === "string" && id.length > 0);
-			if (ids.length > 0) {
-				compact[kind] = ids.sort();
-				any = true;
-			}
+			const ids = list.map((ref) => {
+				const id = normalizeRelationRef(ref);
+				if (!id) {
+					// Fail HARD: silently dropping an unrecognizable reference would
+					// produce a digest-valid snapshot that is quietly missing edges.
+					throw new ReplicateError(
+						`Unrecognizable ${kind} relation reference in source response: ${JSON.stringify(ref)}`,
+					);
+				}
+				return id;
+			});
+			compact[kind] = ids.sort();
+			any = true;
 		}
 	}
 	return any ? compact : null;

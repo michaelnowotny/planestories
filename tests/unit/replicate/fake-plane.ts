@@ -66,6 +66,18 @@ export class FakePlane {
 	failNextPlaceholderDeleteCommitted = false;
 	/** Throw this from the next getProject call (transient-failure injection). */
 	failNextGetProject: PlaneApiError | null = null;
+	/** createProject for THIS identifier commits server-side, response lost (once). */
+	failProjectCreateCommittedFor: string | null = null;
+	/** Comment create whose HTML contains THIS substring commits, response lost (once). */
+	failCommentCreateCommittedMatch: string | null = null;
+	/**
+	 * Comment list fails transiently (once) when the item's stored comments
+	 * contain THIS substring — simulates dying inside the reconciliation read
+	 * without tripping earlier lists (e.g. the probe's).
+	 */
+	failCommentListMatch: string | null = null;
+	/** Simulate a target that rewrites comment HTML on save (strips data-* attrs). */
+	sanitizeCommentHtml = false;
 	/**
 	 * When true, sequence numbers come from max(live)+1 instead of the max-ever
 	 * ledger — the NON-Plane semantics the pre-write gate must fail closed on.
@@ -143,6 +155,10 @@ export class FakePlane {
 			project.states.set(state.id, state);
 		}
 		this.projects.set(id, project);
+		if (this.failProjectCreateCommittedFor === identifier) {
+			this.failProjectCreateCommittedFor = null;
+			throw new PlaneApiError("ambiguous network failure after project commit");
+		}
 		return projectView(project) as T;
 	}
 
@@ -368,10 +384,15 @@ export class FakePlane {
 		_opts?: { maxRetries?: number },
 	): Promise<T> {
 		this.write();
+		const rawHtml = String(body.comment_html);
 		const comment: FakeComment = {
 			...body,
 			id: this.id("comment"),
-			comment_html: String(body.comment_html),
+			// A sanitizing target rewrites markup on save — data-* attributes are
+			// the classic casualty, which is exactly what comment adoption keys on.
+			comment_html: this.sanitizeCommentHtml
+				? rawHtml.replace(/\s+data-[a-z-]+="[^"]*"/g, "")
+				: rawHtml,
 			created_at:
 				this.acceptCreatedAt && typeof body.created_at === "string"
 					? body.created_at
@@ -382,13 +403,26 @@ export class FakePlane {
 		const comments = this.project(projectId).comments.get(workItemId) ?? [];
 		comments.push(comment);
 		this.project(projectId).comments.set(workItemId, comments);
+		if (
+			this.failCommentCreateCommittedMatch !== null &&
+			rawHtml.includes(this.failCommentCreateCommittedMatch)
+		) {
+			this.failCommentCreateCommittedMatch = null;
+			throw new PlaneApiError("ambiguous network failure after comment commit");
+		}
 		return { ...comment } as T;
 	}
 
 	async listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]> {
-		return (this.project(projectId).comments.get(workItemId) ?? []).map((comment) => ({
-			...comment,
-		})) as T[];
+		const stored = this.project(projectId).comments.get(workItemId) ?? [];
+		if (
+			this.failCommentListMatch !== null &&
+			stored.some((comment) => comment.comment_html.includes(this.failCommentListMatch as string))
+		) {
+			this.failCommentListMatch = null;
+			throw new PlaneApiError("comment list failed", 503);
+		}
+		return stored.map((comment) => ({ ...comment })) as T[];
 	}
 
 	projectByIdentifier(identifier: string): FakeProject | undefined {

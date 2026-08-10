@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PlaneApiError } from "../../../src/errors.ts";
@@ -278,6 +278,101 @@ describe("replication apply", () => {
 			expect(readFileSync(ctx.options.journalPath, "utf8")).not.toContain('"type":"poisoned"');
 			const recovered = await applySnapshot(fake, snapshot, { ...ctx.options, limit: undefined });
 			expect(recovered.complete).toBeTrue();
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("sequence drift never journals item-created for the drifted number", async () => {
+		// Poisoning must be the FIRST durable fact about a drifted create. If
+		// item-created lands first and the process dies before the poison line,
+		// resume would treat the drifted item as legitimately owning that
+		// sequence and silently continue building on a mis-numbered board.
+		const ctx = context();
+		const fake = new FakePlane();
+		fake.beforeCreate = (_projectId, body) => {
+			if (body.name !== "Item 3") return;
+			fake.beforeCreate = undefined;
+			const project = fake.projectByIdentifier("SRC")!;
+			project.maxEver++;
+			const stolen: FakeItem = {
+				id: "foreign-stolen",
+				sequence_id: project.maxEver,
+				name: "foreign concurrent item",
+				archived_at: null,
+			};
+			project.items.set(stolen.id, stolen);
+		};
+		try {
+			await expect(applySnapshot(fake, sampleSnapshot(), ctx.options)).rejects.toThrow(
+				/Sequence drift/,
+			);
+			const journal = readFileSync(ctx.options.journalPath, "utf8");
+			expect(journal).toContain('"type":"poisoned"');
+			expect(journal).not.toContain('"sourceItemId":"source-3","targetItemId"');
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("adopts an orphan destination project whose ambiguous create committed", async () => {
+		// Crash window: createProject committed server-side but the journal never
+		// recorded ownership. The orphan holds the identifier; without adoption
+		// the gate would refuse it forever and --recreate-target could not delete
+		// what the journal does not own — a manual-recovery dead end.
+		const ctx = context();
+		const fake = new FakePlane();
+		fake.failProjectCreateCommittedFor = "SRC";
+		const snapshot = sampleSnapshot();
+		try {
+			await expect(applySnapshot(fake, snapshot, ctx.options)).rejects.toThrow(/ambiguous/);
+			const resumed = await applySnapshot(fake, snapshot, ctx.options);
+			expect(resumed.complete).toBeTrue();
+			// The orphan was adopted, not duplicated: exactly one SRC project.
+			expect(
+				[...fake.projects.values()].filter((project) => project.identifier === "SRC"),
+			).toHaveLength(1);
+			expect(
+				[...fake.projectByIdentifier("SRC")!.items.values()].map((item) => item.sequence_id).sort(),
+			).toEqual([1, 3, 5, 6, 7]);
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("a journal holding only a torn header is discarded and the run proceeds fresh", async () => {
+		// Crash during the very first header write leaves a file with zero
+		// committed records. It holds no facts, so it must not brick the run
+		// ("no valid header" + "already exists" with no flag that helps).
+		const ctx = context();
+		const fake = new FakePlane();
+		try {
+			writeFileSync(ctx.options.journalPath, '{"type":"header","runId":"torn'); // no newline
+			const result = await applySnapshot(fake, sampleSnapshot(), ctx.options);
+			expect(result.complete).toBeTrue();
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("comment adoption survives a target that rewrites HTML on save", async () => {
+		// A sanitizing target strips data-* attributes — including the footer's
+		// idempotency marker. Crash window: the FOOTER comment's create commits,
+		// the reconciling list dies, the run dies. On resume the marker is gone
+		// from the stored HTML; adoption must fall back to the natively preserved
+		// created_at or it re-POSTs a duplicate.
+		const ctx = context();
+		const fake = new FakePlane();
+		fake.sanitizeCommentHtml = true;
+		fake.failCommentCreateCommittedMatch = "footer";
+		fake.failCommentListMatch = "footer";
+		const snapshot = sampleSnapshot();
+		try {
+			await expect(applySnapshot(fake, snapshot, ctx.options)).rejects.toThrow(/ambiguous/);
+			const resumed = await applySnapshot(fake, snapshot, ctx.options);
+			expect(resumed.complete).toBeTrue();
+			const allComments = [...fake.projectByIdentifier("SRC")!.comments.values()].flat();
+			expect(allComments).toHaveLength(2); // one per source comment, no duplicates
 		} finally {
 			rmSync(ctx.dir, { recursive: true, force: true });
 		}

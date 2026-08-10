@@ -29,6 +29,7 @@ export interface JournalHeader {
 export type JournalEntry =
 	| JournalHeader
 	| { type: "probe"; probe: TargetProbeResult }
+	| { type: "project-intent"; identifier: string; name: string }
 	| { type: "project-created"; projectId: string; identifier: string; name: string }
 	| {
 			type: "state-mapped";
@@ -36,7 +37,12 @@ export type JournalEntry =
 			targetStateId: string;
 			action: "matched" | "created" | "patched";
 	  }
-	| { type: "label-mapped"; sourceLabelId: string; targetLabelId: string; action: "created" }
+	| {
+			type: "label-mapped";
+			sourceLabelId: string;
+			targetLabelId: string;
+			action: "created" | "adopted";
+	  }
 	| { type: "item-intent"; seq: number; sourceItemId: string | null }
 	| { type: "item-created"; seq: number; sourceItemId: string | null; targetItemId: string }
 	| { type: "item-archived"; targetItemId: string }
@@ -125,6 +131,44 @@ export class Journal {
 		}
 	}
 
+	/**
+	 * Open `path`, or DISCARD it and return null when it holds zero committed
+	 * records — a crash during the very first header write leaves a file whose
+	 * only content is torn residue. Such a file states no facts, so treating it
+	 * as corruption would brick the run behind an error no flag resolves.
+	 */
+	static openOrDiscardTorn(
+		path: string,
+		expected: JournalExpectedBinding,
+		options: JournalOptionInput = {},
+	): Journal | null {
+		const lockPath = acquireLock(path, warningCallback(options));
+		let keepLock = false;
+		try {
+			if (!existsSync(path)) {
+				return null;
+			}
+			const entries = parseJournal(path);
+			if (entries.length === 0) {
+				unlinkSync(path);
+				warningCallback(options)?.(
+					`Discarded journal ${path}: it held no committed records (torn first write).`,
+				);
+				return null;
+			}
+			const header = entries[0];
+			if (!header || header.type !== "header") {
+				throw new ReplicateError(`Journal ${path} has no valid header`);
+			}
+			validateBinding(header, expected);
+			const fd = openSync(path, "a");
+			keepLock = true;
+			return new Journal(path, fd, entries, lockPath);
+		} finally {
+			if (!keepLock) releaseLock(lockPath);
+		}
+	}
+
 	append(entry: JournalEntry): void {
 		if (this.closed) {
 			throw new ReplicateError(`Cannot append to closed journal ${this.path}`);
@@ -187,6 +231,17 @@ export class Journal {
 		);
 	}
 
+	/** A project-create intent with no matching create — the ambiguous window. */
+	get projectIntent(): Extract<JournalEntry, { type: "project-intent" }> | null {
+		if (this.projectCreated) return null;
+		return (
+			this.entries.find(
+				(entry): entry is Extract<JournalEntry, { type: "project-intent" }> =>
+					entry.type === "project-intent",
+			) ?? null
+		);
+	}
+
 	get probeEntry(): Extract<JournalEntry, { type: "probe" }> | null {
 		return (
 			this.entries.find(
@@ -242,7 +297,7 @@ export class Journal {
 
 function acquireLock(path: string, warn?: (message: string) => void): string {
 	const lockPath = `${path}.lock`;
-	for (let attempt = 0; attempt < 2; attempt++) {
+	for (let attempt = 0; attempt < 3; attempt++) {
 		try {
 			writeFileSync(lockPath, String(process.pid), { flag: "wx" });
 			return lockPath;
@@ -253,8 +308,23 @@ function acquireLock(path: string, warn?: (message: string) => void): string {
 			if (Number.isInteger(pid) && pid > 0 && processAlive(pid)) {
 				throw new ReplicateError(`another apply is running (journal lock pid ${pid})`);
 			}
+			// Steal via ATOMIC RENAME, never a blind unlink: two contenders can
+			// both read the same stale pid, and with unlink the loser would then
+			// remove the WINNER's freshly written lock — both proceed. rename
+			// succeeds for exactly one contender; the loser loops and re-examines
+			// whatever lock now exists.
+			const staleName = `${lockPath}.stale-${process.pid}-${attempt}`;
+			try {
+				renameSync(lockPath, staleName);
+			} catch {
+				continue;
+			}
 			warn?.(`Replacing stale replication journal lock ${lockPath} (pid ${raw || "unknown"})`);
-			unlinkSync(lockPath);
+			try {
+				unlinkSync(staleName);
+			} catch {
+				// The stale artifact is inert; leaving it is harmless.
+			}
 		}
 	}
 	throw new ReplicateError(`Could not acquire journal lock ${lockPath}`);
@@ -274,7 +344,12 @@ function warningCallback(options: JournalOptionInput): ((message: string) => voi
 }
 
 function releaseLock(lockPath: string): void {
+	// Ownership-checked release: never unlink a lock another process now holds
+	// (e.g. after our stale lock was legitimately stolen while we were dying).
 	try {
+		if (readFileSync(lockPath, "utf8").trim() !== String(process.pid)) {
+			return;
+		}
 		unlinkSync(lockPath);
 	} catch (error) {
 		if (existsSync(lockPath)) throw error;

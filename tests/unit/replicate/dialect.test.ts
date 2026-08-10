@@ -41,6 +41,9 @@ function splitInstance(servesRelationsOn: PlaneEndpointDialect | "both") {
 		async listWorkItems<T>(): Promise<T[]> {
 			return [{ id: "item-existing", sequence_id: 1 }] as T[];
 		},
+		async listArchivedWorkItems<T>(): Promise<T[] | null> {
+			return [] as T[];
+		},
 		async getRelations(): Promise<PlaneIssueRelations> {
 			if (servesRelationsOn !== "both" && servesRelationsOn !== dialect) {
 				throw new PlaneApiError("Page not found.", 404);
@@ -85,12 +88,39 @@ describe("dialect detection", () => {
 		expect(split.writes).toHaveLength(0);
 	});
 
+	test("an archived-only project is not misread as empty (archived items discriminate)", async () => {
+		// Codex review scenario: live inventory is empty under BOTH dialects but
+		// archived items exist. Choosing /issues/ on its empty live list would
+		// send every later relation read to the known-broken family.
+		const dialect = await detectSourceDialect(
+			(d) => ({
+				dialect: d,
+				async listWorkItems<T>(): Promise<T[]> {
+					return [];
+				},
+				async listArchivedWorkItems<T>(): Promise<T[] | null> {
+					// /issues/ archived endpoint absent; /work-items/ serves it.
+					return d === "work-items" ? ([{ id: "arch-1" }] as T[]) : null;
+				},
+				async getRelations(): Promise<PlaneIssueRelations> {
+					if (d !== "work-items") throw new PlaneApiError("Page not found.", 404);
+					return EMPTY_RELATIONS;
+				},
+			}),
+			"src-project",
+		);
+		expect(dialect).toBe("work-items");
+	});
+
 	test("source-side detection returns the first listing dialect for an empty project", async () => {
 		const dialect = await detectSourceDialect(
 			(d) => ({
 				dialect: d,
 				async listWorkItems<T>(): Promise<T[]> {
 					return [];
+				},
+				async listArchivedWorkItems<T>(): Promise<T[] | null> {
+					return null;
 				},
 				async getRelations(): Promise<PlaneIssueRelations> {
 					throw new Error("must not be called for an empty project");

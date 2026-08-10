@@ -10,7 +10,7 @@ export interface ProbeClient {
 	readonly dialect: PlaneEndpointDialect;
 	listProjects<T>(): Promise<T[]>;
 	listWorkspaceMembers<T>(): Promise<T[]>;
-	createProject<T>(body: Record<string, unknown>): Promise<T>;
+	createProject<T>(body: Record<string, unknown>, opts?: { maxRetries?: number }): Promise<T>;
 	deleteProject(projectId: string): Promise<void>;
 	createWorkItem<T>(
 		projectId: string,
@@ -107,10 +107,13 @@ export async function detectDialect(
 		for (let attempt = 1; attempt <= 3; attempt++) {
 			const suffix = (opts.randomDigits ?? randomFourDigits)();
 			try {
-				const project = await primary.createProject<RawProject>({
-					name: "planestories dialect probe",
-					identifier: `PSDLT${suffix}`,
-				});
+				// maxRetries 0: a blind retry of an ambiguous create would leave TWO
+				// temp projects (one leaked silently). Aborting leaks at most one,
+				// visibly.
+				const project = await primary.createProject<RawProject>(
+					{ name: "planestories dialect probe", identifier: `PSDLT${suffix}` },
+					{ maxRetries: 0 },
+				);
 				projectId = project.id;
 				break;
 			} catch (error) {
@@ -159,40 +162,51 @@ export interface ReadDialectClient {
 		projectId: string,
 		query?: Record<string, string | number | boolean | undefined>,
 	): Promise<T[]>;
+	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
 }
 
 /**
  * Read-only dialect detection for the SNAPSHOT side: a snapshot must not write
- * to the source, so the discriminator is the source project's own items — list
- * under a dialect, then hit the relations endpoint of the first item. Without
- * this, snapshotting a work-items-only instance through `/issues/` would abort
- * on every relation read (fail-hard, but pointlessly). An empty project returns
- * the first dialect that lists (relations are vacuous there).
+ * to the source, so the discriminator is the source project's own items — live
+ * first, then ARCHIVED (an archived-only project must not be misread as empty:
+ * its relation reads would later abort under the wrong family). A dialect with
+ * no observable item is inconclusive, not chosen — only a genuinely empty
+ * project (no evidence under any dialect) falls back to the first family that
+ * listed, where relations are vacuous anyway.
  */
 export async function detectSourceDialect(
 	factory: (dialect: PlaneEndpointDialect) => ReadDialectClient,
 	projectId: string,
 ): Promise<PlaneEndpointDialect> {
+	let emptyFallback: PlaneEndpointDialect | null = null;
 	for (const dialect of ["issues", "work-items"] as const) {
 		const client = factory(dialect);
-		let items: Array<{ id: string }>;
+		let live: Array<{ id: string }>;
 		try {
-			items = await client.listWorkItems<{ id: string }>(projectId);
+			live = await client.listWorkItems<{ id: string }>(projectId);
 		} catch (error) {
 			if (isNotFoundError(error)) continue;
 			throw error;
 		}
-		const first = items[0];
-		if (!first) return dialect;
+		let probeItem = live[0] ?? null;
+		if (!probeItem) {
+			const archived = await client.listArchivedWorkItems<{ id: string }>(projectId);
+			probeItem = archived?.[0] ?? null;
+		}
+		if (!probeItem) {
+			emptyFallback ??= dialect;
+			continue;
+		}
 		try {
-			await client.getRelations(projectId, first.id);
+			await client.getRelations(projectId, probeItem.id);
 			return dialect;
 		} catch (error) {
 			if (isNotFoundError(error)) continue;
 			throw error;
 		}
 	}
+	if (emptyFallback) return emptyFallback;
 	throw new ReplicateError(
 		"Neither the /issues/ nor the /work-items/ path family serves the full read surface " +
 			"(items + relations) for this project — cannot snapshot it.",
@@ -278,10 +292,10 @@ export async function probeTargetEmpirical(
 			try {
 				// Plain words only: some instances (observed on the operator's CE)
 				// reject project names containing special characters.
-				const project = await client.createProject<RawProject>({
-					name: "planestories temporary probe",
-					identifier: `PSPRB${suffix}`,
-				});
+				const project = await client.createProject<RawProject>(
+					{ name: "planestories temporary probe", identifier: `PSPRB${suffix}` },
+					{ maxRetries: 0 },
+				);
 				projectId = project.id;
 				break;
 			} catch (error) {
