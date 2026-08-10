@@ -3,18 +3,139 @@
 [![npm version](https://img.shields.io/npm/v/planestories)](https://www.npmjs.com/package/planestories)
 [![license](https://img.shields.io/npm/l/planestories)](./LICENSE)
 
-A CLI tool that bridges markdown-based user stories and [Plane](https://plane.so) work items, enforcing user story and acceptance-criteria discipline for AI agent-driven development.
+**Your project board as code — with a navigator the whole organization can read.**
+
+planestories bridges markdown user stories in your repository and [Plane](https://plane.so)
+work items, in both directions. Stories are written, reviewed, and versioned like code;
+the board stays current for everyone else. On top of that round-trip it adds a quality
+toolchain (linting, board health checks, grooming), the **Project Atlas** — an interactive
+map of your entire project that reads at every altitude from executive overview to a single
+acceptance criterion — and a **replication engine** that migrates whole projects between
+Plane deployments (cloud ↔ self-hosted) with exact ticket numbers preserved.
 
 > **Attribution.** planestories is a fork of [**linearstories**](https://github.com/stackingturtles/linearstories) by **Ijonas Kisselbach / Stacking Turtles Ltd.**, adapted to target Plane instead of Linear. The original is MIT-licensed; that license is preserved in full (see [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE)). Huge thanks to the original author.
 
-## Why structured acceptance criteria matter for AI agents
+## Executive summary
 
-AI coding agents — Claude Code, Cursor, Copilot Workspace, and others — perform dramatically better when given precise, testable acceptance criteria. Vague tickets like "improve the login flow" lead to ambiguous implementations and wasted iteration cycles. Structured user stories with explicit acceptance criteria give agents the deterministic guardrails they need:
+Most teams lose information in the gap between *where work is described* (the board) and
+*where work happens* (the repository, the terminal, the agent). planestories closes that
+gap and then makes the state of the whole project legible:
 
-- **Clear scope boundaries.** Each acceptance criterion is a discrete, verifiable condition.
-- **Testable by default.** Criteria written as checkboxes (`- [ ] ...`) map directly to test cases.
-- **Markdown as the source of truth.** Stories live in your repository alongside the code.
-- **Two-way sync with Plane.** Managers keep their board current; agents keep their specs current.
+- **Stories as code.** User stories with checkbox acceptance criteria live in markdown,
+  in git — reviewable in pull requests, greppable, diffable, and consumable by AI coding
+  agents as deterministic specs. Imports are idempotent; exports are warm (unchanged
+  stories cost zero writes); the board and the files converge instead of drifting.
+- **Discipline that scales.** `lint` enforces story quality at authoring time; `doctor`
+  detects board rot (orphaned criteria, duplicate titles, dangling dependencies) and
+  works as a CI gate; `groom` cleans up after closed work; a rating skill scores story
+  batches before refinement. The same guardrails serve a solo developer and a
+  hundred-ticket program.
+- **The Project Atlas** turns the board into a single interactive picture — epics as
+  star systems, stories as planets whose color is status and size is effort, dependencies
+  as supply lines. Managers read the constellation; tech leads read a cluster; a
+  developer locks one planet and reads its acceptance criteria. One artifact, every
+  altitude, no login required (it is a self-contained HTML file you can attach to an
+  email).
+- **Deployment freedom.** The replication engine snapshots a project into a versioned
+  JSON file (which doubles as a full backup) and replays it onto any Plane instance —
+  cloud to self-hosted Community Edition or back — preserving exact `PROJECT-N` ticket
+  numbers, hierarchy, dependencies, comments, and (where the target accepts them) original
+  timestamps and authorship. Verification is a first-class command, not a hope. Migrating
+  hosting setups stops being infrastructure debt and becomes an afternoon experiment.
+
+**Who it serves:** solo developers who want specs their AI agents can execute against;
+small teams who want the board to maintain itself; large organizations that need one
+truthful picture across dozens of epics; mixed human+AI teams where agents read, tick,
+and update the same stories humans review; and non-engineering functions — marketing
+launch plans, finance close checklists, operations runbooks are all "stories with
+acceptance criteria" the moment you write them down.
+
+## The Project Atlas
+
+`planestories atlas --project "Data Platform" -o atlas.html` renders your live board (or
+a stories file) into a **self-contained, offline HTML star map**. No server, no accounts —
+open it in any browser, attach it to a status email, or publish it on an intranet.
+
+![Atlas overview — the whole project as a constellation](docs/images/atlas-overview.png)
+
+**The overview is the executive read.** Every epic is a star system: the ring counts its
+stories, the label names it, and the system's glow summarizes status at a glance. The
+header strip gives the headline numbers (epics, stories, flagged items); the chip bar
+filters by status, label, or assignee; the minimap keeps the whole galaxy in view. A
+manager answers "where is the program heavy, where is it stuck?" in seconds, without
+learning a PM tool.
+
+![Atlas cluster — a nebula resolved into worlds](docs/images/atlas-cluster.png)
+
+**Zoom is level of detail.** The Atlas uses a telescopic LOD driven by real areal
+spacing: from afar, clusters are nebulae; as you approach, they resolve into individual
+worlds. Story color encodes the terraforming ladder — barren rock (backlog), ice (todo),
+a reddening Mars (in progress), a living Earth (done), cinder (cancelled) — so a
+cluster's mix of living and barren worlds IS its progress report. Planet size encodes
+effort (log-scaled), orbits encode parent-child structure, and supply lines draw the
+dependency graph across epic boundaries — the critical-path picture tech leads actually
+need.
+
+![Atlas scan — instant search with a contact list](docs/images/atlas-scan.png)
+
+**SCAN is instant navigation.** Type any fragment of a title or ticket id and the field
+dims to your matches with a keyboard-navigable contact list; hit intercept and the camera
+flies to the target. It is the fastest "where is that ticket and what is around it?" in
+the toolchain.
+
+![Atlas dossier — one epic under the lens](docs/images/atlas-dossier.png)
+
+**Lock a target, read its dossier.** Selecting an epic opens its dossier: completion ring
+and percentage, status breakdown, total and remaining effort, boundary supply lines
+(what this epic blocks and is blocked by), and its heaviest open stories — with a direct
+"Open in Plane" link. Selecting a single story shows its full card, including acceptance
+criteria. Program review, sprint planning, and standup can all point at the same living
+picture instead of three different dashboards.
+
+For automation, `atlas --json` emits the identical graph (nodes, dependency edges,
+effort, status, criteria) as machine-readable JSON — the HTML and your tooling can never
+disagree. See [`docs/ATLAS.md`](docs/ATLAS.md) for the full design.
+
+## Replicate projects between Plane deployments
+
+The replication engine removes the biggest piece of PM-tool infrastructure debt: being
+stuck where your data is.
+
+```bash
+# 1. One paced read -> a versioned, digest-bound snapshot (also a full backup)
+planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json
+
+# 2. Replay onto any target -- zero source reads, dry-run by default, resumable
+planestories replicate apply --to ce --snapshot data.snapshot.json --yes
+
+# 3. Prove it, field by field
+planestories replicate verify --to ce --snapshot data.snapshot.json
+planestories replicate freshness --from cloud --snapshot data.snapshot.json --deep
+```
+
+- **Exact ticket numbers.** `PROJECT-123` stays `PROJECT-123` on the target — sequence
+  gaps and all — so every reference in commit messages, documents, and story files stays
+  meaningful. (Mechanism: serial creation with gap placeholders, validated against
+  Plane's own sequence-ledger semantics, asserted on every create.)
+- **Everything that matters travels:** hierarchy, dependencies of every kind, comments,
+  states with colors, labels, priorities, dates, estimates — with original timestamps
+  and authorship preserved natively where the target instance accepts them.
+- **Crash-safe by construction.** Every write is journaled (fsync'd, locked); a killed
+  run resumes exactly where it stopped; ambiguous writes are reconciled before any
+  replay; a concurrent write to the target aborts the run rather than corrupting
+  numbering. `verify` is a field-complete cutover gate and `freshness --deep` proves the
+  source didn't drift since the snapshot. Honest degradation/loss manifests report
+  anything a target cannot carry — nothing is silently dropped.
+- **Cutover tooling included:** `replicate relink` rewrites your markdown corpus to the
+  new instance's ids/URLs atomically; `rename-project` frees or renames identifiers.
+- **Snapshots are backups.** A nightly `replicate snapshot` gives you versioned,
+  restorable, diffable board backups for free.
+
+Multi-instance work is first-class: named credential **contexts**
+(`--context ce`, configured via `PLANE_CTX_<NAME>_*` env vars) keep cloud and
+self-hosted credentials strictly separated, and the client speaks both Plane REST
+dialects (`/issues/` and `/work-items/`), auto-selected per instance. See
+[`docs/REPLICATE.md`](docs/REPLICATE.md).
 
 ## Quick start
 
