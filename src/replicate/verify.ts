@@ -589,7 +589,20 @@ function matchComments(
 		);
 	}
 	const marker = `data-psrepl-comment="${source.id.replace(/[&<>"']/g, escapeHtmlChar)}"`;
-	return targets.filter((target) => (target.comment_html ?? "").includes(marker));
+	const byMarker = targets.filter((target) => (target.comment_html ?? "").includes(marker));
+	if (byMarker.length > 0) return byMarker;
+	// No durable key survived: the target may strip data-* attributes (marker
+	// gone) or the source comment may carry no created_at (nothing was sent).
+	// Fall back to CONTENT matching against the footer-stripped stored HTML —
+	// the caller still enforces exactly-one, so ambiguity stays a failure.
+	const expected = normalizeHtmlForCompare(source.commentHtml);
+	const expectedMarkdown = htmlToMarkdown(source.commentHtml);
+	return targets.filter((target) => {
+		const stored = stripCommentFooter(target.comment_html ?? "");
+		return (
+			normalizeHtmlForCompare(stored) === expected || htmlToMarkdown(stored) === expectedMarkdown
+		);
+	});
 }
 
 function compareCommentAuthorship(
@@ -602,7 +615,7 @@ function compareCommentAuthorship(
 	add: (finding: VerifyFinding) => void,
 	skipped: VerifySkipped[],
 ): void {
-	if (probe.commentCreatedAtAccepted === true) {
+	if (probe.commentCreatedAtAccepted === true && source.createdAt !== null) {
 		if (!sameNullableInstant(source.createdAt, target.created_at ?? null)) {
 			add(itemFinding("authorship", "failure", item, target.id, "Comment created_at differs"));
 		}
@@ -610,7 +623,10 @@ function compareCommentAuthorship(
 		skipped.push({
 			check: "authorship",
 			field: "comment.created_at",
-			message: `Target probe did not accept comment created_at (${source.id})`,
+			message:
+				source.createdAt === null
+					? `Source comment has no created_at to verify (${source.id})`
+					: `Target probe did not accept comment created_at (${source.id})`,
 			sourceItemId: item.id,
 		});
 	}
@@ -877,9 +893,14 @@ function isEmptyHtml(html: string | null): boolean {
 }
 
 function stripCommentFooter(html: string): string {
-	return html
-		.replace(/<p\b[^>]*\bdata-psrepl-comment=(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/p>\s*$/i, "")
-		.trim();
+	return (
+		html
+			.replace(/<p\b[^>]*\bdata-psrepl-comment=(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/p>\s*$/i, "")
+			// A sanitizing target can strip the data-psrepl marker while keeping the
+			// visible provenance text — recognize the footer by its text shape too.
+			.replace(/<p\b[^>]*><em>— replicated from [\s\S]*?<\/em><\/p>\s*$/i, "")
+			.trim()
+	);
 }
 
 function escapeHtmlChar(char: string): string {
