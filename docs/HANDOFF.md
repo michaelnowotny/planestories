@@ -454,7 +454,7 @@ to keep correct.
   convention, which `parseEffortDays` reads everywhere (packet, epic rollup, atlas sizing). If
   Plane ships a decimal field this becomes a small mapping feature.
 
-### 9.7 First task, recommended: settle parent-identifier resolution (small, self-contained)
+### 9.5 First task, recommended: settle parent-identifier resolution (small, self-contained)
 
 A good warm-up because it is small, has a real decision in it, and touches the test suite.
 
@@ -483,11 +483,11 @@ Either way: a regression test pinning the chosen behaviour for BOTH import and l
 case-mismatched parent, and update `DESIGN_DECISIONS_tier1.md` (which currently carries a DRIFT
 note pointing here) plus `AGENTS.md`.
 
-### 9.5 CE housekeeping (operator decision)
+### 9.6 CE housekeeping (operator decision)
 
 `BLOOMR` and the stale `DATA` replica on CE are inspectable and disposable. Ask before deleting.
 
-### 9.6 Before open-sourcing
+### 9.7 Before open-sourcing
 
 `docs/images/atlas-*.png` in the README are screenshots of the **real** board and show real
 project content. Re-shoot them from a synthetic board first. The rig is

@@ -9,8 +9,9 @@ ticket.
 ## Working here (must-follow)
 
 - **Bun, not Node.** `export PATH="$HOME/.bun/bin:$PATH"` in every shell, then `bun install`.
-  Keep green before any commit: `bun test`, `bunx tsc --noEmit`, `bunx biome check ./src ./tests`
-  (`bunx biome check --write` auto-fixes format + import order).
+  Keep green before any commit — the canonical gate, identical to `docs/HANDOFF.md` §4:
+  `bunx biome check --write . && bunx tsc --noEmit && bun test`. (`bun run lint` is the read-only
+  variant, `bunx biome check ./src ./tests`.)
 - **Biome formats with TABS.** The Edit tool silently fails to match when leading whitespace
   differs — match an inner substring (no leading whitespace) and let `biome --write` reindent,
   or Write the whole file.
@@ -90,8 +91,8 @@ Don't blur these.
   (epics always, stories on zoom-in), curved edges + arrowheads, glow on hover/selected. ALL nodes shown by
   default; drag/pan/zoom/hover/click-details (progress bar + clickable dependency list). The `atlas` command
   fetches per-item relations (bounded, per-item failures DROP that item's edges + warn, `--no-dependencies`
-  skips). Node ids reset per build (diff-stable). Verified on the live 665-item DATA board via headless
-  screenshots (overview, deps-only, zoomed).
+  skips). Node ids reset per build (diff-stable). Verified via headless screenshots (overview, deps-only, zoomed) on the live DATA board
+  as it stood in July 2026 (~665 items then; `docs/HANDOFF.md` owns current board figures).
 
 ## Identity / idempotency (load-bearing)
 
