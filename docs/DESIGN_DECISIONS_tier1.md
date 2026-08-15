@@ -4,9 +4,13 @@ Why the Tier-1 features are built the way they are: the decisions, the alternati
 why, the empirically-verified Plane-API facts, and the load-bearing gotchas that are easy to forget.
 Read this before changing `src/markdown/directives.ts`, `src/sync/relations.ts`, or `src/lint/`.
 
-Source of the requirements: `docs/planestories-improvement-brief-2026-07-28.md` (the data-platform
-team's brief). Report back to them: `~/PycharmProjects/finance_csv_importer/external_info/
-planestories-tier1-report-2026-07-28.md`.
+Source of the requirements: the data-platform team's brief, forwarded as
+`docs/planestories-improvement-brief-2026-07-28.md`. **That file is gitignored** (the
+`planestories-*` pattern keeps forwarded cross-repo briefs out of git), so it exists only on the
+machine it was delivered to — do not treat it as a dependency. Everything durable from it lives in
+this document and in `docs/HANDOFF.md`. The reply was
+`~/PycharmProjects/finance_csv_importer/external_info/planestories-tier1-report-2026-07-28.md`,
+likewise gitignored in that repo.
 
 ## Verified Plane-API facts (throwaway items on the live DATA board, cleaned up)
 1. **`point` is integer-only.** `POST issues/ {point:2.5}` → 400 "A valid integer is required." → decimal

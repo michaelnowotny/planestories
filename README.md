@@ -538,6 +538,10 @@ bun test            # run the test suite
 bun run lint        # biome
 ```
 
+Maintaining or extending planestories? Start with [`docs/HANDOFF.md`](docs/HANDOFF.md) — state,
+roadmap, working rules, and the hard-won gotchas — then [`AGENTS.md`](AGENTS.md) for the
+architecture map.
+
 ## License
 
 MIT. See [`LICENSE`](./LICENSE) (original © Stacking Turtles Ltd.) and [`NOTICE`](./NOTICE) for attribution and modification copyright.
