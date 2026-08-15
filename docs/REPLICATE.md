@@ -23,7 +23,9 @@ config-file entries); omitted = the bare `PLANE_*` environment.
 
 Everything replicate carries (see Fidelity below for exactly what that is) —
 project settings, states, labels, members (for email mapping), every work item
-(including archived) with raw `description_html`, relations of all kinds,
+with raw `description_html` — including archived items **when the instance serves
+the archived-items endpoint** (it records `archivedInventory: "unavailable"` when
+it does not, which is the case on both of our instances today) — relations of all kinds,
 comments, and the **sequence map** (present numbers + gaps) — under a content
 sha256 **digest**. It is deterministic and diff-stable, so it doubles as a
 **backup of everything it carries** (NOT of attachments, cycles, modules, pages,
@@ -102,7 +104,9 @@ planestories replicate verify --to ce --snapshot data.snapshot.json --export-fil
 ```
 
 Verify resolves the target project and every source→target item mapping from the
-completed apply journal. It checks the complete live+archived set, exact sequence
+completed apply journal. It checks the complete item set — live plus archived where
+the archived endpoint is available, otherwise live-only, which it states in the report
+as an explicit warning rather than silently narrowing — exact sequence
 numbers, scalar fields, state/label/parent resolution, probe-accepted authorship
 and timestamps, normalized HTML plus a markdown second opinion, comments,
 relations, and source-instance asset/cross-links. Any failure exits 1; warnings

@@ -90,8 +90,16 @@ the description on import; reconciliation is a GLOBAL post-create phase over a F
 `doctor` (board-side) and `/rate-userstories` (LLM).
 - **Identifier resolution mirrors the real consumers (the subtle fix):** PARENT-related rules
   (orphan-criterion, bad-parent, parent-dangling, and the shared epic classifier) resolve EXACTLY —
-  because import resolves `parent` exactly (`index.byIdentifier.get(story.parent)`, case-sensitive) and
-  atlas links children by raw keys. DEPENDENCY rules (cycle, dep-dangling) resolve NORMALIZED (uppercase)
+  because import resolved `parent` exactly (`index.byIdentifier.get(story.parent)`, case-sensitive) and
+  atlas links children by raw keys.
+  > ⚠ **DRIFT (discovered 2026-08-15, unresolved).** Commit `c31fe51` wrapped the importer's parent
+  > lookup in `normalizeIdentifier`, so **import now uppercases the file's `parent:` value** and
+  > accepts `eng-7` where it previously required `ENG-7`. That was an unintended side effect of a
+  > dry-run-diff fix (the intent was only to stop a phantom case diff in the PREVIEW), and it
+  > inverts the invariant stated above: lint is now STRICTER than import, so lint can report a
+  > dangling parent that import happily resolves. Nothing false-passes, but the two no longer
+  > mirror each other. The decision of which behaviour to keep is open — see `docs/HANDOFF.md`
+  > §9.7. DEPENDENCY rules (cycle, dep-dangling) resolve NORMALIZED (uppercase)
   — because the parser uppercases the dep sets and relations resolve case-insensitively. Using one
   normalization for everything false-passes a case-mismatched parent that import would reject.
 - **`classifyFileEpics` is RAW/exact** — the shared epic detector must be behavior-preserving for atlas

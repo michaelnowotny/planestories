@@ -284,7 +284,7 @@ ids) is also proven.
 
 **What is still open** (be honest with yourself about these before you start): the exact
 `makeplane/plane-mcp-server` release and its env-var names must be pinned against what is actually
-installed at cutover time (step 6), and the operator must confirm the story-corpus paths (step 5)
+installed at cutover time (step 7), and the operator must confirm the story-corpus paths (step 6)
 and authorize removing the stale CE replica (step 2). The *replication* is a solved problem; the
 integration around it has three operator prerequisites.
 
@@ -380,7 +380,9 @@ cd ~/PycharmProjects/planestories
 P='Data Platform'
 # 1. before-artifact (dry-run) — keep it
 bun run src/cli/index.ts migrate-criteria --context ce -p "$P" --json > ~/migrate-before.json
-# 2. canary: pick 3-5 long-closed parents FROM that JSON, then
+# 2. canary: pick 3-5 parents. NOTE the dry-run JSON carries only identifier, title,
+#    criteria count and open-child count (no state, no age) — so cross-check candidates
+#    in the Plane UI, or pick ones whose openChildren is 0, before choosing. Then:
 bun run src/cli/index.ts migrate-criteria --context ce -p "$P" --only DATA-x,DATA-y --yes
 # 3. full apply once the canary looks right
 bun run src/cli/index.ts migrate-criteria --context ce -p "$P" --yes
@@ -451,6 +453,35 @@ to keep correct.
   are fixed point-scales behind the paid tier. Hence the `**Effort:** N.n dev-days` body-line
   convention, which `parseEffortDays` reads everywhere (packet, epic rollup, atlas sizing). If
   Plane ships a decimal field this becomes a small mapping feature.
+
+### 9.7 First task, recommended: settle parent-identifier resolution (small, self-contained)
+
+A good warm-up because it is small, has a real decision in it, and touches the test suite.
+
+**The situation.** `docs/DESIGN_DECISIONS_tier1.md` records a deliberate invariant: import resolves
+`parent:` EXACTLY (case-sensitive), and lint's parent rules resolve exactly *to mirror it*, while
+dependency rules normalize (because relations resolve case-insensitively). Commit `c31fe51` then
+wrapped the importer's parent lookup in `normalizeIdentifier`, so import now accepts `eng-7` for
+`ENG-7`. That was an unintended side effect of a dry-run-diff fix — the intent was only to stop the
+PREVIEW reporting a phantom case difference — and it was not reviewed as a behaviour change.
+Consequence today: lint is stricter than import (it can flag a parent import would resolve).
+Nothing false-passes, so this is not urgent; it is just a documented contradiction between
+required-reading and code, which is exactly the kind of thing that produces a wrong fix later.
+
+**Decide one of two, then make code, lint, atlas, docs, and tests agree:**
+- **(A) Restore exactness in the apply path** — revert the normalization at the `parent` lookup in
+  `src/sync/importer.ts` (keep it in the diff/preview comparison, which is all that was wanted),
+  leaving lint/atlas untouched. Restores the documented invariant; a case-mismatched `parent:`
+  fails loudly again. *This is my recommendation* — the invariant was chosen deliberately and the
+  drift was accidental.
+- **(B) Adopt normalization everywhere** — keep import permissive and normalize lint's parent
+  rules and `classifyFileEpics` to match. Friendlier to authors, but `classifyFileEpics` is shared
+  with atlas tree assembly and the design doc explicitly says do NOT normalize it, so this option
+  is wider than it looks: prove atlas grouping is unchanged.
+
+Either way: a regression test pinning the chosen behaviour for BOTH import and lint on a
+case-mismatched parent, and update `DESIGN_DECISIONS_tier1.md` (which currently carries a DRIFT
+note pointing here) plus `AGENTS.md`.
 
 ### 9.5 CE housekeeping (operator decision)
 
