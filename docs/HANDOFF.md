@@ -11,6 +11,32 @@ Written 2026-08-15 by the outgoing maintainer (a Claude Code session) for the in
 
 ---
 
+## 0. WHERE YOU WORK (read before your first command)
+
+**This project lives at `/home/michaelnowotny/PycharmProjects/planestories`. Every command, edit,
+`git add`, and `git commit` happens THERE.** Run `pwd` before your first git operation and after
+any `cd`.
+
+There is a second repository on this machine, `/home/michaelnowotny/PycharmProjects/finance_csv_importer`
+(the "finance repo" / market-data platform). **It is not yours.** It is another agent session's
+active workspace, with its own uncommitted work in progress. A commit made there lands in someone
+else's branch and their review flow. You touch it for exactly two read-only reasons:
+
+1. **Running external reviews:** `~/PycharmProjects/finance_csv_importer/scripts/external_review.sh`
+   (invoke it by absolute path — do NOT `cd` into that repo to run it).
+2. **The story corpus, during a cutover relink only** (§9.1 step 6), and only on paths the operator
+   confirms.
+
+Nothing else. Never `git commit`, `git add`, `git checkout`, or `git stash` in the finance repo.
+
+Two practical consequences of the working directory:
+- **Bun loads `.env` from the CWD**, so a command run from anywhere but the planestories root
+  silently has no credentials (or, worse, someone else's).
+- **`git status` is per-repo.** If a diff you expect is missing, check `pwd` before concluding
+  anything about the code.
+
+---
+
 ## 1. What this is, in one minute
 
 **planestories** is a Bun/TypeScript CLI that syncs markdown user stories ↔ [Plane](https://plane.so)
@@ -483,11 +509,50 @@ Either way: a regression test pinning the chosen behaviour for BOTH import and l
 case-mismatched parent, and update `DESIGN_DECISIONS_tier1.md` (which currently carries a DRIFT
 note pointing here) plus `AGENTS.md`.
 
-### 9.6 CE housekeeping (operator decision)
+### 9.6 Multi-installation ergonomics: a default installation (small, user-facing)
+
+**Operator request, 2026-08-15.** The tool already supports multiple Plane installations well —
+what it lacks is a sane default. Current facts (verified in `src/config/loader.ts` +
+`src/config/schema.ts`):
+
+- **Supported today:** a `.planestoriesrc.json` of the form
+  `{"contexts": [{"name": "ce", "apiKey": "…", "workspaceSlug": "archimedes", "baseUrl": "…",
+  "dialect": "work-items", "defaultProject": "…"}, {"name": "cloud", …}]}`; selection via
+  `--context <name>` (and `--from`/`--to` on `replicate`); per-context env overrides
+  `PLANE_CTX_<NAME>_*`; env-only contexts (no file entry needed); and a hard error if two context
+  names normalize to the same env prefix.
+- **Missing:** there is **no `defaultContext`**, and **no single-context auto-default**. With a
+  multi-context config and no `--context`, `loadConfig` throws *"Config file contains multiple
+  contexts. Use --context <name>…"* — even when only ONE context is defined. The de-facto default
+  is the bare `PLANE_*` env vars, i.e. the default is env-driven rather than config-driven.
+
+**Build this:**
+1. Accept an optional top-level `defaultContext: "<name>"` in the multi-context config (validate
+   that it names an existing context; a dangling value is a startup error, never a silent
+   fallback).
+2. Resolution order when `--context` is omitted: explicit `--context` → `defaultContext` → **if
+   exactly one context is defined, use it** → otherwise the existing error listing the names.
+3. **⚠ The load-bearing safety rule:** when a context is selected *implicitly* (by default or by
+   being the only one), the bare `PLANE_*` env vars must **NOT** apply to it — exactly as they
+   don't for an explicit `--context`. Otherwise a cloud key in the ambient environment could
+   silently authenticate a CE-targeted command. Credential isolation is the whole point of the
+   contract in §4; a default must not become a hole in it. Test this explicitly.
+4. **Leave `replicate --from/--to` explicit** — no defaulting. A cross-instance migration must
+   never silently pick a side; that is a feature, not an omission. Say so in `docs/REPLICATE.md`.
+5. Report the resolved installation in command output/`--json` where a user could be confused
+   about which board they just hit.
+
+**Naming:** the operator's mental model is "Plane installation"; the code says "context". Keep
+`--context` as the canonical flag — it is threaded through every command, documented, and used by
+the finance repo's workflows — but consider wording the help text as
+`--context <installation>  Plane installation to target (see .planestoriesrc.json)`. If you add
+`--installation` as an alias, make it a true alias of one implementation, never a second code path.
+
+### 9.7 CE housekeeping (operator decision)
 
 `BLOOMR` and the stale `DATA` replica on CE are inspectable and disposable. Ask before deleting.
 
-### 9.7 Before open-sourcing
+### 9.8 Before open-sourcing
 
 `docs/images/atlas-*.png` in the README are screenshots of the **real** board and show real
 project content. Re-shoot them from a synthetic board first. The rig is

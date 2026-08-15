@@ -94,6 +94,46 @@ Don't blur these.
   skips). Node ids reset per build (diff-stable). Verified via headless screenshots (overview, deps-only, zoomed) on the live DATA board
   as it stood in July 2026 (~665 items then; `docs/HANDOFF.md` owns current board figures).
 
+## House engineering rules (inherited from the operator's other repo, and they apply here)
+
+The operator's market-data platform (`finance_csv_importer`) carries a large rules catalogue built
+from real incidents. Most of it is domain-specific (ClickHouse, ZFS, market data) and irrelevant
+here. These are the ones that genuinely transfer — they are house rules, not suggestions:
+
+- **The three-lookup ritual before you touch anything.** Before changing a module: (1) read the
+  module and its neighbours; (2) read its DESIGN doc (`docs/DESIGN_*.md`, `docs/REPLICATE.md`) —
+  the "why" and the rejected alternatives live there; (3) `grep` the tests for the symbol. **A
+  passing test that asserts the behaviour you are about to call broken is decisive** — check it
+  before writing the bug report, not after. The origin of this rule: an agent spent a whole
+  investigation "discovering" a defect that three committed documents already explained.
+- **A running system tells you what it DOES, never what it is FOR.** Purpose lives in docs and
+  tests. Do not infer intent from behaviour alone.
+- **Regression-test-first for bug fixes**, with the RED run against unfixed code as the evidence
+  step. A test written after the fix, that never failed, proves nothing.
+- **Never coerce absence into a valid-looking value** (the null-ban). No `0`, `""`, epoch, or
+  `false` standing in for "unknown". Preserve null, omit the field, or return an explicit
+  status/note. In this repo the recurring form is a preview or report that invents certainty it
+  does not have.
+- **Present-but-invalid configuration fails loudly at startup**; defaults apply only when a value
+  is ABSENT. Never silently normalize a broken setting into a working one (see `repo_config.ts`,
+  and rule 3 of the installation-defaults work in `docs/HANDOFF.md` §9.6).
+- **Failures and partials never publish success.** A failed sweep, a partial page, a lost lock:
+  none of them may become an empty-but-healthy result, and no success marker (watermark,
+  completion status, `plane_hash` write-back) advances until the work and its publication both
+  completed.
+- **Retry only classified-transient failures**, and after an ambiguous write, VERIFY durable state
+  before replaying it. Blind retry of a POST is how you double-create.
+- **Delegate depth, retain adjudication.** Send deep implementation and investigation to a
+  subagent or an external engine; keep the overview, the adjudication between disagreeing
+  reviewers, and the final decision for yourself. Errors cluster in unsupervised deep dives.
+- **Never mask errors in diagnostics.** `2>/dev/null` on an exploratory command once turned a
+  failed lookup into a confident false "absent" that was then reported as a finding.
+- **One sample is not a measurement**, and **agreement needs a stated reason** — before treating a
+  match as verification, say what a MISMATCH would have meant. A backfill that reconciled at
+  exactly 100% was once proof of a defect, not of success.
+- **Verify state, don't assume it:** check the branch before committing and the SHA after; re-read
+  a file before asserting its contents; never switch branches while a test run is in flight.
+
 ## Identity / idempotency (load-bearing)
 
 Created items carry `external_source: "planestories"` + `external_id = slug(title)`; criterion
