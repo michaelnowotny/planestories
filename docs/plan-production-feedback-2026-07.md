@@ -1,8 +1,8 @@
 # planestories — improvement plan from production feedback (2026-07-17)
 
 > **HISTORICAL.** This is a requirements/plan document from 2026-07; everything in it is
-> implemented and shipped. It is kept because `docs/DESIGN_DECISIONS_tier1.md` cites it as the
-> source of its requirements. For current state, roadmap, and rules see `docs/HANDOFF.md`.
+> implemented and shipped (the v2 program it plans is complete). Kept as the historical record of
+> why the v2 slices exist. For current state, roadmap, and rules see `docs/HANDOFF.md`.
 
 Source: 3 weeks of production use in the finance_csv_importer session (815-item board, weekly
 epic imports, full-board audits, a 454-open-ticket hygiene audit). This plan responds to that

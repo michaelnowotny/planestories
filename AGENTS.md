@@ -23,7 +23,9 @@ ticket.
 
 The markdown file owns **content** (title, body, criteria, priority, labels); the Plane board
 owns **state/completion**. Import pushes content file→board and only when it actually changed
-(content hash). A future `groom` pulls state board→file. Don't blur these.
+(content hash). State flows board→file: `export` recovers task-list criteria checkbox state
+(`data-checked`), and `groom --write-back` ticks legacy `::ac<n>`-backed checkboxes in place.
+Don't blur these.
 
 ## Architecture map
 
@@ -66,9 +68,13 @@ owns **state/completion**. Import pushes content file→board and only when it a
   cycle handling (skip only cyclic edges, sync the rest); withhold `plane_hash` for skipped-edge stories.
   `src/plane/client.ts` gains `getRelations`/`createRelation`/`removeRelation`.
 - `src/lint/` — `rules.ts` (10 offline mechanical rules) + `linter.ts` (parse fileset → run rules →
-  exit code). PARENT-related rules resolve identifiers EXACTLY (matches import's exact parent lookup);
-  DEPENDENCY rules resolve NORMALIZED (matches relations' case-insensitive resolution). Reuses the shared
-  raw `classifyFileEpics` from `atlas/model.ts`.
+  exit code). Rules index stories under BOTH an exact and a normalized identifier map; DEPENDENCY
+  rules resolve NORMALIZED (matching `relations.ts`). ⚠ **Known discrepancy:** `import` now
+  normalizes `parent:` through `normalizeIdentifier` (`importer.ts`), so a parent spelled `eng-7`
+  is accepted by import while an exact-keyed check would call it dangling — lint can be stricter
+  than import on parent case. Either unify on one shared resolution contract (updating the tests)
+  or keep it deliberate, but do not assume the two agree. Reuses the shared raw
+  `classifyFileEpics` from `atlas/model.ts`.
 - `src/atlas/` — the **Project Atlas** visualizer (FORCE-DIRECTED dependency graph). `model.ts` builds an
   `AtlasGraph` (nodes + dependency `edges`) from either a parsed file (`buildAtlasFromFile`) or the shared
   `fetchProjectIndex` (`buildAtlasFromBoard(…, relationsById?)` — folds `kind: criterion` children into

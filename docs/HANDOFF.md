@@ -25,8 +25,9 @@ this CLI keeps the two honest. Everything else the tool does — the dependency 
 packets, the board doctor, the replication engine — grew out of that one need.
 
 **Its board.** The production board is a Plane Cloud project **"Data Platform" (identifier
-`DATA`)** — ~2,500 work items, 47 epics, ~765 stories. It is the finance team's live board. It is
-in active daily use by another agent session. **You do not write to it** (see §3).
+`DATA`)** — 2,548 work items on 2026-08-15: 47 epics, 768 stories, and 1,733 legacy criterion
+children awaiting the fold (§9.3). It is the finance team's live board, in active daily use by
+another agent session. **You do not write to it** (see §3).
 
 **Its state.** Mature and heavily reviewed. `main` is green, 604 tests, and every feature since
 July shipped through adversarial external review. The one big pending operation is the
@@ -39,8 +40,9 @@ Edition — which is built, rehearsed end-to-end, and waiting on the operator's 
 
 1. **This file** — state, rules, roadmap, gotchas.
 2. **`AGENTS.md`** (repo root) — the architecture map with the reasoning behind each module.
-   Dense and accurate; treat it as the second half of this handoff. (`CLAUDE.md` is a pointer
-   to it, kept so Claude sessions still find it.)
+   Dense and code-shaped; treat it as the second half of this handoff. It is the durable
+   architecture record — state and roadmap live HERE, never there, so the two cannot drift.
+   (`CLAUDE.md` is a pointer to it, kept so Claude sessions still find it.)
 3. **`docs/REPLICATE.md`** — the operator contract for the replication engine
    (snapshot/apply/verify/relink/freshness/backup). Read before touching `src/replicate/`.
 4. **`docs/DESIGN_DECISIONS_tier1.md`** — why effort/relations/lint are built the way they are,
@@ -138,7 +140,7 @@ reindent, or rewrite the file.
 | `import <files>` | file → board. Create/update/skip-unchanged (content hash), duplicate guard, relations, criteria, write-back of `plane_id`/`plane_identifier`/`plane_url`/`plane_hash`. `--dry-run` (with field-level diff), `--check`, `--status-only`, `--force`, `--adopt-duplicates`, `--force-create`, `--strict`, `--no-diff`. |
 | `export` | board → file. Full story blocks incl. warm `plane_hash`; `--orphans-only` emits the parentless-story worksheet; `--open-only`/`--status`. |
 | `set` / `delete` / `projects` | small verbs: status flip, scoped delete, list projects. |
-| `groom` | closes orphaned acceptance-criterion sub-items whose parent is done. Dry-run default. |
+| `groom` | closes orphaned acceptance-criterion sub-items whose parent is done. Dry-run default. `--write-back <files>` is a separate, EXCLUSIVE file-only mode: it ticks legacy `::ac<n>`-backed checkboxes in place from board state (no board writes). |
 | `doctor` | read-only board-rot report + CI gate (non-zero exit on findings). `--json`, `--no-fail-on-findings`, `--house-rules`. |
 | `lint` | offline, mechanical story-file check. No API, no credentials. |
 | `atlas` | renders the board as a self-contained offline HTML "cockpit" (force-directed star map). `--json` emits the same graph as data. |
@@ -154,15 +156,26 @@ reindent, or rewrite the file.
 
 Full contract: `docs/REPLICATE.md`. The essentials:
 
-**`snapshot`** does the one expensive paced read of a project (items incl. archived, relations,
-comments, states, labels, members, the sequence map with its gaps, source dialect) into a
-versioned, digest-bound, deterministically-ordered JSON file. It is fail-hard: any read failure
-aborts and no file is written. That file doubles as a **board backup**.
+**`snapshot`** does the one expensive paced read of a project (items, relations, comments, states,
+labels, members, the sequence map with its gaps, source dialect) into a versioned, digest-bound,
+deterministically-ordered JSON file. It is fail-hard: any read failure aborts and no file is
+written. That file doubles as a **board backup**. Archived items are included *when the instance
+serves the archived-items endpoint*; **neither of our instances does**, so in practice the
+snapshot records `archivedInventory: "unavailable"` and downstream checks narrow their scope and
+say so rather than pretending to full coverage.
 
 **`apply`** runs the entire phased writer FROM THE FILE — zero source reads. Dry-run by default.
-Phases: probe → target shell (project/states/labels) → items → parents → relations → comments →
-verify → placeholder cleanup. Crash-safe via an fsync'd append-only JSONL journal; `--yes` to
-write, resume is automatic, `--recreate-target` is the recovery path.
+Phases, in this exact order (`src/replicate/apply.ts`): probe → gate → target shell
+(project/states/labels) → items → parents → relations → comments → **placeholder cleanup** →
+**light verify**. Note the order: cleanup precedes verification, and that final step is a *light*
+in-run check (id containment + journal-keyed membership) — **not** the `replicate verify` command,
+which is the real cutover gate and runs separately. Crash-safe via an fsync'd append-only JSONL
+journal; `--yes` to write, resume is automatic.
+
+**`--recreate-target` is narrower than it sounds.** It rebuilds a target project **owned by this
+snapshot's journal**. It will NOT delete a project the journal doesn't own: the pre-write gate
+(`src/replicate/gate.ts`) fails closed with *"already held by project … the journal does not own
+it"*. Removing a foreign or previous-rehearsal project is a deliberate operator step, never a flag.
 
 **Exact identifier preservation** is the hard trick and the reason the engine exists. Plane
 assigns `sequence_id = MAX(ledger)+1` under a per-project advisory lock, and **retains ledger
@@ -191,8 +204,9 @@ backup, and the next night self-heals.
 
 ## 7. State of the world (2026-08-15)
 
-- **Repo:** `~/PycharmProjects/planestories`, `main` @ `91851cb`, pushed, clean, 604 tests green.
-  No open branches, no worktrees.
+- **Repo:** `~/PycharmProjects/planestories`, `main` @ `91851cb` at the time of writing, pushed,
+  604 tests green. No known unmerged implementation work. (Branch/worktree state is volatile —
+  check `git status`, `git branch`, `git worktree list` rather than trusting this line.)
 - **Version discrepancy (known, deliberate):** `package.json` and `src/cli/index.ts` both say
   `0.3.1`, the last npm publish. `main` is far ahead. The release is a planned task (§9.2), not
   an oversight — do not "fix" the version in an unrelated change.
@@ -266,53 +280,127 @@ are 402-paywalled on the cloud workspace).
 **Status:** built, and rehearsed end-to-end on 2026-08-10 with a green result — 2,504 items,
 sequences 1..2520 including all 16 historical gaps, 2,238 parents, 46 relations, 1,455 comments,
 native `created_at`/`created_by`, **verify 0 failures**. The return trip (CE→cloud with exact
-ids) is also proven. Nothing is unknown; it is waiting on timing.
+ids) is also proven.
+
+**What is still open** (be honest with yourself about these before you start): the exact
+`makeplane/plane-mcp-server` release and its env-var names must be pinned against what is actually
+installed at cutover time (step 6), and the operator must confirm the story-corpus paths (step 5)
+and authorize removing the stale CE replica (step 2). The *replication* is a solved problem; the
+integration around it has three operator prerequisites.
 
 **Runbook — execute only on the operator's explicit signal, in this order:**
 
 1. `replicate freshness --from cloud --snapshot <last>.snapshot.json --deep` — expect STALE
    (work has landed since). That is confirmation, not a problem.
-2. Take a **fresh** snapshot of a quiet board (~25 min):
-   `replicate snapshot --from cloud -p "Data Platform" -o <new>.snapshot.json`.
+2. **Clear the destination identifier — an explicit, operator-approved step.** CE already holds a
+   `DATA` project from the 2026-08-10 rehearsal. `--recreate-target` will NOT remove it (see §6:
+   the gate refuses a project the journal doesn't own), so the fresh apply would fail closed on
+   *"already held by project … the journal does not own it"*. With the operator's approval, either
+   delete that project in the CE UI, or free the identifier:
+   `bun run src/cli/index.ts rename-project --context ce --project DATA --identifier DATAOLD --yes`
+   (dry-run first — it prints the change and warns that item prefixes move with the identifier).
+   Verify with `bun run src/cli/index.ts projects --context ce` that no project holds `DATA`.
+3. Take a **fresh** snapshot of a quiet board (~25 min):
+
+   ```bash
+   SNAP=~/plane-replication/data-cutover.snapshot.json
+   bun run src/cli/index.ts replicate snapshot --from cloud -p "Data Platform" -o "$SNAP"
+   ```
+
    The board must be quiet for the duration — the operator arranges this; consistency comes from
    the freeze, not from reconciliation (there is deliberately no delta sync in v1).
-3. `replicate apply --to ce --snapshot <new> --assume-gaps-deleted --yes --recreate-target`
+4. `bun run src/cli/index.ts replicate apply --to ce --snapshot "$SNAP" --assume-gaps-deleted --yes`
    (~2 h; CE PATCH latency dominates the parent/comment phases and arrives in waves — do not
-   diagnose a "stall" under 10 minutes).
-4. `replicate verify --to ce --snapshot <new>` — **0 failures required**. Then
-   `replicate freshness --from cloud --snapshot <new> --deep` — must say FRESH (proves the
-   source didn't move during the window).
-5. `replicate relink --to ce --snapshot <new> <story dirs>` on the finance repo's markdown
-   corpus. **Dry-run first and have the operator review the diff.** Without this every linked
-   story file still points at dead cloud UUIDs and the first edited file would PATCH a cloud id
-   against CE.
-6. Switch the finance repo's `.mcp.json` from the hosted Plane MCP (cloud-tied OAuth) to the
-   **open-source stdio server** `makeplane/plane-mcp-server`, with `PLANE_BASE_URL`,
-   the CE key, and workspace slug `archimedes`. Pin the exact env-var names against the installed
-   release — older releases use `PLANE_API_HOST_URL`.
-7. Flip the backup cron's `--from cloud` to `--from ce`.
-8. The operator archives or renames the cloud `DATA` project (`rename-project` exists; note that
+   diagnose a "stall" under 10 minutes). Keep the journal it writes: `verify` needs *this* run's
+   journal, and no other.
+5. `bun run src/cli/index.ts replicate verify --to ce --snapshot "$SNAP"` — **0 failures
+   required** (warnings are acceptable and explained in the report). Then
+   `bun run src/cli/index.ts replicate freshness --from cloud --snapshot "$SNAP" --deep` — must
+   say FRESH (proves the source didn't move during the window).
+6. Relink the markdown corpus — **dry-run first, operator reviews the git diff**:
+
+   ```bash
+   CORPUS=~/PycharmProjects/finance_csv_importer/planning/stories   # confirm with the operator
+   bun run src/cli/index.ts replicate relink --to ce --snapshot "$SNAP" "$CORPUS"        # dry-run
+   bun run src/cli/index.ts replicate relink --to ce --snapshot "$SNAP" --yes "$CORPUS"  # apply
+   ```
+
+   Without this, every linked story file still points at dead cloud UUIDs and the first edited
+   file would PATCH a cloud id against CE.
+7. Switch the finance repo's `.mcp.json` from the hosted Plane MCP (cloud-tied OAuth) to the
+   **open-source stdio server** `makeplane/plane-mcp-server`, pointed at CE with workspace slug
+   `archimedes`. **Unresolved prerequisite:** pin the exact package version and its env-var names
+   against the release actually installed — current releases use `PLANE_BASE_URL`, older ones
+   `PLANE_API_HOST_URL`, and guessing produces a silently dead MCP. Reference the key as
+   `${PLANE_CTX_CE_API_KEY}` (or whatever the operator's launcher supplies) — never inline it.
+   Smoke-test by listing projects through the MCP before declaring the switch done; the rollback
+   is the previous `.mcp.json`, so keep a copy.
+8. Flip the backup cron's `--from cloud` to `--from ce` (`crontab -e`, the line marked
+   `# planestories-nightly-backup`), then wait for one run and confirm a CE-sourced file lands.
+9. The operator archives or renames the cloud `DATA` project (`rename-project` exists; note that
    renaming a *destination* identifier changes item prefixes while preserving numbers).
-9. Hand the finance session the criteria fold (§9.3), which then runs on CE.
+10. Hand the finance session the criteria fold (§9.3), which then runs on CE.
 
 ### 9.2 npm release 0.5.0
 
-`main` is far ahead of the published `0.3.1`. Do it as one clean change after the cutover:
-bump `package.json` **and** the `.version()` string in `src/cli/index.ts` (they must match),
-write a CHANGELOG covering v0.4/v0.5 (atlas cockpit, criteria-as-task-list, packet/epic,
-replication engine, backup, house-rules, dry-run diff), verify `bun build` and the `bin` entry,
-then publish. **Before any public release**, see §9.6 — the README screenshots contain real
-board content.
+`main` is far ahead of the published `0.3.1`. Do it as one clean change after the cutover.
+
+**The version lives in THREE places and they must match** — miss the third and every snapshot and
+journal you write is stamped with a lie:
+
+1. `package.json` `"version"`
+2. the `.version("…")` call in `src/cli/index.ts`
+3. **`TOOL_VERSION` in `src/constants.ts`** — recorded into snapshots and journals (its own comment
+   says to keep it in sync; nothing enforces it, so a test asserting all three agree would be a
+   worthwhile addition)
+
+Then: write a CHANGELOG covering v0.4/v0.5 (atlas cockpit, criteria-as-task-list, packet/epic,
+replication engine, backup, house-rules, dry-run diff); run the gate; verify the compiled binary
+with `bun run build` (= `bun build src/cli/index.ts --compile --outfile planestories`) and check
+the `bin` entry still resolves; `npm publish` (npm auth is interactive — the operator's account
+uses WebAuthn, so publishing needs them at the keyboard, it is not automatable from a session);
+finally push a `v*` tag, which triggers `.github/workflows/release.yml` to build the
+multi-platform binaries and cut the GitHub release. **Before any public release**, see §9.6 — the
+README screenshots contain real board content.
 
 ### 9.3 Criteria fold + orphan backfill (runs on CE, after cutover)
 
-The board still carries ~310 parents / ~1,578 legacy `::ac<n>` criterion child items from the
-old model. `migrate-criteria` folds them into the parent description's task list. Order:
-`migrate-criteria --json` (dry-run, keep as the "before" artifact) → `--only DATA-x,DATA-y`
-canary on a handful of long-closed parents → `--yes` → `export` → `import` → `doctor --json` and
-assert `criteria.unmigrated == []` and `criteria.dual == []`. Separately, ~214 of 742 stories are
-board-orphans (no parent): `export --orphans-only` emits a worksheet where you add `parent:` keys
-and re-import. This is the finance session's work, but the tooling is yours to keep correct.
+**Counted from the 2026-08-15 backup** (recount before you start — this drifts; the method is a
+few lines of Python over `items[].externalId` in any snapshot): **1,733 legacy `::ac<n>` criterion
+children across ~337 parents**, and **226 of 768 stories are board-orphans** (no parent), under
+**47 epics**. `migrate-criteria` folds the criterion children into the parent description's task
+list.
+
+**⚠ Every command below MUST carry `--context ce`.** Without it the CLI uses the bare cloud
+credentials and you would be writing to the production board — the exact thing §3 forbids. This
+runs *after* cutover, when CE is authoritative.
+
+```bash
+cd ~/PycharmProjects/planestories
+P='Data Platform'
+# 1. before-artifact (dry-run) — keep it
+bun run src/cli/index.ts migrate-criteria --context ce -p "$P" --json > ~/migrate-before.json
+# 2. canary: pick 3-5 long-closed parents FROM that JSON, then
+bun run src/cli/index.ts migrate-criteria --context ce -p "$P" --only DATA-x,DATA-y --yes
+# 3. full apply once the canary looks right
+bun run src/cli/index.ts migrate-criteria --context ce -p "$P" --yes
+# 4. round-trip the corpus and confirm the board is clean
+bun run src/cli/index.ts export --context ce -p "$P" -o <corpus-file>.md
+bun run src/cli/index.ts import <corpus files> --context ce
+bun run src/cli/index.ts doctor --context ce -p "$P" --json > ~/doctor-after.json
+```
+
+Gate on `criteria.unmigrated == []` and `criteria.dual == []` in `doctor-after.json`.
+
+For the orphans: `export --context ce -p "$P" --orphans-only -o orphan-worksheet.md` emits a
+worksheet whose header lists the epic directory; add a `parent: DATA-N` key to each story's YAML
+block, review the diff, then `import orphan-worksheet.md --context ce`. Unknown parents fail that
+story's import rather than being guessed.
+
+**Confirm the corpus paths with the operator** (which exported file replaces which of the
+finance repo's story files) before writing anything back — the corpus is multi-file and this
+handoff cannot know the current layout. This is the finance session's work; the tooling is yours
+to keep correct.
 
 ### 9.4 Parked features — with the reasoning, so you can revive them properly
 
@@ -322,15 +410,25 @@ and re-import. This is the finance session's work, but the tooling is yours to k
   alone declared `blocked_by: [B]` and the user deletes that line, only A's hash changes; edge
   removal requires **both** endpoints present in the batch (`canRemoveEdge`), so a warm B outside
   the batch makes the edge unremovable — silently breaking the documented "re-import the full
-  set removes it" contract. A regression test now pins this. **If you revive it**, the shape that
-  works is *passive records*: keep warm stories in the batch as removal-eligible endpoints
-  without spending a `getRelations` read on them (their desired edges are already known from the
-  file). Do not simply narrow the batch again.
-- **`groom` board→file reverse-sync** (ticking a Plane checkbox and having `export` write
-  `- [x]`). Mostly **obsoleted**: with criteria-as-task-list the reader recovers `data-checked`,
-  so `export` already round-trips checkbox state for migrated parents. What remains is only the
-  legacy `::ac` child model, which `migrate-criteria` is retiring anyway. Don't build the old
-  design; confirm the new path covers the case first.
+  set removes it" contract. The regression that pins it is `tests/unit/sync/importer.test.ts` →
+  *"removes an asymmetric dependency when changed A and warm unchanged B are re-imported"*.
+  **If you revive it**, the seam already exists in `src/sync/relations.ts`: `syncedIds` (who may
+  have edges REMOVED) is deliberately distinct from `relationFetchIds` (whose relations we READ),
+  so "passive records" = keep warm stories in `syncedIds`, leave them out of `relationFetchIds`.
+  **That alone is not a complete design.** Settle the policy question first: *does a full import
+  promise to repair board-side relation drift?* A matching `plane_hash` proves only that the FILE
+  is unchanged — it says nothing about what someone did in the Plane UI, so in an all-warm run a
+  UI-added or UI-deleted relation would go unseen. Decide explicitly (either "import repairs
+  drift, so current relation state must still come from somewhere" or "import is file-
+  authoritative and `--force` is the repair path"), write the decision down, and cover four
+  cases: changed-A + warm-B removal; all-warm after an out-of-band relation ADD; all-warm after
+  an out-of-band relation DELETE; and a cycle involving passive endpoints.
+- **`groom --write-back` is SHIPPED, not parked** — an exclusive, file-only mode that ticks a
+  story's `- [x]`/`- [ ]` in place to match each legacy `::ac<n>` child's board state
+  (`src/sync/writeback.ts`). The open question is its *retirement*: with criteria-as-task-list,
+  ordinary `export` already recovers `data-checked`, so once §9.3's fold completes, `--write-back`
+  serves only a model that no longer exists. Decide then whether to deprecate it (and say so in
+  the docs) rather than carrying a second reverse-sync path forever.
 - **Journal-less `verify`.** Today verify is journal-anchored, which is a strength (it judges by
   recorded fact, not inference) but means a replica can only be verified with the journal from
   *that* snapshot's apply. A weaker "structural verify" for an orphaned replica is possible;
@@ -341,10 +439,13 @@ and re-import. This is the finance session's work, but the tooling is yours to k
   and gzip would cut the ~5 MB/night footprint. Snapshots are deterministically ordered
   specifically so they diff cleanly — that groundwork is already done.
 - **`doctor` house-rule configuration.** `--house-rules` currently hardcodes two lints
-  (missing `**Effort:**`; board-side dependency prose without a wired relation). Making the
-  rule set configurable needs a deliberate config story: `.planestoriesrc.json` is *repo/file*
-  configuration while doctor is a *board* check, and gluing them together is a design decision,
-  not a bolt-on. That is why it shipped hardcoded.
+  (missing `**Effort:**`; board-side dependency prose without a wired relation). Making the rule
+  set configurable needs a deliberate config story, because there are already TWO config files
+  with different jobs: `.planestoriesrc.json` (credentials/contexts, gitignored) and
+  `.planestories.yml` (committed, non-secret repo conventions — today `lint.strictness` and
+  `lint.disable`, read by `src/config/repo_config.ts`). Doctor is a *board* check, so extending
+  the *repo* conventions file to configure it is a real design decision, not a bolt-on. That is
+  why it shipped hardcoded.
 - **Decimal estimates.** Blocked upstream: Plane's `point` field rejects non-integers
   (`400 {"point": ["A valid integer is required."]}`, empirically probed), and estimate systems
   are fixed point-scales behind the paid tier. Hence the `**Effort:** N.n dev-days` body-line
@@ -364,9 +465,16 @@ project content. Re-shoot them from a synthetic board first. The rig is
 fit-to-view on degenerate bounds produces absurd zoom), so screenshots must be driven in real
 time over the DevTools Protocol.
 
+Also still outstanding from an earlier cleanup: **`~/plane access.txt` exists on the dev box** and
+looks like a stray credentials/notes file. Ask the operator to delete it (do not open it).
+
 ---
 
 ## 10. Load-bearing facts about Plane (empirically verified — each cost real time)
+
+*Verified by probe or live run at the dates given in git history. Anything about the CURRENT
+contents of an instance (CE project inventory, npm publication state, board counts) is a dated
+observation — re-check it, don't trust it.*
 
 1. **Sequence ledger is max-ever.** Deleted numbers are never reused. Confirmed on both cloud
    and CE, by probe (mid-delete and top-delete). The whole exact-identifier mechanism rests on it.
@@ -393,10 +501,13 @@ time over the DevTools Protocol.
 10. **Title cap is 255 characters** (Plane's own limit; the fake client enforces it too).
 11. **429s are real and bursty.** The client retries transient failures (429/5xx/network,
     honouring `Retry-After`, else exponential backoff with jitter, `PLANE_MAX_RETRIES`). Heavy
-    sweeps (atlas, doctor, snapshot) use a paced two-phase fetch — concurrency pass, then a
-    sequential retry of failures — and **fail hard** if anything is still missing. That
-    fail-hard is deliberate: a partially-fetched export would silently *remove* relations on the
-    next import.
+    sweeps use a paced two-phase fetch — a concurrency pass, then a sequential retry of the
+    failures. **The failure policy then differs by command, deliberately:** `snapshot`, `export`,
+    and `doctor` **fail hard** on any residual failure (a partially-fetched export would silently
+    *remove* relations on the next import; a partial doctor scan is a false-clean CI gate),
+    whereas `atlas` is **fail-soft** — it drops the failed items' edges, warns on stderr, and
+    still renders (a graph with most edges beats no graph, and it is a read-only visualizer that
+    nothing downstream consumes). Don't "fix" either behaviour into the other.
 12. **The board's API quota is shared with the other session.** A heavy sweep at a busy hour
     gets slow or aborts. Run big reads at quiet hours; an abort here is the design working.
 

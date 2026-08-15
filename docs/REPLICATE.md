@@ -177,3 +177,26 @@ planestories rename-project --context ce --project DST --identifier DATA --yes
 The project resolves by case-insensitive identifier or exact name. Changing the
 identifier changes every work-item prefix workspace-visibly, so both preview and
 apply print a warning.
+
+## Residual limitations (accepted, and why)
+
+These four are known, confirmed in the code, and deliberately accepted — each is bounded by
+something else in the design. They were surfaced by adversarial review of the engine; do not
+rediscover them as bugs, and do not remove the comments that record them.
+
+1. **A request already in flight can land after journal-lock loss.** Ownership is asserted before
+   every journal append, before every Plane write, and again inside the client's retry loop — but
+   a single HTTP request that has already left cannot be recalled. Everything after it is refused
+   at three layers. Bounded by: only one process is ever meant to own a run, and the next append
+   fails closed.
+2. **Live-only verify cannot see a foreign item archived after apply.** Neither of our instances
+   serves the archived-items endpoint, so verify runs in live-only mode (it says so in the
+   report). An item archived by someone else *after* the apply is invisible to that pass.
+3. **The `created_by` capability probe can false-positive on a single-member workspace**
+   (`src/replicate/probe.ts`): the only probe-able member may BE the API key's owner, whom the
+   server would stamp anyway, so acceptance can read true even where the field is ignored.
+   Harmless where it matters (a single-member workspace has one possible author).
+4. **A foreign item could in theory be adopted** if it sits at exactly the expected sequence, has
+   exactly the expected title, and carries NO external identity (`src/replicate/create.ts`). No
+   API-visible field discriminates it. Bounded by the hard requirement that the target project is
+   run-created and sequence-pristine — nothing foreign should exist there at all.
