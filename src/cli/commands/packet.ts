@@ -10,6 +10,7 @@ import {
 	announceSnapshotSource,
 	asClient,
 	FROM_SNAPSHOT_HELP,
+	loadConfigForSnapshot,
 	openSnapshotSource,
 } from "../snapshot_option.ts";
 
@@ -49,7 +50,9 @@ export function registerPacketCommand(program: Command) {
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (identifier: string, options) => {
 			try {
-				const config = await loadConfig({ configPath: options.config, context: options.context });
+				const config = options.fromSnapshot
+					? await loadConfigForSnapshot(options.config, options.context)
+					: await loadConfig({ configPath: options.config, context: options.context });
 				const snapshotSource = options.fromSnapshot
 					? await openSnapshotSource(String(options.fromSnapshot))
 					: null;

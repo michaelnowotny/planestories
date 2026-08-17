@@ -1,7 +1,9 @@
 import chalk from "chalk";
+import { loadConfig } from "../config/loader.ts";
 import type { PlaneClient } from "../plane/client.ts";
 import { parseSnapshot } from "../replicate/snapshot.ts";
 import { SnapshotSource } from "../replicate/snapshot_source.ts";
+import type { ResolvedConfig } from "../types.ts";
 
 /**
  * Shared plumbing for `--from-snapshot` on the read-only commands.
@@ -47,4 +49,37 @@ export function snapshotProvenance(source: SnapshotSource | null): {
 	source?: { kind: "snapshot"; takenAt: string };
 } {
 	return source ? { source: { kind: "snapshot", takenAt: source.takenAt } } : {};
+}
+
+/**
+ * Config loading for a snapshot-backed run.
+ *
+ * `--from-snapshot` advertises that it works OFFLINE, and that has to be literally
+ * true: reading a file must not require credentials. But every command loads config
+ * first, and `loadConfig` refuses to start without an API key — so on a machine
+ * without `.env` (a fresh clone, a CI job, a laptop on a plane) the offline path
+ * could not boot, and the help text was a lie.
+ *
+ * When a snapshot is supplied we therefore tolerate a missing/incomplete config and
+ * fall back to neutral defaults. Nothing here can reach the network: no client is
+ * built from it. A config that IS present is still honoured, so `defaultProject` and
+ * friends keep working.
+ */
+export async function loadConfigForSnapshot(
+	configPath: string | undefined,
+	context: string | undefined,
+): Promise<ResolvedConfig> {
+	try {
+		return await loadConfig({ configPath, context });
+	} catch {
+		return {
+			apiKey: "",
+			workspaceSlug: "",
+			baseUrl: "",
+			defaultProject: null,
+			defaultLabels: [],
+			sourceLabel: null,
+			maxRetries: 0,
+		};
+	}
 }

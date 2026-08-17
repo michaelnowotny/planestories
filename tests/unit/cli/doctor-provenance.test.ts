@@ -21,9 +21,17 @@ test("doctor --json --from-snapshot embeds its provenance, and a revert would be
 		writeFileSync(file, serializeSnapshot(snapshot));
 		const cli = join(import.meta.dir, "../../../src/cli/index.ts");
 
+		// HERMETIC: no credentials, and a cwd with no .env — otherwise this test would
+		// be green merely because a gitignored file happens to exist on this machine,
+		// which is the same "green for the wrong reason" trap as an identity helper.
+		// A fresh clone or a CI job must get the same answer.
+		const env: Record<string, string> = { FORCE_COLOR: "0" };
+		for (const [key, value] of Object.entries(process.env)) {
+			if (!key.startsWith("PLANE_") && value !== undefined) env[key] = value;
+		}
 		const proc = Bun.spawnSync(
 			["bun", "run", cli, "doctor", "--from-snapshot", file, "-p", snapshot.project.name, "--json"],
-			{ env: { ...process.env, FORCE_COLOR: "0" } },
+			{ env, cwd: dir },
 		);
 		const stdout = proc.stdout.toString();
 		const report = JSON.parse(stdout);

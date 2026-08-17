@@ -25,9 +25,12 @@
  * lingers, is immediate anyway (a client run exits in ~0.75 s).
  *
  * What we CAN do honestly is tell the truth: if the runtime is still alive well after
- * the work finished, say so once on stderr. The user then knows the command is done —
- * which was the actual harm — and that interrupting it is safe, because every write is
- * awaited before a command returns.
+ * the work finished, say so once on stderr. The user then knows the command has
+ * returned — which was the actual harm. Whether INTERRUPTING is safe depends on where
+ * stdout goes, so the notice splits on that rather than promising: on a TTY there is no
+ * unread pipe and killing costs nothing; on a pipe the runtime may be waiting for the
+ * reader, and interrupting would truncate exactly the output being waited for. Board
+ * state is safe either way, because every write is awaited before a command returns.
  */
 const NOTICE_MS = 5_000;
 

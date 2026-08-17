@@ -13,7 +13,11 @@ import { groom } from "../../sync/groomer.ts";
 import { checkHouseRules, type HouseRuleFindings } from "../../sync/house_rules.ts";
 import { checkCriteriaMigration } from "../../sync/migrate.ts";
 import { reportPacing } from "../pacing.ts";
-import { announceSnapshotSource, snapshotProvenance } from "../snapshot_option.ts";
+import {
+	announceSnapshotSource,
+	loadConfigForSnapshot,
+	snapshotProvenance,
+} from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -65,7 +69,9 @@ export function registerDoctorCommand(program: Command) {
 		)
 		.action(async (options) => {
 			try {
-				const config = await loadConfig({ configPath: options.config, context: options.context });
+				const config = options.fromSnapshot
+					? await loadConfigForSnapshot(options.config, options.context)
+					: await loadConfig({ configPath: options.config, context: options.context });
 				// A snapshot contains exactly what doctor enumerates, so it can stand in for
 				// the instance entirely. The one rule: say so, and print its age — a stale
 				// answer presented as a live one is worse than no answer.
