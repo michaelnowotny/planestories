@@ -572,6 +572,59 @@ are to bite the next person.
    `sequence_id` against the snapshot. **It cannot see in-place edits**, so it must print a weaker,
    explicitly-caveated verdict — never the same wording as `--deep`.
 
+### 9.5c Product opportunities the real cutover revealed (bigger than defects — read before picking work)
+
+§9.5b lists things that broke. These are things the experience showed are *missing*, ordered by
+value-per-effort. The cutover changed the tool's centre of gravity: CE is now primary, it is
+~25× faster than cloud for the same work, and a full-fidelity offline snapshot of the board exists
+every night. Several long-standing constraints stop making sense in that world.
+
+1. **`--from-snapshot` for every read-only command** (doctor, atlas, export, packet, epic, lint's
+   board-side cousins). *The strongest idea here.* A snapshot already contains items, hierarchy,
+   relations, comments, states and labels — everything those commands enumerate the API for. Today
+   `doctor` costs ~800 relation GETs and simply cannot complete against a rate-limited instance;
+   against a snapshot it would be a local computation taking seconds, with zero API calls, and it
+   would work offline and on a plane. It also turns the nightly backups into something you *use*
+   rather than something you hope never to need, and it makes historical analysis possible
+   ("what did the board look like three weeks ago?"). Design note: the command must SAY it read a
+   snapshot and print the snapshot's `takenAt`, so nobody mistakes a stale answer for a live one.
+2. **Per-instance performance profiles.** Concurrency is currently hardcoded (relations sweeps at
+   6, snapshot at 4) because it was tuned defensively for Plane Cloud's limiter. On CE those
+   numbers are absurdly conservative — measured: `migrate-criteria` dry-run 36 s on CE vs ~15 min
+   on cloud, and a single-ticket cloud canary died on a 429 before writing. Add per-context
+   `concurrency` / rate settings to the config (§9.6's work is the natural home), default cloud
+   conservative and CE aggressive, and let the operator tune. This is probably a 2–5× speedup on
+   every paced command for a day's work.
+3. **`replicate diff <a.snapshot.json> <b.snapshot.json>`.** Snapshots are already
+   deterministically ordered *specifically* so they diff cleanly — the groundwork is done. This is
+   the missing answer to the situation the cutover created: CE and cloud have genuinely diverged,
+   and there is currently no way to see *how*. Also gives point-in-time board archaeology ("what
+   changed last week?") and a cheap review artifact. Note what it must NOT pretend to be: a merge
+   tool. Show the difference; let a human decide.
+4. **`replicate restore-drill`.** The backups are now load-bearing and have never been restored.
+   One command should: apply a chosen backup into a scratch project under a throwaway
+   `--dest-identifier`, run `verify`, report, and delete the scratch project. Until that exists,
+   "we have backups" is a belief rather than a fact. (The operator's other repo runs exactly this
+   discipline for its ZFS backups — a periodic restore drill with a timestamp — so the concept is
+   already in their mental model.)
+5. **One-pass greenfield import.** Authoring a NEW epic + children directly on the board is now a
+   primary workflow (it was rare when everything came from cloud). Today it takes three passes
+   because parent and dependency resolution read a memoized index that predates the run's own
+   creates (§9.5b #3). Fix the index lifecycle and this becomes: write the file, `import`, done.
+6. **Progress + cost telemetry on every paced command.** Print a progress line with an ETA, and on
+   completion the API call count and elapsed time. Two payoffs: "no output for ten minutes" stops
+   being indistinguishable from a hang, and the *cost* of a command becomes visible — which is how
+   you would have known, without measuring by hand, that doctor makes ~800 calls and snapshot ~2×
+   the item count.
+7. **A journal-less structural verify** (already parked in §9.4, now more valuable). Post-cutover
+   there is a live CE board and nightly snapshots but no way to ask "is this board still what I
+   think it is?" without the original apply journal. Ship it as an explicitly weaker verdict with
+   different wording from the real gate.
+8. **Instance provenance in story files.** `plane_url` records the host, but `plane_identifier:
+   DATA-2461` alone is now ambiguous across two live boards sharing an identifier space. Consider
+   stamping the workspace/base-url (or a short instance alias) into exported story blocks and
+   packet headers, so a file says which board it belongs to without inference.
+
 ### 9.6 Multi-installation ergonomics: a default installation (small, user-facing)
 
 **Operator request, 2026-08-15.** The tool already supports multiple Plane installations well —
