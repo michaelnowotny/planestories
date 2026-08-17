@@ -58,22 +58,45 @@ not implemented in this build, fails closed).
 
 ## Fidelity
 
-- **Native where accepted** (probe-decided): `created_at`/`created_by` on items and
-  comments, email-mapped to target members. Otherwise comments get a visible
-  provenance footer keyed by the source comment UUID.
-- **Verbatim**: `external_source`/`external_id` (keeps existing story files warm),
-  `description_html`, priorities, points, dates, labels (color/description/parent),
-  states (matched by name+group; colors/descriptions patched onto Plane's defaults).
-- **Archived items are replicated as archived** (probe-gated verb).
-- **Degradation/loss manifests**: every fallback (unmappable authors, rejected
-  relation kinds, missing archive verb) is counted in the apply report. V1-out
-  entities are reported as losses: `updated_at`/`completed_at` counted per item;
-  cycles/modules/pages and attachments/activity/reactions as categorical notes
-  (they are not inventoried in snapshot v1 — description-embedded asset URLs
-  still point at the source instance).
-- If the source's archived inventory endpoint is unavailable, sequence gaps cannot
-  be distinguished from invisible archived items: the gate fails closed until
-  `--assume-gaps-deleted` is passed deliberately.
+Three categories, deliberately distinguished — they invite very different follow-up:
+
+**1. Preserved.** `external_source`/`external_id` (keeps existing story files warm),
+`description_html`, titles, priorities, points, start/target dates, labels
+(color/description/parent), states (matched by name+group; colors/descriptions patched
+onto Plane's defaults), parent hierarchy, relations, **comments in full** — and,
+probe-permitting, native `created_at`/`created_by` on items **and** comments,
+email-mapped to target members. Unmappable authors fall back to a visible provenance
+footer keyed by the source comment UUID.
+
+**2. Impossible — the server owns these fields; no client can set them.** Measured on a
+live instance 2026-08-17, not inferred:
+
+| Field | On create | On PATCH | Why |
+|---|---|---|---|
+| `created_at` | **accepted** | — | Plane's create view deliberately copies it after save (an import affordance). The POST *response* echoes server time; only a re-read shows the historical value that persisted. |
+| `completed_at` | ignored (`null`) | `200 OK`, **unchanged** | Server-derived from the state transition. Supplying it *while* moving into a completed state still yields `now()`. |
+| `updated_at` | ignored | `200 OK`, **server-stamped** | `auto_now`: overwritten on every save by definition. |
+
+Consequence: a post-apply backfill of `completed_at` is **not possible** — PATCH returns
+`200` and silently changes nothing, which is the worst failure mode there is. What this
+does and does not cost you: the completed/cancelled **state** transfers, so *"what is
+done"* is intact; only *"when it was completed"* is absent from the board. Both values
+remain in every snapshot, so they are recoverable as data, just not as board state.
+
+**3. Out of scope in v1 — implementable, simply not built.** Cycles, modules, pages,
+intake, reactions, and the **activity/audit log** (**NOT comments** — comments are
+preserved in full, with original authorship and timestamps). Formal attachments are not
+inventoried; description-embedded asset URLs still point at the source instance, so check
+your own exposure before retiring a source (a one-line scan of `descriptionHtml` for
+`<img`/external hosts answers it). Multi-assignee collapses to the first by email.
+
+Every fallback and every v1-out entity is counted in the apply report rather than hidden.
+
+**Archived items** are replicated as archived where the instance supports it. Note that
+Plane serves the archived list **only under the `work-items` spelling** — and not at all
+on some self-hosted versions. When a source's archived inventory is genuinely
+unavailable, sequence gaps cannot be distinguished from invisible archived items, and the
+gate fails closed until `--assume-gaps-deleted` is passed deliberately.
 
 ## Crash safety and resume
 

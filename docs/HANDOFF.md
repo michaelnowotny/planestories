@@ -240,10 +240,10 @@ backup, and the next night self-heals.
   ran the migration: 2,551 items, digest `3051b700233a`, 16 gaps reproduced, **verify 0 failures**,
   relink committed (51 files, 858 substitutions), 1,613 criteria folded on CE, and new tickets
   (DATA-2568…2574) authored directly on CE. **CE and cloud have genuinely diverged — a cloud→CE
-  replication would now DESTROY the fold and the new tickets. That path is closed.** Still open at
-  the time of writing: the `.mcp.json` switch (answered — `uvx plane-mcp-server@0.3.0 stdio`, env
-  `PLANE_API_KEY`/`PLANE_WORKSPACE_SLUG=archimedes`/`PLANE_BASE_URL=https://plane.porcupine.works`,
-  proven live against CE), repointing the backup cron at CE, and archiving cloud. The full
+  replication would now DESTROY the fold and the new tickets. That path is closed.** **The cutover COMPLETED on 2026-08-16/17:** the MCP is switched (via a wrapper script —
+  see below), the nightly cron now snapshots CE into `backups-ce/`, and the cloud project has been
+  renamed `DATAX` to break the shared `DATA-N` identifier space. Cloud remains live, unarchived,
+  as the rollback. The full
   question-and-answer record is `finance_csv_importer/external_info/planestories-cutover-*.md`
   (gitignored there — the durable version of everything that concerns this repo is §9.5b).
 - **CE instance** (`plane.porcupine.works`, workspace `archimedes`) holds: `SBOX` (sandbox),
@@ -342,7 +342,7 @@ integration around it has three operator prerequisites.
    `bun run src/cli/index.ts rename-project --context ce --project DATAOLD --name "Data Platform Old" --yes`
    Verify with `bun run src/cli/index.ts projects --context ce` that nothing holds `DATA` or the
    name.
-3. Take a **fresh** snapshot of a quiet board (~25 min):
+3. Take a **fresh** snapshot of a quiet board (**size it from the item count: ~30 items/min end-to-end; a 2,550-item board took 85 minutes** over a residential link — an early draft of this runbook said ~25 min and that under-estimate contributed to two runs being killed):
 
    ```bash
    SNAP=~/plane-replication/data-cutover.snapshot.json
@@ -563,7 +563,21 @@ are to bite the next person.
 6. **New labels are silently skipped without `--create-labels`** (one dim line in a long summary).
    Fix: make the skip loud in the summary. Do NOT default to creating — silent creation from a typo
    is how a board accumulates `ops`, `Ops`, and `opps`.
-7. **`freshness --quick` (new, small, genuinely useful).** A full `--deep` is unaffordable against
+7. **`rename-project` reports FAILURE after SUCCEEDING** (found 2026-08-16 in real use; the
+   dangerous direction, because it invites a destructive retry). Cause: a non-idempotent retry —
+   the client replays transient failures, so a PATCH that *applied* but hiccupped in transport is
+   re-sent and the replay fails `400 "identifier already in use"` (taken by itself). The handler
+   converts any 400/409 into a hard error without checking reality. Fix: on 400/409, re-read the
+   project and report success if the desired state is already in place (house rule A10 —
+   after an ambiguous write, verify durable state before replaying or reporting).
+8. **The archived-items probe follows the DIALECT and so asks for a path that does not exist.**
+   The archived list is served only under the `work-items` spelling: on cloud
+   `archived-work-items/` returns `200 total_count=0` while `archived-issues/` 404s. A cloud
+   snapshot on the `issues` dialect therefore reports "endpoint unavailable" when a definitive
+   "nothing archived" was available, and `verify` carries a caveat it does not need. Fix: probe
+   the `work-items` spelling regardless of dialect before concluding unavailable. (On instances
+   that genuinely lack it — the operator's CE — the caveat is honest and must stay.)
+9. **`freshness --quick` (new, small, genuinely useful).** A full `--deep` is unaffordable against
    a rate-limited instance — the finance session could not get any verdict during the cutover.
    Plane's paginated envelope already carries what a cheap check needs; a live CE response shows
    `total_count`, `count`, `total_pages`, `total_results` alongside `next_cursor`, but our
@@ -571,6 +585,39 @@ are to bite the next person.
    Build: one request with `per_page=1&order_by=-sequence_id` → compare `total_count` + top
    `sequence_id` against the snapshot. **It cannot see in-place edits**, so it must print a weaker,
    explicitly-caveated verdict — never the same wording as `--deep`.
+
+### 9.5bb What the FIRST WEEK of real use taught us (2026-08-17)
+
+Measured against a live instance while answering the finance session's follow-up. These
+supersede several assumptions in the docs, and three of them are the reason for the bug list
+in 9.5b.
+
+1. **`completed_at` and `updated_at` cannot be written at all** — not on create, not on PATCH
+   (`200 OK`, silently unchanged), and `completed_at` is server-stamped even when you supply it
+   while moving an item into a completed state. `created_at` *is* writable, because Plane's
+   create view deliberately copies it after save. **The POST response echoes server time**, so
+   only a re-read reveals the persisted historical value — any future probe must re-read rather
+   than trust the create response. A `completed_at` backfill is therefore impossible; do not
+   build one. Full matrix: `docs/REPLICATE.md` §Fidelity.
+2. **The archived list exists ONLY under the `work-items` spelling**, and not at all on some
+   self-hosted versions. Cloud: `archived-work-items/` → `200`, `archived-issues/` → `404`.
+   The operator's CE: both 404. Since the client derives that path from the *dialect*, a cloud
+   snapshot on the `issues` dialect wrongly concludes "unavailable" (9.5b #9).
+3. **An activity/audit export DOES exist**: `GET .../work-items/{id}/activities/` returns 200
+   with `verb`/`field` per entry, both spellings, on cloud. It is per-item, so a full dump is
+   ~1 request per item — affordable now that pacing exists. Offered to the finance session as
+   `replicate snapshot --with-activity`; not yet built.
+4. **Zero embedded images.** A scan of all 2,558 items found no `<img>` and no external asset
+   host in any description, so retiring the source instance breaks nothing there. Worth
+   re-measuring per board rather than assuming either way — the check is a one-line scan of
+   `descriptionHtml`.
+5. **Snapshot throughput is ~30 items/min end-to-end** over a residential link (2,550 items =
+   85 minutes), not the "~25 min" an early runbook draft claimed. The under-estimate directly
+   caused two runs to be killed mid-flight.
+6. **The MCP server's tools are action-dispatched** (`workitem` + `action: "list"`), and
+   `retrieve_by_identifier` is the one call taking a human `DATA-N` with no `project_id`. The
+   `.mcp.json` **wrapper script is the recommended default**, not a fallback: a `${VAR}`
+   reference to a mistyped name yields an *empty key* and a silently-dead MCP.
 
 ### 9.5c Product opportunities the real cutover revealed (bigger than defects — read before picking work)
 
