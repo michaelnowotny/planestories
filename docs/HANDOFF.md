@@ -327,6 +327,28 @@ red first. Ordered as the roadmap sections that produced them.
    `--recreate-target` AND `--allow-divergent-target`.
 2. The CLI no longer forces an exit; it prints a linger notice instead (see below).
 
+## 8c. Where to pick up (as of 2026-08-17)
+
+Nothing is half-finished. Every branch is merged, the tree is clean, and no operation is
+mid-flight. Pick by what the operator wants next:
+
+- **If the operator wants planestories features:** §9.5 (parent-identifier resolution — small,
+  self-contained, a real decision to make), then §9.6 (multi-installation default), then the
+  unbuilt items in §9.5c (`replicate diff`, `restore-drill`, journal-less verify,
+  `snapshot --with-activity`, attachment counts). §9.5a lists the three known residuals.
+- **If the operator wants the npm release:** §9.2, and remember the version lives in THREE places.
+- **If the finance session asks for something:** they are the primary user; their reports have
+  produced the best work in this repo. Their latest brief and my answers are in
+  `finance_csv_importer/external_info/planestories-*.md` (gitignored there — the durable version
+  of anything that concerns this repo is in THIS file).
+- **If something looks broken in production:** the CE board is authoritative and live; cloud is
+  renamed `DATAX` and kept as rollback. Read §9.1 for what the cutover did and did not do.
+
+**Planestories work is NOT tracked in Plane.** The DATA board belongs to the finance data-platform
+programme; this repo's roadmap lives in this document, deliberately — the tool should not compete
+for space on the board it serves. If that ever changes, it is an operator decision, not a
+housekeeping one.
+
 ## 9. The roadmap — the whole arc, in priority order
 
 ### 9.1 THE CUTOVER (operator-gated; the reason most of this exists)
