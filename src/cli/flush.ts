@@ -1,41 +1,43 @@
 /**
- * Exit discipline.
+ * Why this file does NOT force an exit.
  *
- * Two failure modes pull in opposite directions:
+ * The symptom that started this: a run finished its work and then sat for ~45 MINUTES
+ * on a lingering handle, so "finished" was indistinguishable from "hung" and a user
+ * nearly killed a completed migration.
  *
- *   1. A run can finish its work and then sit for ~45 MINUTES on some lingering
- *      handle, making "finished" indistinguishable from "hung" (a user nearly killed
- *      a completed migration over it).
- *   2. `process.exit()` DISCARDS buffered stdout. Measured in Bun: a 1 MiB payload
- *      through a pipe arrives as exactly 65,536 bytes — the pipe buffer — and no
- *      flush strategy prevents it (`write("", cb)` and polling `writableLength` both
- *      still truncate). Losing the tail of an epic `packet` or a JSON artifact is a
- *      silent data loss.
+ * The obvious fix — `process.exit()` once the command returns — is unsafe here, and
+ * measurably so on this runtime:
  *
- * So: never force an exit on the happy path — let the runtime end naturally, which
- * delivers stdout in full and, when nothing lingers, is immediate anyway. Arm an
- * UNREF'd watchdog instead: it cannot hold the process open by itself, so a healthy
- * run still exits at once, but if something else is holding the loop it fires and
- * ends the run deliberately — refusing to do so while stdout still has bytes waiting,
- * because a slow reader must not be truncated either.
+ *   - `process.exit()` DISCARDS buffered stdout. A 1 MiB payload through a pipe
+ *     arrives as exactly 65,536 bytes (the pipe buffer).
+ *   - It cannot be made safe by draining first: `process.stdout.write("", cb)` and
+ *     polling `process.stdout.writableLength` both still truncate, and on Bun
+ *     `writableLength` is ALWAYS 0, so any guard built on it is dead code.
+ *   - Worse, UNREAD stdout is itself a handle keeping the loop alive. So "something
+ *     is lingering" and "the consumer has not read my output yet" are the same
+ *     observation from inside the process — and a watchdog that exits on the first
+ *     cannot avoid killing the second. A slow or late pipe reader
+ *     (`| less`, a CI capture, `packet`/`atlas --json`/`export` piped to a file)
+ *     is exactly what gets truncated.
+ *
+ * Since we cannot distinguish the two cases, we do not gamble with the user's data:
+ * the process ends naturally, which delivers stdout in full and, when nothing
+ * lingers, is immediate anyway (a client run exits in ~0.75 s).
+ *
+ * What we CAN do honestly is tell the truth: if the runtime is still alive well after
+ * the work finished, say so once on stderr. The user then knows the command is done —
+ * which was the actual harm — and that interrupting it is safe, because every write is
+ * awaited before a command returns.
  */
-const WATCHDOG_MS = 5_000;
+const NOTICE_MS = 5_000;
 
-export function armExitWatchdog(intervalMs: number = WATCHDOG_MS): void {
-	const schedule = () => {
-		const timer = setTimeout(() => {
-			const pending = (process.stdout as { writableLength?: number }).writableLength ?? 0;
-			if (pending > 0) {
-				// A slow consumer is still reading. Wait rather than truncate it.
-				schedule();
-				return;
-			}
-			console.error(
-				"planestories: work finished but the runtime is still alive (a lingering connection handle); exiting.",
-			);
-			process.exit(process.exitCode ?? 0);
-		}, intervalMs);
-		timer.unref?.();
-	};
-	schedule();
+export function armLingerNotice(intervalMs: number = NOTICE_MS): void {
+	const timer = setTimeout(() => {
+		console.error(
+			"planestories: the work above is COMPLETE — the process is only waiting on a lingering connection handle (or on a reader of its output). Interrupting now is safe.",
+		);
+	}, intervalMs);
+	// Unref'd: it must never keep the process alive by itself, or every command would
+	// pay this interval.
+	timer.unref?.();
 }

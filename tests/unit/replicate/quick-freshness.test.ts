@@ -32,6 +32,26 @@ describe("freshness --quick", () => {
 		expect(report.fresh).toBe(true);
 	});
 
+	test("the max comparison is live-only too, not snapshot.sequence.max", async () => {
+		// If the highest-numbered item is ARCHIVED, snapshot.sequence.max exceeds every
+		// live sequence id, and comparing against it would report CHANGED forever on an
+		// untouched board. Pin the live-only max so a revert cannot pass.
+		const archivedTop = {
+			...snapshot.items[0]!,
+			id: "archived-top",
+			sequenceId: snapshot.sequence.max + 50,
+			archived: true,
+		};
+		const withArchivedTop = {
+			...snapshot,
+			items: [...snapshot.items, archivedTop],
+			sequence: { ...snapshot.sequence, max: archivedTop.sequenceId },
+		};
+		const report = await checkFreshnessQuick(client(live.length, liveMax), withArchivedTop);
+		expect(report.fresh).toBe(true);
+		expect(report.maxSequenceId.snapshot).toBe(liveMax);
+	});
+
 	test("an added item reads CHANGED", async () => {
 		const report = await checkFreshnessQuick(client(live.length + 1, liveMax + 1), snapshot);
 		expect(report.fresh).toBe(false);

@@ -1,5 +1,5 @@
-import { armExitWatchdog } from "../../../src/cli/flush.ts";
+import { armLingerNotice } from "../../../src/cli/flush.ts";
 
 process.stdout.write("done\n");
-// A 60s interval: if the watchdog were ref'd, this process would take a minute.
-armExitWatchdog(60_000);
+// 60s: if this were ref'd, the process would sit for a minute.
+armLingerNotice(60_000);

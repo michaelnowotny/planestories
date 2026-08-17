@@ -269,6 +269,20 @@ The project resolves by case-insensitive identifier or exact name. Changing the
 identifier changes every work-item prefix workspace-visibly, so both preview and
 apply print a warning.
 
+## When a run seems to hang after printing its summary
+
+The work is finished. Every write is awaited before a command returns, so once you see a
+completion summary the board is in its final state and interrupting is safe.
+
+What lingers is the runtime, not the work — a connection handle, or simply a consumer
+that has not read the command's output yet. The CLI deliberately does **not** force an
+exit, because `process.exit()` discards buffered stdout (measured on Bun: a 1 MiB
+payload through a pipe arrives as exactly 65,536 bytes) and the condition cannot be
+detected from inside the process: `writableLength` always reads 0, and unread stdout is
+itself what keeps the loop alive. Truncating a `packet` or a JSON artifact to save a few
+seconds is not a trade worth making, so after five seconds the CLI simply says so on
+stderr and lets you decide.
+
 ## Residual limitations (accepted, and why)
 
 These four are known, confirmed in the code, and deliberately accepted — each is bounded by

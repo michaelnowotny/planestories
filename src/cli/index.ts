@@ -14,7 +14,7 @@ import { registerProjectsCommand } from "./commands/projects.ts";
 import { registerRenameProjectCommand } from "./commands/rename-project.ts";
 import { registerReplicateCommand } from "./commands/replicate.ts";
 import { registerSetCommand } from "./commands/set.ts";
-import { armExitWatchdog } from "./flush.ts";
+import { armLingerNotice } from "./flush.ts";
 
 const program = new Command();
 
@@ -45,15 +45,18 @@ registerRenameProjectCommand(program);
 // Long runs were observed idling for ~45 MINUTES after their final output, because a
 // lingering keep-alive socket keeps the runtime alive long after every write has been
 // awaited. That made "finished" indistinguishable from "hung" and nearly cost a user a
-// completed migration. Exit deliberately once the command's work is done, preserving
+// completed migration. Do not force an exit once the command's work is done, preserving
 // whatever exit code the command set.
 program
 	.parseAsync()
 	.then(() => {
-		armExitWatchdog();
+		// Deliberately NOT process.exit(): forcing an exit truncates piped stdout and
+		// cannot be made safe on this runtime (see src/cli/flush.ts). Natural shutdown
+		// delivers output in full; the notice only tells the truth if it is slow.
+		armLingerNotice();
 	})
 	.catch((error) => {
 		console.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
-		armExitWatchdog();
+		armLingerNotice();
 	});
