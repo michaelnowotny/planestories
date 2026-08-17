@@ -31,6 +31,8 @@ export interface FakeData {
 	workItems?: Record<string, Array<Record<string, unknown>>>;
 	/** Existing comments keyed by work item id, returned by listWorkItemComments. */
 	comments?: Record<string, Array<Record<string, unknown>>>;
+	/** Existing activity entries keyed by work item id, returned by listWorkItemActivities. */
+	activities?: Record<string, Array<Record<string, unknown>>>;
 	/** Plane relation UUID arrays keyed by work item id. */
 	relations?: Record<string, Partial<PlaneIssueRelations>>;
 	/** When true, creating a child work item (body has `parent`) throws — for testing follow-up-failure recovery. */
@@ -249,6 +251,14 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 		async listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]> {
 			record("listWorkItemComments", [projectId, workItemId]);
 			return (data.comments?.[workItemId] ?? []) as unknown as T[];
+		},
+
+		// Required by AGENTS.md: a new PlaneClient method must exist here too. This
+		// fake is cast through `as unknown as PlaneClient`, so tsc stays silent about
+		// the omission and the next real-flow test to call it would die at runtime.
+		async listWorkItemActivities<T>(projectId: string, workItemId: string): Promise<T[]> {
+			record("listWorkItemActivities", [projectId, workItemId]);
+			return (data.activities?.[workItemId] ?? []) as unknown as T[];
 		},
 
 		async createWorkItemComment<T>(

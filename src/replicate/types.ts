@@ -127,13 +127,36 @@ export interface SnapshotActivity {
 	verb: string | null;
 	/** The field that changed, when the entry describes a field change. */
 	field: string | null;
+	/**
+	 * The DISPLAY value before/after the change — a state or label NAME, not an id.
+	 * Names are reused over a board's life, so these alone cannot be joined back to
+	 * an entity; that is what the `*Identifier` pair below is for.
+	 */
 	oldValue: string | null;
 	newValue: string | null;
+	/**
+	 * The UUID before/after the change (state/label/user). THE durable join key:
+	 * `oldValue` says "In Progress", this says WHICH "In Progress". Dropping it was
+	 * the review's most valuable catch — on a dump that can never be re-taken,
+	 * keeping only the display name is irreversible loss the moment a name is reused.
+	 */
+	oldIdentifier: string | null;
+	newIdentifier: string | null;
 	/** The acting user's UUID. */
 	actor: string | null;
 	createdAt: string | null;
 	/** Plane's human-readable rendering of the change, when present. */
 	comment: string | null;
+	/** Joins a comment-related entry to the `comments` section we already store in full. */
+	issueComment: string | null;
+	/**
+	 * Every OTHER key Plane returned, verbatim. This is deliberate belt-and-braces
+	 * for a ONE-SHOT irreversible capture: a named field can only preserve what we
+	 * knew to ask for, and the cost of guessing wrong is a permanently missing
+	 * column. Omitted entirely when Plane returned nothing beyond the known fields,
+	 * so it never appears as an empty object pretending to be data.
+	 */
+	extras?: Record<string, unknown>;
 }
 
 /** Per-item relation edges, by kind, as SOURCE work-item UUID lists. */

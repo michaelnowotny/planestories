@@ -73,8 +73,11 @@ function activityLine(snapshot: ProjectSnapshot): string {
 		(sum, values) => sum + values.length,
 		0,
 	);
-	const items = Object.keys(snapshot.activities).length;
-	return `Activity    ${entries} entries across ${items} item(s)`;
+	const withHistory = Object.keys(snapshot.activities).length;
+	// Say "captured", and report coverage against items SCANNED. The bare
+	// "N entries across M item(s)" read as "we only looked at M" whenever some
+	// items came back empty — understating coverage as badly as overstating it.
+	return `Activity    captured: ${entries} entries; ${withHistory}/${snapshot.items.length} items had history`;
 }
 
 function verdict(value: boolean | null): string {

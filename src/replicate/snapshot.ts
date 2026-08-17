@@ -113,16 +113,34 @@ interface RawComment {
 	actor?: string | null;
 }
 
-interface RawActivity {
+interface RawActivity extends Record<string, unknown> {
 	id: string;
 	verb?: string | null;
 	field?: string | null;
 	old_value?: string | null;
 	new_value?: string | null;
+	old_identifier?: string | null;
+	new_identifier?: string | null;
 	actor?: string | null;
 	created_at?: string | null;
 	comment?: string | null;
+	issue_comment?: string | null;
 }
+
+/** Raw activity keys `normalizeActivity` maps onto named fields; the rest go to `extras`. */
+const KNOWN_ACTIVITY_KEYS = new Set([
+	"id",
+	"verb",
+	"field",
+	"old_value",
+	"new_value",
+	"old_identifier",
+	"new_identifier",
+	"actor",
+	"created_at",
+	"comment",
+	"issue_comment",
+]);
 
 /**
  * Read one Plane project COMPLETELY into a self-contained snapshot — the one
@@ -418,15 +436,29 @@ function normalizeActivity(raw: RawActivity): SnapshotActivity {
 		// an audit record we cannot identify is not one we should silently keep.
 		throw new ReplicateError(`Malformed activity entry in source response (id=${String(raw.id)})`);
 	}
+	// Keep EVERY key. This dump is taken once, immediately before a source instance
+	// is retired, so anything dropped here is gone permanently — including keys this
+	// build has never seen. Named fields stay typed and queryable; everything else
+	// is preserved verbatim rather than guessed at.
+	const extras: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(raw)) {
+		if (!KNOWN_ACTIVITY_KEYS.has(key)) {
+			extras[key] = value;
+		}
+	}
 	return {
 		id: raw.id,
 		verb: raw.verb ?? null,
 		field: raw.field ?? null,
 		oldValue: raw.old_value ?? null,
 		newValue: raw.new_value ?? null,
+		oldIdentifier: raw.old_identifier ?? null,
+		newIdentifier: raw.new_identifier ?? null,
 		actor: raw.actor ?? null,
 		createdAt: raw.created_at ?? null,
 		comment: raw.comment ?? null,
+		issueComment: raw.issue_comment ?? null,
+		...(Object.keys(extras).length > 0 ? { extras } : {}),
 	};
 }
 

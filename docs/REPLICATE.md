@@ -33,8 +33,9 @@ the archived-items endpoint** (it records `archivedInventory: "unavailable"` whe
 it does not, which is the case on both of our instances today) — relations of all kinds,
 comments, and the **sequence map** (present numbers + gaps) — under a content
 sha256 **digest**. It is deterministic and diff-stable, so it doubles as a
-**backup of everything it carries** (NOT of attachments, cycles, modules, pages,
-activity history, or reactions — those are outside snapshot schema v1). It holds
+**backup of everything it carries** (NOT of attachments, cycles, modules, pages, or
+reactions — those are outside snapshot schema v1; the **activity/audit log is carried
+only when you pass `--with-activity`**, and is archival-only — see Fidelity). It holds
 board content: treat it as data; don't commit it to shared repos by default.
 `apply` recomputes the digest and refuses edited/corrupted files — re-snapshot
 instead of hand-editing.

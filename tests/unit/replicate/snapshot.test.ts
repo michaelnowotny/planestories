@@ -106,9 +106,12 @@ describe("activity capture (--with-activity)", () => {
 				field: null,
 				oldValue: null,
 				newValue: null,
+				oldIdentifier: null,
+				newIdentifier: null,
 				actor: null,
 				createdAt: "2025-03-01T00:00:00Z",
 				comment: null,
+				issueComment: null,
 			},
 			{
 				id: "act-2",
@@ -116,9 +119,12 @@ describe("activity capture (--with-activity)", () => {
 				field: "state",
 				oldValue: null,
 				newValue: null,
+				oldIdentifier: null,
+				newIdentifier: null,
 				actor: null,
 				createdAt: "2025-03-02T00:00:00Z",
 				comment: null,
+				issueComment: null,
 			},
 		]);
 		// item-b returned []; an item with no history is OMITTED, and that reads
@@ -188,6 +194,60 @@ describe("activity capture (--with-activity)", () => {
 		);
 		expect(snapshot.activities).toEqual({});
 		expect(snapshot.source.activityInventory).toBe("captured");
+	});
+
+	test("EVERY field is preserved, including keys this build does not know", async () => {
+		// The review's most valuable catch: oldValue is a display NAME ("In Progress"),
+		// oldIdentifier is WHICH one. Names get reused, so dropping the identifier is
+		// irreversible loss on a dump that can never be re-taken. `extras` extends the
+		// same logic to keys we have never seen — the cost of guessing wrong is a
+		// permanently missing column, and the cost of keeping them is nothing.
+		const snapshot = await takeSnapshot(
+			snapshotClient({
+				async listWorkItemActivities<T>(_p: string, itemId: string): Promise<T[]> {
+					if (itemId !== "item-a") return [] as T[];
+					return [
+						{
+							id: "act-1",
+							verb: "updated",
+							field: "state",
+							old_value: "In Progress",
+							new_value: "Done",
+							old_identifier: "state-uuid-old",
+							new_identifier: "state-uuid-new",
+							actor: "user-uuid",
+							created_at: "2025-03-01T00:00:00Z",
+							comment: "changed state",
+							issue_comment: "comment-uuid",
+							epoch: 1740787200,
+							attachments: [],
+							a_field_invented_after_this_build: "must survive",
+						},
+					] as T[];
+				},
+			}),
+			{ projectId: "p" },
+			{ toolVersion: "t", now: () => "2025-01-01T00:00:00Z", withActivity: true },
+		);
+		const entry = snapshot.activities?.["item-a"]?.[0];
+		expect(entry?.oldIdentifier).toBe("state-uuid-old");
+		expect(entry?.newIdentifier).toBe("state-uuid-new");
+		expect(entry?.issueComment).toBe("comment-uuid");
+		expect(entry?.extras).toEqual({
+			epoch: 1740787200,
+			attachments: [],
+			a_field_invented_after_this_build: "must survive",
+		});
+	});
+
+	test("extras is OMITTED when Plane returned nothing beyond the known fields", async () => {
+		// An empty object would be absence dressed up as data.
+		const snapshot = await takeSnapshot(
+			snapshotClient(ACTIVITY_CLIENT),
+			{ projectId: "p" },
+			{ toolVersion: "t", now: () => "2025-01-01T00:00:00Z", withActivity: true },
+		);
+		expect(snapshot.activities?.["item-a"]?.[0] as object).not.toHaveProperty("extras");
 	});
 
 	test("a captured snapshot round-trips through parse", async () => {
