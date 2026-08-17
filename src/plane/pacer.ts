@@ -94,8 +94,13 @@ export class Pacer {
 	recordThrottled(): void {
 		const currentTime = this.now();
 		this.advance(currentTime);
-		const floor = Math.max(this.requestsPerMinute / 10, 1);
-		this.effectiveRpm = Math.max(floor, this.effectiveRpm / 2);
+		// The floor must never exceed the ceiling: with a small headroom the
+		// configured ceiling can sit BELOW R/10, and an unclamped floor would let
+		// a 429 RAISE the rate (and then stick, since recovery only runs below the
+		// ceiling). Clamp both ends.
+		const ceiling = this.configuredCeiling();
+		const floor = Math.max(Math.min(this.requestsPerMinute / 10, ceiling), 1);
+		this.effectiveRpm = Math.min(ceiling, Math.max(floor, this.effectiveRpm / 2));
 		this.tokens = Math.min(this.tokens, this.bucketCapacity());
 		this.lastRecoveryAt = currentTime;
 		this.throttledCount++;

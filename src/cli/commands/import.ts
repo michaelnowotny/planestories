@@ -316,7 +316,7 @@ export function registerImportCommand(program: Command) {
 
 				// Exit with error code if any failures (incl. failed validation in --check)
 				if (summary.failed > 0 || summary.relationErrors.length > 0) {
-					process.exit(1);
+					process.exitCode = 1;
 				}
 				reportPacing(client);
 			} catch (error) {

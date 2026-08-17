@@ -258,6 +258,7 @@ export function registerReplicateCommand(program: Command) {
 					);
 				}
 				const snapshot = await takeSnapshotForOneShot(source.client, source.projectId, options);
+				reportPacing(source.client);
 				const out = String(options.out ?? defaultSnapshotPath(snapshot));
 				await runApply(target, snapshot, out, options);
 			} catch (error) {
@@ -346,6 +347,7 @@ export function registerReplicateCommand(program: Command) {
 					console.error(verdict);
 					for (const note of result.freshnessNotes) console.log(note);
 				}
+				reportPacing(source.client);
 				console.log(`Pruned ${result.pruned.length} old backup(s)`);
 				for (const file of result.pruned) console.log(`  ${file.split(/[\\/]/).pop()}`);
 			} catch (error) {

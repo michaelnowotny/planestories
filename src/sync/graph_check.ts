@@ -49,7 +49,7 @@ export async function checkDependencyGraph(
 	// Relations with the paced rate-limit sweep — FAIL-HARD on residual failure:
 	// doctor is an acceptance gate, and silently missing relations would
 	// under-report dangling edges (a false-clean).
-	const rel = await fetchRelationsWithSweep(client, projectId, items, 6);
+	const rel = await fetchRelationsWithSweep(client, projectId, items, client.concurrency?.() ?? 6);
 	if (rel.failed > 0) {
 		throw new PlaneApiError(
 			`${rel.failed} relation lookup(s) failed even after the paced retry pass — ` +

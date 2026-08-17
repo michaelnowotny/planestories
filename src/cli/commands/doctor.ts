@@ -122,7 +122,7 @@ export function registerDoctorCommand(program: Command) {
 					console.log(JSON.stringify(reportObject, null, 1));
 					reportPacing(client);
 					if (findings > 0 && options.failOnFindings !== false) {
-						process.exit(1);
+						process.exitCode = 1;
 					}
 					return;
 				}
@@ -200,8 +200,10 @@ export function registerDoctorCommand(program: Command) {
 				} else {
 					console.log(chalk.red(`  ${findings} finding(s).`));
 					// Commander converts --no-fail-on-findings to failOnFindings: false.
+					// exitCode (not exit) so the pacing line below still prints — a
+					// run WITH findings is exactly the one whose cost you want to see.
 					if (options.failOnFindings !== false) {
-						process.exit(1);
+						process.exitCode = 1;
 					}
 				}
 				reportPacing(client);

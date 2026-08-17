@@ -115,7 +115,6 @@ export async function takeSnapshot(
 	options: TakeSnapshotOptions,
 ): Promise<ProjectSnapshot> {
 	const progress = options.onProgress ?? (() => {});
-	const concurrency = options.concurrency ?? client.concurrency?.() ?? 4;
 
 	const project = await resolveProject(client, projectRef);
 	progress(`Snapshotting project ${project.identifier ?? project.id} (${project.name ?? "?"})`);
@@ -142,6 +141,9 @@ export async function takeSnapshot(
 
 	const sequence = buildSequenceMap(items);
 
+	// Derive concurrency HERE, not at entry: the list phase above has now fed the
+	// latency EWMA, so Little's Law sees a real L instead of the seed value.
+	const concurrency = options.concurrency ?? client.concurrency?.() ?? 4;
 	progress(`Fetching relations for ${items.length} items (paced)...`);
 	const relationsSweep = await sweepFetch(
 		items,

@@ -297,7 +297,10 @@ export function parseApiRateLimit(raw: string | number, field: string): number {
 	if (typeof raw === "number") {
 		rpm = raw;
 	} else {
-		const match = raw.match(/^\s*(\d+)\s*\/\s*minute\s*$/i);
+		// Env vars are always strings, so a bare integer must parse the same way
+		// the JSON number does — otherwise PLANE_API_RATE_LIMIT=600 is an error
+		// while {"apiRateLimit": 600} works.
+		const match = raw.match(/^\s*(\d+)\s*(?:\/\s*minute\s*)?$/i);
 		rpm = match ? Number(match[1]) : Number.NaN;
 	}
 	if (!Number.isSafeInteger(rpm) || rpm <= 0) {

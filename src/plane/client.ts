@@ -42,6 +42,8 @@ export interface PlaneClientOptions {
 	rateHeadroom?: number;
 	/** Safety cap for Little's-Law-derived concurrency (default 16). */
 	maxConcurrency?: number;
+	/** INTERNAL: an existing pacer to share (sibling clients on the same API key). */
+	pacer?: Pacer;
 	/** Injectable clock used by pacing and telemetry. */
 	now?: () => number;
 }
@@ -147,7 +149,12 @@ export class PlaneClient {
 		this.beforeWriteAttempt = options.beforeWriteAttempt;
 		this.now = options.now ?? Date.now;
 		this.startedAt = this.now();
-		if (options.requestsPerMinute !== undefined) {
+		// A sibling client (withDialect / withBeforeWriteAttempt) inherits the
+		// SAME Pacer: the rate limit is per API key, so two buckets against one
+		// key would double the burst whenever both are used concurrently.
+		if (options.pacer !== undefined) {
+			this.pacer = options.pacer;
+		} else if (options.requestsPerMinute !== undefined) {
 			const pacerOptions: PacerOptions = {
 				requestsPerMinute: options.requestsPerMinute,
 				headroom: options.rateHeadroom,
@@ -179,12 +186,12 @@ export class PlaneClient {
 
 	/** A sibling client whose every non-GET HTTP attempt first runs `hook`. */
 	withBeforeWriteAttempt(hook: () => void): PlaneClient {
-		return new PlaneClient({ ...this.options, beforeWriteAttempt: hook });
+		return new PlaneClient({ ...this.options, beforeWriteAttempt: hook, pacer: this.pacer });
 	}
 
 	/** A sibling client for another endpoint dialect, retaining this instance's rate profile. */
 	withDialect(dialect: PlaneEndpointDialect): PlaneClient {
-		return new PlaneClient({ ...this.options, dialect });
+		return new PlaneClient({ ...this.options, dialect, pacer: this.pacer });
 	}
 
 	/** The work-item API path segment for this instance's endpoint dialect. */
