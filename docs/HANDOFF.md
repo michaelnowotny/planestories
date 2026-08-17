@@ -332,10 +332,19 @@ red first. Ordered as the roadmap sections that produced them.
 Nothing is half-finished. Every branch is merged, the tree is clean, and no operation is
 mid-flight. Pick by what the operator wants next:
 
+- **⚠ FIRST, because it has a deadline and nothing else here does: `snapshot --with-activity`**
+  (§9.5d A). Approved by the operator on 2026-08-17. The cloud board's audit trail must be dumped
+  BEFORE cloud is archived, and no later run can recover it. Every other item on this roadmap is
+  reversible; this one is not.
+- **Then the two documentation corrections in §9.5d B** — they are cheap, and they are *actively
+  harmful while wrong*: following the current MCP cheat-sheet silently fails to change item state
+  (it cost the finance session three tickets they believed were closed), and nothing yet tells a
+  reader that internal UUIDs are new on a replicated target.
 - **If the operator wants planestories features:** §9.5 (parent-identifier resolution — small,
   self-contained, a real decision to make), then §9.6 (multi-installation default), then the
-  unbuilt items in §9.5c (`replicate diff`, `restore-drill`, journal-less verify,
-  `snapshot --with-activity`, attachment counts). §9.5a lists the three known residuals.
+  unbuilt items in §9.5c (`replicate diff`, `restore-drill`, journal-less verify, attachment
+  counts) and the during-run half of §9.5c #6. §9.5a lists the three known residuals, §9.5d D/E
+  two small real-use defects.
 - **If the operator wants the npm release:** §9.2, and remember the version lives in THREE places.
 - **If the finance session asks for something:** they are the primary user; their reports have
   produced the best work in this repo. Their latest brief and my answers are in
@@ -712,6 +721,11 @@ every night. Several long-standing constraints stop making sense in that world.
 2. **DONE — Per-instance performance profiles.** Per-context `apiRateLimit` now mirrors Plane's
    `API_KEY_RATE_LIMIT`; a per-client token bucket paces to it and derives sweep concurrency from
    observed latency via Little's Law, while an absent profile preserves the old constants.
+   **Configurable BOTH ways** — `apiRateLimit` in a context's config entry, or the env form
+   `PLANE_CTX_<NAME>_API_RATE_LIMIT` (bare `PLANE_API_RATE_LIMIT` on the default path). The env
+   form is wired in `src/config/loader.ts:172-178` and pinned by
+   `tests/unit/config/rate-profile.test.ts`; a report that it is missing was checked and is wrong
+   (§9.5d C) — the confusion came from the *telemetry*, not the *setting*.
 3. **`replicate diff <a.snapshot.json> <b.snapshot.json>`.** Snapshots are already
    deterministically ordered *specifically* so they diff cleanly — the groundwork is done. This is
    the missing answer to the situation the cutover created: CE and cloud have genuinely diverged,
@@ -728,11 +742,17 @@ every night. Several long-standing constraints stop making sense in that world.
    primary workflow (it was rare when everything came from cloud). Today it takes three passes
    because parent and dependency resolution read a memoized index that predates the run's own
    creates (§9.5b #3). Fix the index lifecycle and this becomes: write the file, `import`, done.
-6. **Progress + cost telemetry on every paced command.** Print a progress line with an ETA, and on
-   completion the API call count and elapsed time. Two payoffs: "no output for ten minutes" stops
-   being indistinguishable from a hang, and the *cost* of a command becomes visible — which is how
-   you would have known, without measuring by hand, that doctor makes ~800 calls and snapshot ~2×
-   the item count.
+6. **HALF DONE — Progress + cost telemetry on every paced command.** Print a progress line with an
+   ETA, and on completion the API call count and elapsed time. Two payoffs: "no output for ten
+   minutes" stops being indistinguishable from a hang, and the *cost* of a command becomes visible
+   — which is how you would have known, without measuring by hand, that doctor makes ~800 calls and
+   snapshot ~2× the item count.
+   **What shipped is the COMPLETION half only**, and the second week showed that is the wrong half
+   to have first: `reportPacing` fires after the command finishes, so a run you kill because it
+   looks hung prints nothing at all, and a `doctor` whose entire prelude (`groom` +
+   `fetchProjectIndex`) is un-instrumented looks dead for minutes on a big board regardless of
+   instance speed. See §9.5d C and D — the remaining work is an immediate opening line plus
+   during-run cost, not more polish on the sweep counter.
 7. **A journal-less structural verify** (already parked in §9.4, now more valuable). Post-cutover
    there is a live CE board and nightly snapshots but no way to ask "is this board still what I
    think it is?" without the original apply journal. Ship it as an explicitly weaker verdict with
@@ -741,6 +761,94 @@ every night. Several long-standing constraints stop making sense in that world.
    DATA-2461` alone is now ambiguous across two live boards sharing an identifier space. Consider
    stamping the workspace/base-url (or a short instance alias) into exported story blocks and
    packet headers, so a file says which board it belongs to without inference.
+
+### 9.5d Second week of real use — the finance session's report (2026-08-17)
+
+Six items from real usage after the cutover. One is an approved feature with an external deadline;
+two are corrections to guidance I gave them that is actively harmful while wrong; one of their
+reports is factually wrong, and the reason they reached it is itself the finding.
+
+**A. `snapshot --with-activity` is APPROVED, and it is the only item here with a DEADLINE.**
+The operator wants the cloud board's audit trail dumped **before cloud is archived**. Miss it and
+the activity history is gone permanently — no later run can recover it. Everything else on this
+roadmap can wait for a quiet week; this one is gated by an event someone else controls.
+
+Design notes, because "dump the activities" hides three decisions:
+- `GET .../work-items/{id}/activities/` is **per item** — ~2,551 requests, both dialect spellings,
+  200 on cloud (§9.5bb #3). At cloud's paced rate that is roughly an hour. Affordable *because*
+  the pacer shipped (§9.5c #2) — this is that work paying for itself.
+- **Opt-in only.** It more than doubles a snapshot's cost; the nightly backup must not silently
+  inherit it.
+- **Fail hard, and never emit an empty array for an item whose activities could not be read.**
+  `snapshot` is fail-hard by design, and an archival dump is exactly the case where a silent gap is
+  worst: an empty `activities: []` is indistinguishable from "this item genuinely has no history".
+  That is the null-ban in its most consequential form. Either abort the run, or record explicit
+  per-item unavailability — never both-ways-readable silence.
+- Schema version bump, and `parseSnapshot` must keep accepting activity-less snapshots (every
+  existing backup is one).
+
+**B. Two MCP cheat-sheet corrections — and we caused the first one.**
+
+1. **`workitem` + `action: "update"` takes `state`, NOT `state_id`.** Passing `state_id` returns
+   SUCCESS and silently changes nothing. The finance session closed three tickets, got no error,
+   and caught it only because their verification re-read the items in the same session. Without
+   that they would have reported three closures that never happened.
+   **Why the wrong guess is so natural is the part worth writing down: our own naming taught it.**
+   The snapshot schema says `stateId`, and `src/plane/issues.ts:92-93` maps our internal `stateId`
+   onto the wire field `state` — so an internal name leaked into their model of the wire API. The
+   docs must say plainly: **the wire field is `state`, in both REST and MCP; `stateId` is ours and
+   `state_id` is nobody's.** (Our CLI is correct — it has always sent `state`.)
+2. **Internal UUIDs are NOT preserved across replication.** Identifiers survive exactly
+   (`DATA-2114` is `DATA-2114`), which makes it natural to assume the snapshot's other UUIDs are
+   valid on the target. They are not: apply MINTS new state, label and project objects. Using a
+   snapshot's state id against CE gives `HTTP 400: state: Invalid pk … object does not exist` —
+   loud, so this is a documentation gap rather than a bug. `docs/REPLICATE.md`'s fidelity matrix
+   needs the rule stated once: *identifiers are preserved; internal UUIDs are NEW on the target —
+   resolve them from the target, never from the snapshot.* Their follow-on suggestion is good and
+   cheap: have `verify` emit the state-id mapping, since post-migration scripting needs it and the
+   journal already holds both sides.
+
+**C. `PLANE_CTX_<NAME>_API_RATE_LIMIT` IS implemented — and why they concluded otherwise is the
+real finding.** Verified before folding this in: `src/config/loader.ts:172-178` parses it, and
+`tests/unit/config/rate-profile.test.ts:77` pins that exact variable name (11 tests, green). **Do
+NOT downgrade the docs to "config-file only"** — that would document a limitation the code does not
+have. What they actually observed is the finding: **`reportPacing` prints only at COMPLETION**
+(`src/cli/pacing.ts`), and their `doctor` run never completed — they backgrounded it at 115s. Cost
+telemetry that exists only at the end is missing exactly when you most want it, which is while a
+command is running long enough that you are wondering what it is doing. §9.5c #6 shipped the
+*completion* half; the *during* half is what they needed. Treat that as the item's second half, not
+as done.
+
+Their measurement deserves a precise reading: 90 GETs in 36 s with zero 429s proves their CE limit
+is **at or above 150/min** — it does not establish its value, because not hitting a ceiling tells
+you nothing about where the ceiling is. The instance is theirs, so the authoritative answer is free:
+read `API_KEY_RATE_LIMIT` off the CE deployment rather than inferring it from a clean run.
+
+**D. `doctor` is slow on CE too, and its silent PRELUDE is un-instrumented.** Progress exists but
+covers only the relation sweep (`src/cli/commands/doctor.ts:109-133`). Everything before it —
+`groom` (a full board read), `resolveProject`, and `fetchProjectIndex` across 2,558 items — is
+silent by construction, so "no output at all, then backgrounded at 115s" is exactly what the code
+does. The fix is not more progress on the sweep; it is an immediate first line (what it is scanning,
+against which instance) and instrumentation of the fetch phase. Note the earlier framing was wrong
+in a specific way worth remembering: I treated this as a *cloud rate-limit* problem, when it is a
+*board-size* problem — 2,558 items is slow on a fast instance too.
+
+**E. `migrate-criteria --only` reports a disjunction it could resolve.** `src/cli/commands/migrate.ts:69`
+prints *"ids matching NO migration candidate (typo? no ::ac children? already migrated?)"* — three
+cases with opposite meanings, since "already migrated" is success and "typo" is an error. The tool
+holds the facts to tell them apart (it knows whether the description carries a checklist and whether
+children exist). **This is the null-ban's mirror image:** the standing rule forbids inventing
+certainty you lack, and the same principle forbids discarding certainty you have. The finance
+session had to verify by hand that a fix had worked.
+
+**F. The MCP server is self-teaching — document the trick deliberately.** Sending a deliberately
+bogus argument makes it enumerate the valid ones: `{"action":"update", …, "__bogus__":"x"}` →
+*"action 'update' does not take: __bogus__. It takes: assignees, description_html, …, state,
+target_date, type_id, workitem_id."* That single trick answers questions a cheat-sheet cannot
+anticipate, and it belongs in `docs/USING_WITH_CLAUDE.md` as the recommended way to discover any
+action's schema. **The caveat is what makes item B1 so dangerous:** the server rejects a MISSPELLED
+key loudly but drops a PLAUSIBLE one silently. Loud on nonsense, silent on near-misses, is the wrong
+way round.
 
 ### 9.6 Multi-installation ergonomics: a default installation (small, user-facing)
 
