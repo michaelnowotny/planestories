@@ -422,10 +422,18 @@ findings** (pass `--no-fail-on-findings` to just report):
 
 ```
 planestories doctor --project <name> [--house-rules]
+planestories doctor --from-snapshot backups/data.ce-archimedes.20260817-052043Z.snapshot.json -p <name>
 ```
 
 `--house-rules` flags open non-epic stories without a valid `**Effort:** N dev-days` line,
 and open work whose board-authored `Depends on:` / `Blocks:` prose lacks the matching relation.
+
+`--from-snapshot` analyses a snapshot file instead of the live board: **zero API calls, works
+offline, and possible when the instance is rate-limiting you**. On a 2,558-item board a live
+`doctor` needs ~800 requests and can take many minutes (or fail outright against a throttled
+instance); from a snapshot the same analysis takes under a second. The report always states the
+snapshot's age, so a stale answer is never mistaken for a live one — and it makes the nightly
+backups useful for something other than disaster.
 
 ### `lint`
 

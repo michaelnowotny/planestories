@@ -2,9 +2,11 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient } from "../../plane/client.ts";
+import { createPlaneClient, type PlaneClient } from "../../plane/client.ts";
 import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
+import { parseSnapshot } from "../../replicate/snapshot.ts";
+import { SnapshotSource } from "../../replicate/snapshot_source.ts";
 import { isOwnedCriterionChild } from "../../sync/board-story.ts";
 import { checkDependencyGraph } from "../../sync/graph_check.ts";
 import { groom } from "../../sync/groomer.ts";
@@ -56,19 +58,31 @@ export function registerDoctorCommand(program: Command) {
 		.option("--no-fail-on-findings", "Report findings but always exit 0")
 		.option("--house-rules", "Check open-work effort and board-side dependency conventions", false)
 		.option("--json", "Emit the report as JSON (machine-readable acceptance gate)", false)
+		.option(
+			"--from-snapshot <file>",
+			"Analyse a snapshot file instead of the live board: ZERO API calls, works offline, and possible when the instance is rate-limiting you. The report states the snapshot's age.",
+		)
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
-				const client = createPlaneClient({
-					apiKey: config.apiKey,
-					workspaceSlug: config.workspaceSlug,
-					baseUrl: config.baseUrl,
-					maxRetries: config.maxRetries,
-					dialect: config.dialect,
-					requestsPerMinute: config.apiRateLimit,
-					rateHeadroom: config.rateHeadroom,
-					maxConcurrency: config.maxConcurrency,
-				});
+				// A snapshot contains exactly what doctor enumerates, so it can stand in for
+				// the instance entirely. The one rule: say so, and print its age — a stale
+				// answer presented as a live one is worse than no answer.
+				const snapshotSource = options.fromSnapshot
+					? new SnapshotSource(parseSnapshot(await Bun.file(String(options.fromSnapshot)).text()))
+					: null;
+				const client = (snapshotSource ??
+					createPlaneClient({
+						apiKey: config.apiKey,
+						workspaceSlug: config.workspaceSlug,
+						baseUrl: config.baseUrl,
+						maxRetries: config.maxRetries,
+						dialect: config.dialect,
+						requestsPerMinute: config.apiRateLimit,
+						rateHeadroom: config.rateHeadroom,
+						maxConcurrency: config.maxConcurrency,
+					})) as unknown as PlaneClient;
+				if (snapshotSource && !options.json) console.log(chalk.dim(snapshotSource.provenance()));
 
 				// Read-only: groom without apply is a pure analysis.
 				const report = await groom(client, { config, project: options.project });
@@ -90,6 +104,9 @@ export function registerDoctorCommand(program: Command) {
 					project.identifier,
 					index,
 					(done, total) => {
+						// Nothing to wait for when the source is a file — the progress line
+						// exists to distinguish "slow network sweep" from "hung".
+						if (snapshotSource) return;
 						if (done !== total && done - lastTick < 25) return;
 						lastTick = done;
 						process.stderr.write(`\r  scanning dependencies ${done}/${total}...`);
