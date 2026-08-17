@@ -538,12 +538,18 @@ Recorded so the next maintainer inherits them as facts rather than surprises:
    unassigned. A real fidelity gap, but NOT destructive: `import` only PATCHes `assignees` when
    the story supplies one, so a snapshot-sourced export cannot clear live assignees. Fix by
    expanding through `members` exactly as state and labels already are.
-2. **Two test-isolation residuals.** `tests/unit/cli/doctor-provenance.test.ts` strips `PLANE_*`
+2. **Ambient `PLANE_*` env is a latent flake source across the suite.** `loadConfig` reads
+   `process.env` directly and several suites set `PLANE_*` vars for their own cases; one process
+   means those can leak between files. It surfaced as an intermittent failure of
+   `loadConfigForSnapshot > a present config file is HONOURED` in FULL runs only. That suite now
+   saves/clears/restores `PLANE_*` around each test. Any NEW test that calls `loadConfig` should
+   do the same rather than trust ordering.
+3. **Two test-isolation residuals.** `tests/unit/cli/doctor-provenance.test.ts` strips `PLANE_*`
    and uses a temp cwd but does not redirect `HOME`, so a machine with
    `~/.config/planestories/config.json` could boot through a different path. And the `baseUrl`
    assertion in `tests/unit/config/snapshot-config.test.ts` is environmental — the useful pin is
    `baseUrl === ""` under an isolated cwd/HOME/env.
-3. **An `isTTY`-gated `process.exit`** remains a candidate for the linger case and is deliberately
+4. **An `isTTY`-gated `process.exit`** remains a candidate for the linger case and is deliberately
    NOT implemented: it is unmeasured, and `src/cli/flush.ts` documents why an unmeasured forced
    exit is not something to bless.
 

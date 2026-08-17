@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,27 @@ import { loadConfigForSnapshot } from "../../../src/cli/snapshot_option.ts";
  * config errors go to die either. Only the two secret assertions are optional.
  */
 describe("loadConfigForSnapshot", () => {
+	// `loadConfig` reads process.env directly, and several other suites set PLANE_*
+	// vars to exercise their own paths. Sharing one process means ambient env can leak
+	// in and make these assertions fail (or pass) for reasons that have nothing to do
+	// with the code under test — observed as an intermittent failure only in FULL runs.
+	// Isolate what we depend on rather than hoping about ordering.
+	const savedEnv: Record<string, string | undefined> = {};
+	beforeEach(() => {
+		for (const key of Object.keys(process.env)) {
+			if (key.startsWith("PLANE_")) {
+				savedEnv[key] = process.env[key];
+				delete process.env[key];
+			}
+		}
+	});
+	afterEach(() => {
+		for (const [key, value] of Object.entries(savedEnv)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	});
+
 	function withDir<T>(run: (dir: string) => T): T {
 		const dir = mkdtempSync(join(tmpdir(), "planestories-cfg-"));
 		try {
