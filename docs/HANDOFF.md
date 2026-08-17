@@ -230,8 +230,8 @@ backup, and the next night self-heals.
 
 ## 7. State of the world (2026-08-15)
 
-- **Repo:** `~/PycharmProjects/planestories`, `main` @ `91851cb` at the time of writing, pushed,
-  604 tests green. No known unmerged implementation work. (Branch/worktree state is volatile —
+- **Repo:** `~/PycharmProjects/planestories`, `main` @ `97e423a` at the time of writing, pushed,
+  **675 tests green**. No known unmerged implementation work, no worktrees, no open branches. (Branch/worktree state is volatile —
   check `git status`, `git branch`, `git worktree list` rather than trusting this line.)
 - **Version discrepancy (known, deliberate):** `package.json` and `src/cli/index.ts` both say
   `0.3.1`, the last npm publish. `main` is far ahead. The release is a planned task (§9.2), not
@@ -302,6 +302,30 @@ backup, and the next night self-heals.
   way.
 
 ---
+
+## 8b. What shipped 2026-08-16/17 (the first week of real use, and the night after)
+
+The finance session ran the cutover and used the tool in anger; their report drove all of this.
+Everything below is on `main`, each item reviewed and each fix carrying a regression test proven
+red first. Ordered as the roadmap sections that produced them.
+
+| Shipped | Where it came from | Section |
+|---|---|---|
+| **Per-instance rate profile** — `apiRateLimit: "60/minute"` mirroring Plane's `API_KEY_RATE_LIMIT`; a token bucket paces to it and concurrency is DERIVED via Little's Law (`λ = R·H/60`, `N = ceil(λ·L)`); AIMD on 429. Opt-in: no profile, no change. | §9.5c #2 | `src/plane/pacer.ts` |
+| **`--from-snapshot`** on `doctor`/`atlas`/`export`/`packet`/`epic` — zero API calls, no credentials, works offline. **doctor 0.63 s and atlas 0.72 s** on the 2,558-item board vs live paths that cannot complete at all against a throttled instance. | §9.5c #1 | `src/replicate/snapshot_source.ts`, `src/cli/snapshot_option.ts` |
+| **Divergence guard** — `apply` refuses when the destination holds items the snapshot never saw, unless `--allow-divergent-target`. Compares CONTENT, fails closed when it cannot enumerate, and runs BEFORE `--recreate-target` deletes anything. | §9.5c #1 (operator ask) | `src/replicate/gate.ts`, `apply.ts` |
+| **Seven real-use bug fixes** — rename false-failure (non-idempotent retry), gate's missing NAME check, archived-path dialect trap, the 45-minute non-exit, `relink` dying on unrelated markdown, `doctor`'s silence, near-invisible label skip. | §9.5b | across |
+| **`freshness --quick`** — one request (count + max sequence), 1.3 s, with its blindness stated in its own output. | §9.5b #9 | `freshness.ts` |
+| **Source-tagged backups** — `data.<instance>.<stamp>.snapshot.json`; retention prunes only that project from that instance. | §9.5c | `backup.ts` |
+| **Snapshot progress + ETA**, and throughput documented as ~30 items/min rather than a wrong fixed figure. | §9.5c #6 | `snapshot.ts` |
+| **The exports rule** — board exports default to `exports/` at the REPOSITORY root, gitignored; explicit in-repo paths warn. | operator directive | `src/cli/output_path.ts`, `AGENTS.md` |
+
+**Two behaviour changes downstream users must know**, both relayed to the finance session in
+`finance_csv_importer/external_info/planestories-changes-2026-08-17.md`:
+
+1. Poisoned-journal recovery onto a destination holding foreign items now needs BOTH
+   `--recreate-target` AND `--allow-divergent-target`.
+2. The CLI no longer forces an exit; it prints a linger notice instead (see below).
 
 ## 9. The roadmap — the whole arc, in priority order
 
@@ -553,7 +577,11 @@ Recorded so the next maintainer inherits them as facts rather than surprises:
    NOT implemented: it is unmeasured, and `src/cli/flush.ts` documents why an unmeasured forced
    exit is not something to bless.
 
-### 9.5b Defects found by the real cutover (2026-08-16) — all reproduced, none speculative
+### 9.5b Defects found by the real cutover (2026-08-16) — ALL FIXED 2026-08-17
+
+**Status: every item below is fixed on `main`, each with a regression test proven red against the
+unfixed code.** Kept in full because the REASONING is the durable part — each one is a shape of
+mistake that can recur in new code, and the fix notes say what the right answer was and why.
 
 The finance session ran the real migration and it landed green (2,551 items, 0 verify failures,
 native timestamps/authorship). These are the things that cost them time. Ordered by how likely they
@@ -791,6 +819,40 @@ observation — re-check it, don't trust it.*
     gets slow or aborts. Run big reads at quiet hours; an abort here is the design working.
 
 ---
+
+## 10b. Tests that cannot fail — the dominant failure mode of 2026-08-17
+
+Across eight adversarial review rounds in one night, the single most common defect was **a test
+that passed against broken code**. Not sloppy tests — tests that *looked* rigorous and were
+reported as evidence. Five real instances, because the shapes repeat:
+
+1. **The wrong layer.** A divergence-guard test exercised `decideGate` and passed, while the real
+   `applySnapshot` path deleted the destination BEFORE the gate ran. A pure-function test cannot
+   see orchestration. *If the defect is in the ordering of effects, the test must run the thing
+   that orders them.*
+2. **The harness hid the condition.** A stdout-truncation test used `Bun.spawn`, which drains the
+   child concurrently — so the full-64 KiB-pipe condition never occurred and the test passed
+   against code that truncated 94% of the payload. The faithful version is a real shell pipeline
+   with a sleeping reader. *Reproduce the condition, not an approximation of it.*
+3. **The identity function.** A provenance test passed a hand-built object through
+   `assembleDoctorReport` (which, without house-rules, returns its input) and asserted it came
+   back. Deleting the field's construction left it green. *Test the construction, ideally through
+   the real command.*
+4. **The non-discriminating fixture.** `findRepoRoot` on a lone empty `.git` returns the same
+   answer whether the walk rejects decoys or accepts anything named `.git`. The discriminating
+   case is a decoy NESTED inside a real repo. *Ask: what would this test do if the fix were
+   reverted? If the answer is "pass", it is not a test.*
+5. **Green for an environmental reason.** A test passed only because a gitignored `.env` happened
+   to exist in that worktree; a fresh clone would have failed. *Isolate what you depend on —
+   cwd, HOME, `PLANE_*` env — or you are testing the machine.*
+
+**The habit that catches all five: after writing a test, revert the fix and watch it fail.** Every
+fix in the 2026-08-17 work carries that red-then-green evidence in its commit message. It is
+cheap, and it is the only thing that distinguishes a test from a decoration.
+
+**A related process failure worth the same vigilance:** three scripted edits that night silently
+matched nothing, and two commit messages consequently described work that was not in the tree.
+Assert your anchor before writing, and re-read the file after — a no-op edit exits zero.
 
 ## 11. Failure modes already paid for (do not re-learn these)
 
