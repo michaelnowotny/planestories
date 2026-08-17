@@ -32,7 +32,7 @@ export async function fetchRelationsWithSweep(
 	projectId: string,
 	items: ReadonlyArray<{ id: string }>,
 	concurrency = client.concurrency?.() ?? 4,
-	onProgress?: (done: number, total: number) => void,
+	onProgress?: (done: number, total: number, retry?: { retrying: number; toRetry: number }) => void,
 ): Promise<RelationsFetchResult> {
 	const failedItems: Array<{ id: string }> = [];
 	let done = 0;
@@ -57,8 +57,12 @@ export async function fetchRelationsWithSweep(
 		pairs.filter((p): p is readonly [string, PlaneIssueRelations] => p !== null),
 	);
 
+	// Phase 2 is sequential and is exactly the slow tail on a throttled instance:
+	// without reporting, progress reaches N/N and then goes quiet again, which is the
+	// silence this indicator exists to remove.
 	let recovered = 0;
 	let failed = 0;
+	let retried = 0;
 	for (const item of failedItems) {
 		try {
 			relationsById.set(item.id, await client.getRelations(projectId, item.id));
@@ -66,6 +70,8 @@ export async function fetchRelationsWithSweep(
 		} catch {
 			failed++;
 		}
+		retried++;
+		onProgress?.(total, total, { retrying: retried, toRetry: failedItems.length });
 	}
 	// Rebuild in INPUT order: recovered entries append after the sweep, which
 	// would make edge order (and the rendered HTML) vary with request timing —

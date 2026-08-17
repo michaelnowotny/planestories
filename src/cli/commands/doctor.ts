@@ -103,10 +103,19 @@ export function registerDoctorCommand(program: Command) {
 					project.id,
 					project.identifier,
 					index,
-					(done, total) => {
+					(done, total, retry) => {
 						// Nothing to wait for when the source is a file — the progress line
 						// exists to distinguish "slow network sweep" from "hung".
 						if (snapshotSource) return;
+						if (retry) {
+							// The sequential recovery pass is the slow tail on a throttled
+							// instance; without this the counter reaches N/N and goes quiet.
+							process.stderr.write(
+								`\r  retrying rate-limited lookups ${retry.retrying}/${retry.toRetry}...`,
+							);
+							if (retry.retrying === retry.toRetry) process.stderr.write("\n");
+							return;
+						}
 						if (done !== total && done - lastTick < 25) return;
 						lastTick = done;
 						process.stderr.write(`\r  scanning dependencies ${done}/${total}...`);

@@ -55,6 +55,8 @@ export interface TargetProbeResult {
 	 * must fail closed on that rather than assume emptiness.
 	 */
 	targetSequenceIds?: number[] | null;
+	/** False when the destination's archived items could not be listed (a divergence blind spot). */
+	targetArchivedEnumerable?: boolean;
 	existingProjectId: string | null;
 	memberByEmail: Record<string, string>;
 	sequencesMaxEver: boolean | null;
@@ -276,13 +278,21 @@ export async function probeTargetReadOnly(
 	// undefined = "could not enumerate" (the gate fails closed on that); null = no
 	// destination project at all.
 	let targetSequenceIds: number[] | null | undefined;
+	let targetArchivedEnumerable = true;
 	if (!existing) {
 		targetSequenceIds = null;
 	} else {
 		try {
 			const live = await client.listWorkItems<{ sequence_id?: number }>(existing.id);
-			const archived =
-				(await client.listArchivedWorkItems<{ sequence_id?: number }>(existing.id)) ?? [];
+			const archivedList = await client.listArchivedWorkItems<{ sequence_id?: number }>(
+				existing.id,
+			);
+			// null = the instance does not serve an archived list (always true on some
+			// self-hosted versions). Comparing the live items is still worth doing, but
+			// the blind spot is recorded so the gate can say it out loud rather than
+			// implying a complete inventory.
+			targetArchivedEnumerable = archivedList !== null;
+			const archived = archivedList ?? [];
 			targetSequenceIds = [...live, ...archived]
 				.map((item) => item.sequence_id)
 				.filter((sequenceId): sequenceId is number => typeof sequenceId === "number");
@@ -296,6 +306,7 @@ export async function probeTargetReadOnly(
 		identifierAvailable: !existing,
 		nameAvailable: !nameHolder,
 		targetSequenceIds,
+		targetArchivedEnumerable,
 		existingProjectId: existing?.id ?? null,
 		memberByEmail,
 		sequencesMaxEver: null,

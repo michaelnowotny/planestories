@@ -164,8 +164,11 @@ export class FakePlane {
 		return projectView(project) as T;
 	}
 
+	readonly deletedProjects: string[] = [];
+
 	async deleteProject(projectId: string): Promise<void> {
 		this.write();
+		this.deletedProjects.push(projectId);
 		if (!this.projects.delete(projectId)) throw new PlaneApiError("not found", 404);
 	}
 

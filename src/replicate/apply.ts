@@ -155,9 +155,25 @@ export async function applySnapshot(
 			validateResumeOptions(journal, destName, destIdentifier, initialMode);
 
 			if (options.flags.recreateTarget) {
-				// Explicit drop-and-rebuild: delete the run-created project (if any)
-				// and retire this journal generation. The run then continues as a
-				// fresh one — including a fresh empirical probe of the target.
+				// ⚠ THE DIVERGENCE GUARD MUST RUN *BEFORE* THE DELETE, ON LIVE STATE.
+				// This is the only apply path that actually destroys destination-only
+				// work, and it is the recovery flag the docs point an operator at — so
+				// it is precisely the path a diverged destination gets wiped from. Once
+				// recreateOwnedTarget has run, the later probe sees no destination at
+				// all, the guard's `existingProjectId !== null` is false, and the gate
+				// waves through a create from the stale snapshot. Checking the gate
+				// afterwards is checking a world we already destroyed.
+				const preDelete = await probeTargetReadOnly(client, destIdentifier, destName);
+				const preGate = decideGate({
+					snapshot,
+					probe: preDelete,
+					flags: options.flags,
+					destName,
+					destIdentifier,
+					resume: { journalOwnsProject: journal.projectCreated?.projectId ?? null },
+					ownedSequenceIds: journal.createdSequenceIds(),
+				});
+				if (!preGate.ok) throw new ReplicateError(preGate.errors.join("\n"));
 				await recreateOwnedTarget(ownershipGuardedClient(client, journal), journal);
 				journal.archivePoisoned();
 				journal = null;

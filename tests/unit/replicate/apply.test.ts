@@ -132,6 +132,44 @@ describe("replication apply", () => {
 		}
 	});
 
+	test("--recreate-target must NOT delete a destination that has diverged", async () => {
+		// The critical case: after a cutover the destination is authoritative and has
+		// accumulated work the snapshot never saw. --recreate-target is the flag the
+		// docs point an operator at for recovery, and it is the ONLY apply path that
+		// destroys destination-only work. The guard therefore has to run BEFORE the
+		// delete, on live state — checking afterwards is checking a world we already
+		// destroyed. A gate-level test cannot see that ordering; this one can.
+		const ctx = context();
+		const fake = new FakePlane();
+		try {
+			// First, a complete apply so the journal legitimately owns the destination.
+			await applySnapshot(fake, sampleSnapshot(), ctx.options);
+			const project = fake.projectByIdentifier("SRC")!;
+			// Then the destination accumulates work of its own.
+			project.items.set("dest-only", {
+				id: "dest-only",
+				sequence_id: 9001,
+				name: "work done on the destination after cutover",
+				archived_at: null,
+			} as never);
+			const deletedBefore = fake.deletedProjects.length;
+
+			await expect(
+				applySnapshot(fake, sampleSnapshot(), {
+					...ctx.options,
+					flags: { ...baseFlags, recreateTarget: true },
+				}),
+			).rejects.toThrow(/9001|diverged|never seen/i);
+
+			// The refusal must happen BEFORE any destruction.
+			expect(fake.deletedProjects.length).toBe(deletedBefore);
+			expect(fake.projectByIdentifier("SRC")).toBeDefined();
+			expect(fake.projectByIdentifier("SRC")!.items.has("dest-only")).toBe(true);
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
 	test("poisons on sequence drift and only recreate-target can recover", async () => {
 		const ctx = context();
 		const fake = new FakePlane();
@@ -156,9 +194,20 @@ describe("replication apply", () => {
 			await expect(applySnapshot(fake, sampleSnapshot(), ctx.options)).rejects.toThrow(
 				/--recreate-target/,
 			);
+			// The destination now holds a foreign item, so --recreate-target ALONE is
+			// refused: content cannot distinguish "a stray item planted mid-run" from
+			// "a week of work someone did on the destination", and the destructive
+			// flag must not decide that on the operator's behalf.
+			await expect(
+				applySnapshot(fake, sampleSnapshot(), {
+					...ctx.options,
+					flags: { ...baseFlags, recreateTarget: true },
+				}),
+			).rejects.toThrow(/diverged|never seen/i);
+			// Acknowledging the divergence explicitly recovers.
 			const result = await applySnapshot(fake, sampleSnapshot(), {
 				...ctx.options,
-				flags: { ...baseFlags, recreateTarget: true },
+				flags: { ...baseFlags, recreateTarget: true, allowDivergentTarget: true },
 			});
 			expect(result.complete).toBeTrue();
 			expect(

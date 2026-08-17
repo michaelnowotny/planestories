@@ -128,6 +128,22 @@ Three properties worth knowing:
 Only `--allow-divergent-target` proceeds, and it downgrades the refusal to a warning
 that says the divergent work will be overwritten.
 
+**`--recreate-target` on a diverged destination now requires `--allow-divergent-target`
+as well.** That flag is the documented recovery for a poisoned journal, and it is the
+only apply path that actually destroys destination-only work — so it is exactly the path
+a diverged board would be wiped from. The guard runs on LIVE state *before* the delete;
+checking afterwards would be checking a world already destroyed. Content alone cannot
+distinguish "a stray item planted mid-run" from "a week of work someone did on the
+destination", so the tool refuses to make that judgement on your behalf and asks you to
+state it.
+
+Items this run itself created (including gap placeholders) are not divergence — an
+interrupted run of the same snapshot resumes without complaint.
+
+One honest limitation: on instances that do not serve an archived-items list, only LIVE
+items can be compared, and the gate says so in a warning rather than implying a complete
+inventory.
+
 ## Crash safety and resume
 
 Every real apply writes an append-only, fsync'd JSONL **journal** next to the

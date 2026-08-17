@@ -18,6 +18,12 @@ export interface GateInput {
 	destIdentifier: string;
 	/** Destination project name — Plane enforces uniqueness on this separately. */
 	destName?: string;
+	/**
+	 * Sequence ids this run already created on the destination (real items and gap
+	 * placeholders). They are OURS, so a destination carrying the residue of an
+	 * interrupted run of this same snapshot is not divergence.
+	 */
+	ownedSequenceIds?: number[];
 }
 
 export interface GateDecision {
@@ -44,19 +50,28 @@ export function decideGate(input: GateInput): GateDecision {
 	// The name is a SEPARATE Plane uniqueness constraint from the identifier: freeing
 	// only the identifier leaves the create to fail mid-apply on a raw 409. Fail closed
 	// here, where every other precondition is checked, and name the remedy.
-	// DIVERGENCE GUARD. After a cutover the destination is the authoritative board and
+	// DIVERGENCE GUARD (the name-uniqueness check is the separate block below).
+	// After a cutover the destination is the authoritative board and
 	// accumulates work the snapshot never saw; applying a stale snapshot over it destroys
 	// that work silently, totally and irreversibly. Ownership is NOT a sufficient proxy:
 	// the journal-ownership check is satisfied the moment somebody frees the identifier,
 	// which is exactly the ritual a normal cutover teaches. Compare CONTENT.
 	if (probe.existingProjectId !== null) {
-		const known = new Set(input.snapshot.items.map((item) => item.sequenceId));
+		const known = new Set([
+			...input.snapshot.items.map((item) => item.sequenceId),
+			...(input.ownedSequenceIds ?? []),
+		]);
 		if (probe.targetSequenceIds === undefined) {
 			errors.push(
 				"Could not enumerate the destination project's existing items, so divergence cannot be ruled out. Refusing rather than assuming the destination is safe to overwrite.",
 			);
 		} else if (probe.targetSequenceIds !== null) {
 			const unknown = probe.targetSequenceIds.filter((sequenceId) => !known.has(sequenceId));
+			if (unknown.length === 0 && probe.targetArchivedEnumerable === false) {
+				warnings.push(
+					"The destination's archived items could not be enumerated on this instance, so divergence among ARCHIVED items cannot be ruled out — only live items were compared.",
+				);
+			}
 			if (unknown.length > 0) {
 				const examples = unknown
 					.slice(0, 5)

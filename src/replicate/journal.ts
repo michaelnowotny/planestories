@@ -237,6 +237,20 @@ export class Journal {
 		return this.entries.some((entry) => entry.type === "apply-complete");
 	}
 
+	/**
+	 * Every sequence id this journal created on the destination — real items AND
+	 * gap placeholders. The divergence guard needs it so a destination holding the
+	 * residue of our own interrupted run is not mistaken for a diverged board.
+	 */
+	createdSequenceIds(): number[] {
+		return this.entries
+			.filter(
+				(entry): entry is Extract<JournalEntry, { type: "item-created" }> =>
+					entry.type === "item-created",
+			)
+			.map((entry) => entry.seq);
+	}
+
 	placeholders(): Array<{ seq: number; targetItemId: string }> {
 		return this.entries
 			.filter(

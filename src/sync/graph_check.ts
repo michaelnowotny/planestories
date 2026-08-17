@@ -39,7 +39,7 @@ export async function checkDependencyGraph(
 	projectId: string,
 	projectIdentifier: string,
 	index: ProjectIndex,
-	onProgress?: (done: number, total: number) => void,
+	onProgress?: (done: number, total: number, retry?: { retrying: number; toRetry: number }) => void,
 ): Promise<GraphCheckReport> {
 	// Only real stories/epics carry dependency relations (criterion sub-items don't).
 	const items = index.items.filter((item) => !isCriterionChild(item));
