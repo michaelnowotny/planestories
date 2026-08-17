@@ -269,6 +269,55 @@ project.
   (`project:` frontmatter → `--project` → `defaultProject`). This can run alongside the
   normal board-side groom — together they are the full reconcile loop.
 
+## Working through the Plane MCP server (alongside this CLI)
+
+An agent session usually has both: this CLI for authoring and bulk sync, and the Plane MCP
+server for quick status flips and comments. Three things about the MCP have cost real time
+and are not guessable from its schema.
+
+### ⚠ `action: "update"` takes `state`, NOT `state_id` — and the wrong one fails SILENTLY
+
+```jsonc
+// CORRECT
+{"action": "update", "project_id": "<uuid>", "workitem_id": "<uuid>", "state": "<state-uuid>"}
+// WRONG — returns SUCCESS and changes nothing
+{"action": "update", "project_id": "<uuid>", "workitem_id": "<uuid>", "state_id": "<state-uuid>"}
+```
+
+`state_id` is the natural guess because it is the name used nearly everywhere else — in REST
+responses, in this tool's snapshot schema (`stateId`), and in the older granular MCP tools.
+Passing it returns success and the item does not move. This closed three tickets that were
+never closed; it was caught only because the session re-read the items afterwards.
+
+**So: after an MCP state change, re-read the item.** That is not paranoia, it is the only
+signal — there is no error to catch.
+
+### ⚠ Internal UUIDs do NOT survive replication; identifiers do
+
+After a cutover, `DATA-2114` is still `DATA-2114`, so it is natural to reuse the *other*
+UUIDs from a snapshot or from the old instance. They are invalid: states, labels and the
+project itself are newly minted on the target. You get
+`HTTP 400: state: Invalid pk … object does not exist`. Resolve those ids from the instance
+you are talking to, and prefer `retrieve_by_identifier` — it is the one call that takes a
+human `DATA-N` and needs no `project_id`. Full explanation: `docs/REPLICATE.md`.
+
+### The server is self-teaching — use it instead of guessing
+
+Send a deliberately bogus argument and it enumerates the valid ones:
+
+```jsonc
+{"action": "update", "project_id": "…", "workitem_id": "…", "__bogus__": "x"}
+// -> Error: action 'update' does not take: __bogus__. It takes: assignees,
+//    description_html, …, state, target_date, type_id, workitem_id.
+```
+
+This answers schema questions no cheat-sheet can anticipate, and it is the recommended way
+to discover an action's parameters. **But note the asymmetry, because it is exactly what
+makes the `state_id` bug so nasty: the server rejects a MISSPELLED key loudly and drops a
+PLAUSIBLE one silently.** Loud on nonsense, silent on near-misses. The bogus-argument trick
+tells you what an action accepts; it will not tell you that the sensible-looking key you
+just sent was ignored.
+
 ## Caveats
 
 - Priorities are strings (`urgent`/`high`/`medium`/`low`/`none`); legacy Linear integers
