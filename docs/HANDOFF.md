@@ -335,7 +335,13 @@ integration around it has three operator prerequisites.
    delete that project in the CE UI, or free the identifier:
    `bun run src/cli/index.ts rename-project --context ce --project DATA --identifier DATAOLD --yes`
    (dry-run first — it prints the change and warns that item prefixes move with the identifier).
-   Verify with `bun run src/cli/index.ts projects --context ce` that no project holds `DATA`.
+   **⚠ Free the NAME as well as the identifier** — the apply also creates the project with the
+   snapshot's name, and Plane rejects a duplicate name with a `409 {"name":"The project name is
+   already taken"}` that the pre-write gate does not currently catch (§9.5b #1). This bit the real
+   cutover:
+   `bun run src/cli/index.ts rename-project --context ce --project DATAOLD --name "Data Platform Old" --yes`
+   Verify with `bun run src/cli/index.ts projects --context ce` that nothing holds `DATA` or the
+   name.
 3. Take a **fresh** snapshot of a quiet board (~25 min):
 
    ```bash
@@ -357,8 +363,12 @@ integration around it has three operator prerequisites.
 
    ```bash
    CORPUS=~/PycharmProjects/finance_csv_importer/planning/stories   # confirm with the operator
-   bun run src/cli/index.ts replicate relink --to ce --snapshot "$SNAP" "$CORPUS"        # dry-run
-   bun run src/cli/index.ts replicate relink --to ce --snapshot "$SNAP" --yes "$CORPUS"  # apply
+   # ⚠ Pass only STORY files. relink parses every .md under a directory and dies on unrelated
+   # markdown with invalid YAML — a docker-compose example with duplicate keys killed the real
+   # cutover run (§9.5b #2). Scope it:
+   FILES=$(grep -rl 'plane_id:' "$CORPUS" --include='*.md')
+   bun run src/cli/index.ts replicate relink --to ce --snapshot "$SNAP" $FILES        # dry-run
+   bun run src/cli/index.ts replicate relink --to ce --snapshot "$SNAP" --yes $FILES  # apply
    ```
 
    Without this, every linked story file still points at dead cloud UUIDs and the first edited
