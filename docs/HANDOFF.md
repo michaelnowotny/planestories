@@ -319,6 +319,8 @@ red first. Ordered as the roadmap sections that produced them.
 | **Source-tagged backups** — `data.<instance>.<stamp>.snapshot.json`; retention prunes only that project from that instance. | §9.5c | `backup.ts` |
 | **Snapshot progress + ETA**, and throughput documented as ~30 items/min rather than a wrong fixed figure. | §9.5c #6 | `snapshot.ts` |
 | **The exports rule** — board exports default to `exports/` at the REPOSITORY root, gitignored; explicit in-repo paths warn. | operator directive | `src/cli/output_path.ts`, `AGENTS.md` |
+| **`snapshot --with-activity`** (2026-08-17) — archives the per-item audit trail so a source instance can be retired without destroying its history. Opt-in, fail-hard, digest-bound, refuses a board-wide empty result, and no schema bump so every existing backup still parses with its original digest. | §9.5d A (operator, deadline-bearing) | `src/replicate/snapshot.ts` |
+| **MCP section in the agent cheat-sheet** (2026-08-17) — the silent `state_id` trap, UUIDs that do not survive replication, the bogus-argument discovery trick and its asymmetry. The doc previously had no MCP content at all. | §9.5d B | `docs/USING_WITH_CLAUDE.md` |
 
 **Two behaviour changes downstream users must know**, both relayed to the finance session in
 `finance_csv_importer/external_info/planestories-changes-2026-08-17.md`:
@@ -332,14 +334,13 @@ red first. Ordered as the roadmap sections that produced them.
 Nothing is half-finished. Every branch is merged, the tree is clean, and no operation is
 mid-flight. Pick by what the operator wants next:
 
-- **⚠ FIRST, because it has a deadline and nothing else here does: `snapshot --with-activity`**
-  (§9.5d A). Approved by the operator on 2026-08-17. The cloud board's audit trail must be dumped
-  BEFORE cloud is archived, and no later run can recover it. Every other item on this roadmap is
-  reversible; this one is not.
-- **Then the two documentation corrections in §9.5d B** — they are cheap, and they are *actively
-  harmful while wrong*: following the current MCP cheat-sheet silently fails to change item state
-  (it cost the finance session three tickets they believed were closed), and nothing yet tells a
-  reader that internal UUIDs are new on a replicated target.
+- **⚠ FIRST, and it is an OPERATION not a build: actually RUN the cloud archive.**
+  `snapshot --with-activity` shipped 2026-08-17 (§9.5d A has the command), but the audit trail is
+  only safe once the file exists. It must happen BEFORE cloud is archived and no later run can
+  recover it. Everything else on this roadmap is reversible; this is not.
+- ~~The two documentation corrections in §9.5d B~~ — **done 2026-08-17**
+  (`docs/USING_WITH_CLAUDE.md` gained an MCP section; it previously had none, which is why the
+  guidance the finance session followed lived only in a gitignored brief in their repo).
 - **If the operator wants planestories features:** §9.5 (parent-identifier resolution — small,
   self-contained, a real decision to make), then §9.6 (multi-installation default), then the
   unbuilt items in §9.5c (`replicate diff`, `restore-drill`, journal-less verify, attachment
@@ -768,12 +769,24 @@ Six items from real usage after the cutover. One is an approved feature with an 
 two are corrections to guidance I gave them that is actively harmful while wrong; one of their
 reports is factually wrong, and the reason they reached it is itself the finding.
 
-**A. `snapshot --with-activity` is APPROVED, and it is the only item here with a DEADLINE.**
-The operator wants the cloud board's audit trail dumped **before cloud is archived**. Miss it and
-the activity history is gone permanently — no later run can recover it. Everything else on this
-roadmap can wait for a quiet week; this one is gated by an event someone else controls.
+**A. ✅ SHIPPED 2026-08-17 — `snapshot --with-activity`.** It was the only item here with a
+DEADLINE: the operator wants the cloud board's audit trail dumped **before cloud is archived**,
+and no later run can recover it.
 
-Design notes, because "dump the activities" hides three decisions:
+**To actually run it** (the point of the whole exercise — this is still to do):
+
+```bash
+cd ~/PycharmProjects/planestories
+bun run src/cli/index.ts replicate snapshot --from cloud -p "Data Platform" \
+    -o ~/plane-replication/data-cloud-archive.snapshot.json --with-activity
+```
+
+Budget ~2× a normal snapshot: activities add one request per item on top of the existing
+relation and comment sweeps. Size it from the measured ~30 items/min baseline and run it at a
+quiet hour. It is fail-hard, so a rate-limit storm costs the whole run — that is deliberate
+(see below), but it means the hour matters.
+
+Design notes, because "dump the activities" hid four decisions:
 - `GET .../work-items/{id}/activities/` is **per item** — ~2,551 requests, both dialect spellings,
   200 on cloud (§9.5bb #3). At cloud's paced rate that is roughly an hour. Affordable *because*
   the pacer shipped (§9.5c #2) — this is that work paying for itself.
@@ -782,10 +795,26 @@ Design notes, because "dump the activities" hides three decisions:
 - **Fail hard, and never emit an empty array for an item whose activities could not be read.**
   `snapshot` is fail-hard by design, and an archival dump is exactly the case where a silent gap is
   worst: an empty `activities: []` is indistinguishable from "this item genuinely has no history".
-  That is the null-ban in its most consequential form. Either abort the run, or record explicit
-  per-item unavailability — never both-ways-readable silence.
-- Schema version bump, and `parseSnapshot` must keep accepting activity-less snapshots (every
-  existing backup is one).
+  That is the null-ban in its most consequential form. Shipped as: fail-hard sweep, plus
+  `source.activityInventory: "captured" | "not-requested"` so absence is never ambiguous
+  (`parseSnapshot` rejects a file where the discriminator and the section disagree).
+- **NO schema-version bump** — the reasoning inverted during the build and it matters. `parseSnapshot`
+  hard-refuses an unknown version, so bumping would have made **every existing nightly backup**
+  unreadable by `apply`/`verify`/`--from-snapshot`. An optional archival section that no consumer
+  requires is not a breaking shape change. `activities` is still digest-bound; an ABSENT section
+  contributes nothing because `canonicalJson` drops undefined values, so old files keep their exact
+  original digests. `tests/…/snapshot.test.ts` pins the pre-change fixture digest `8896e27b…` as the
+  tripwire — **that test is SUPPOSED to fail** if anyone changes absent-key handling, because doing
+  so would silently invalidate the operator's whole backup history.
+- **A board-wide empty result is refused** (added after the review probed `listAll`). `listAll`
+  returns `[]` for any envelope it does not recognize, so an unseen response shape degrades to
+  silence rather than an error — producing a digest-valid file that looks like a complete archive and
+  holds nothing, discovered only after the source is gone. One quiet item is ordinary; a whole
+  project with zero entries is a parse failure, so the guard is on the aggregate only.
+- **Captured but never replayed**, and the `apply` loss report says so with the real entry count.
+  Plane stamps its own activity as a replica is written; a forged audit trail is worse than none.
+  (The old grouped "activity not inventoried" loss line became false the moment capture existed —
+  a reminder that a schema change is done only when every DERIVED path agrees with it.)
 
 **B. Two MCP cheat-sheet corrections — and we caused the first one.**
 
