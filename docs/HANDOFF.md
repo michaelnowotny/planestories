@@ -588,13 +588,9 @@ every night. Several long-standing constraints stop making sense in that world.
    rather than something you hope never to need, and it makes historical analysis possible
    ("what did the board look like three weeks ago?"). Design note: the command must SAY it read a
    snapshot and print the snapshot's `takenAt`, so nobody mistakes a stale answer for a live one.
-2. **Per-instance performance profiles.** Concurrency is currently hardcoded (relations sweeps at
-   6, snapshot at 4) because it was tuned defensively for Plane Cloud's limiter. On CE those
-   numbers are absurdly conservative — measured: `migrate-criteria` dry-run 36 s on CE vs ~15 min
-   on cloud, and a single-ticket cloud canary died on a 429 before writing. Add per-context
-   `concurrency` / rate settings to the config (§9.6's work is the natural home), default cloud
-   conservative and CE aggressive, and let the operator tune. This is probably a 2–5× speedup on
-   every paced command for a day's work.
+2. **DONE — Per-instance performance profiles.** Per-context `apiRateLimit` now mirrors Plane's
+   `API_KEY_RATE_LIMIT`; a per-client token bucket paces to it and derives sweep concurrency from
+   observed latency via Little's Law, while an absent profile preserves the old constants.
 3. **`replicate diff <a.snapshot.json> <b.snapshot.json>`.** Snapshots are already
    deterministically ordered *specifically* so they diff cleanly — the groundwork is done. This is
    the missing answer to the situation the cutover created: CE and cloud have genuinely diverged,

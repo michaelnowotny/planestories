@@ -44,6 +44,37 @@ describe("fetchRelationsWithSweep", () => {
 		expect(calls.length).toBe(3);
 	});
 
+	test("uses derived concurrency unless an explicit value is supplied", async () => {
+		let active = 0;
+		let maximum = 0;
+		const client = {
+			concurrency: () => 1,
+			getRelations: async () => {
+				active++;
+				maximum = Math.max(maximum, active);
+				await Promise.resolve();
+				active--;
+				return {
+					blocking: [],
+					blocked_by: [],
+					relates_to: [],
+					duplicate: [],
+					start_before: [],
+					start_after: [],
+					finish_before: [],
+					finish_after: [],
+				};
+			},
+		};
+
+		await fetchRelationsWithSweep(client, "p1", items);
+		expect(maximum).toBe(1);
+
+		maximum = 0;
+		await fetchRelationsWithSweep(client, "p1", items, 2);
+		expect(maximum).toBe(2);
+	});
+
 	test("rate-limited items are recovered by the paced second pass", async () => {
 		// "b" fails once (first pass), succeeds on the sweep; others clean.
 		const { client, calls } = stubClient({ b: 1 });

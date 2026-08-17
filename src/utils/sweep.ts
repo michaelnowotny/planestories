@@ -22,7 +22,7 @@ export interface SweepResult<T, R> {
 export async function sweepFetch<T, R>(
 	items: readonly T[],
 	fn: (item: T) => Promise<R>,
-	concurrency = 4,
+	concurrency: number,
 ): Promise<SweepResult<T, R>> {
 	const firstPass = await mapWithConcurrency([...items], concurrency, async (item) => {
 		try {

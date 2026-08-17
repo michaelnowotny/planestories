@@ -128,6 +128,9 @@ export function registerMigrateCriteriaCommand(program: Command) {
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
 					dialect: config.dialect,
+					requestsPerMinute: config.apiRateLimit,
+					rateHeadroom: config.rateHeadroom,
+					maxConcurrency: config.maxConcurrency,
 				});
 				const report = await migrateCriteria(client, {
 					config,

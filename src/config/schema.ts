@@ -21,6 +21,19 @@ function hasValidConfigFields(obj: Record<string, unknown>): boolean {
 	if (obj.dialect !== undefined && obj.dialect !== "issues" && obj.dialect !== "work-items") {
 		return false;
 	}
+	if (
+		obj.apiRateLimit !== undefined &&
+		typeof obj.apiRateLimit !== "string" &&
+		typeof obj.apiRateLimit !== "number"
+	) {
+		return false;
+	}
+	if (obj.maxConcurrency !== undefined && typeof obj.maxConcurrency !== "number") {
+		return false;
+	}
+	if (obj.rateHeadroom !== undefined && typeof obj.rateHeadroom !== "number") {
+		return false;
+	}
 
 	if (obj.defaultLabels !== undefined) {
 		if (!Array.isArray(obj.defaultLabels)) {
@@ -37,7 +50,43 @@ function hasValidConfigFields(obj: Record<string, unknown>): boolean {
 }
 
 const SHAPE_MESSAGE =
-	"Invalid config shape: expected an object with optional apiKey (string), workspaceSlug (string), baseUrl (string), dialect (issues | work-items), defaultProject (string), and defaultLabels (string[])";
+	"Invalid config shape: expected an object with optional apiKey (string), workspaceSlug (string), baseUrl (string), dialect (issues | work-items), defaultProject (string), defaultLabels (string[]), apiRateLimit (string | number), maxConcurrency (number), and rateHeadroom (number)";
+
+function assertRateFields(obj: Record<string, unknown>, prefix = ""): void {
+	if (obj.apiRateLimit !== undefined) {
+		const raw = obj.apiRateLimit;
+		const rpm =
+			typeof raw === "number"
+				? raw
+				: typeof raw === "string"
+					? Number(raw.match(/^\s*(\d+)\s*\/\s*minute\s*$/i)?.[1])
+					: Number.NaN;
+		if (!Number.isSafeInteger(rpm) || rpm <= 0) {
+			throw new ConfigError(
+				`Invalid config field "${prefix}apiRateLimit": expected a positive integer rpm or Plane form "60/minute", got ${JSON.stringify(raw)}`,
+			);
+		}
+	}
+	if (
+		obj.maxConcurrency !== undefined &&
+		(!Number.isSafeInteger(obj.maxConcurrency) || (obj.maxConcurrency as number) <= 0)
+	) {
+		throw new ConfigError(
+			`Invalid config field "${prefix}maxConcurrency": expected a positive integer, got ${JSON.stringify(obj.maxConcurrency)}`,
+		);
+	}
+	if (
+		obj.rateHeadroom !== undefined &&
+		(typeof obj.rateHeadroom !== "number" ||
+			!Number.isFinite(obj.rateHeadroom) ||
+			obj.rateHeadroom <= 0 ||
+			obj.rateHeadroom > 1)
+	) {
+		throw new ConfigError(
+			`Invalid config field "${prefix}rateHeadroom": expected a number in (0, 1], got ${JSON.stringify(obj.rateHeadroom)}`,
+		);
+	}
+}
 
 /**
  * Type guard that checks whether a value conforms to the CliConfig shape.
@@ -119,6 +168,16 @@ export function assertConfigFile(value: unknown): asserts value is CliConfig | M
 	}
 
 	const obj = value as Record<string, unknown>;
+	if (Array.isArray(obj.contexts)) {
+		for (const entry of obj.contexts) {
+			if (entry !== null && typeof entry === "object") {
+				const entryObj = entry as Record<string, unknown>;
+				assertRateFields(entryObj, `contexts.${String(entryObj.name)}.`);
+			}
+		}
+	} else {
+		assertRateFields(obj);
+	}
 	if (
 		"dialect" in obj &&
 		obj.dialect !== undefined &&

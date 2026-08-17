@@ -136,7 +136,8 @@ export async function rollupEpic(
 		});
 
 	// Relations only for leaf stories, to find which are actively blocked / blocking. Bounded.
-	const relationPairs = await mapWithConcurrency(leaves, 6, async (leaf) => {
+	const concurrency = client.concurrency() ?? 6;
+	const relationPairs = await mapWithConcurrency(leaves, concurrency, async (leaf) => {
 		const relations = await client.getRelations(project.id, leaf.id);
 		return [leaf.id, relations] as const;
 	});

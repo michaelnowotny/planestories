@@ -10,6 +10,7 @@ import { checkDependencyGraph } from "../../sync/graph_check.ts";
 import { groom } from "../../sync/groomer.ts";
 import { checkHouseRules, type HouseRuleFindings } from "../../sync/house_rules.ts";
 import { checkCriteriaMigration } from "../../sync/migrate.ts";
+import { reportPacing } from "../pacing.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -64,6 +65,9 @@ export function registerDoctorCommand(program: Command) {
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
 					dialect: config.dialect,
+					requestsPerMinute: config.apiRateLimit,
+					rateHeadroom: config.rateHeadroom,
+					maxConcurrency: config.maxConcurrency,
 				});
 
 				// Read-only: groom without apply is a pure analysis.
@@ -116,6 +120,7 @@ export function registerDoctorCommand(program: Command) {
 
 				if (options.json) {
 					console.log(JSON.stringify(reportObject, null, 1));
+					reportPacing(client);
 					if (findings > 0 && options.failOnFindings !== false) {
 						process.exit(1);
 					}
@@ -199,6 +204,7 @@ export function registerDoctorCommand(program: Command) {
 						process.exit(1);
 					}
 				}
+				reportPacing(client);
 			} catch (error) {
 				handleError(error);
 			}

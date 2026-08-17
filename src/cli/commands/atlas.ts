@@ -6,10 +6,15 @@ import { fetchRelationsWithSweep } from "../../atlas/relations.ts";
 import { renderAtlasHtml } from "../../atlas/render.ts";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient, type PlaneIssueRelations } from "../../plane/client.ts";
+import {
+	createPlaneClient,
+	type PlaneClient,
+	type PlaneIssueRelations,
+} from "../../plane/client.ts";
 import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
 import { isCriterionChild } from "../../sync/board-story.ts";
+import { reportPacing } from "../pacing.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -71,6 +76,7 @@ export function registerAtlasCommand(program: Command) {
 		.action(async (file: string | undefined, options) => {
 			try {
 				let graph: AtlasGraph;
+				let pacedClient: PlaneClient | undefined;
 
 				if (file) {
 					// Offline: parse one markdown file, no config, no API.
@@ -94,7 +100,11 @@ export function registerAtlasCommand(program: Command) {
 						baseUrl: config.baseUrl,
 						maxRetries: config.maxRetries,
 						dialect: config.dialect,
+						requestsPerMinute: config.apiRateLimit,
+						rateHeadroom: config.rateHeadroom,
+						maxConcurrency: config.maxConcurrency,
 					});
+					pacedClient = client;
 					const resolver = new Resolver(client);
 					const project = await resolver.resolveProject(projectName);
 					const index = await fetchProjectIndex(client, project.id, project.identifier);
@@ -154,6 +164,7 @@ export function registerAtlasCommand(program: Command) {
 				} else {
 					console.log(chalk.dim(`Open it: file://${abs}`));
 				}
+				if (pacedClient) reportPacing(pacedClient);
 			} catch (error) {
 				handleError(error);
 			}

@@ -5,6 +5,7 @@ import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { createPlaneClient } from "../../plane/client.ts";
 import { generatePacket } from "../../sync/packet.ts";
+import { reportPacing } from "../pacing.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -48,6 +49,9 @@ export function registerPacketCommand(program: Command) {
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
 					dialect: config.dialect,
+					requestsPerMinute: config.apiRateLimit,
+					rateHeadroom: config.rateHeadroom,
+					maxConcurrency: config.maxConcurrency,
 				});
 
 				const { markdown, packet } = await generatePacket(client, {
@@ -68,6 +72,7 @@ export function registerPacketCommand(program: Command) {
 					// The packet itself goes to stdout so it can be piped to an agent.
 					process.stdout.write(markdown);
 				}
+				reportPacing(client);
 			} catch (error) {
 				handleError(error);
 			}

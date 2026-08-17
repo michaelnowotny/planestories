@@ -111,6 +111,9 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 				defaultProject: entry.defaultProject,
 				defaultLabels: entry.defaultLabels,
 				sourceLabel: entry.sourceLabel,
+				apiRateLimit: entry.apiRateLimit,
+				maxConcurrency: entry.maxConcurrency,
+				rateHeadroom: entry.rateHeadroom,
 			};
 		}
 	} else {
@@ -133,7 +136,7 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 	// Merge env vars. A NAMED context resolves ONLY its per-context vars; the
 	// bare PLANE_* vars apply ONLY on the default path (see doc comment above).
 	const envFor = (
-		field: "API_KEY" | "WORKSPACE_SLUG" | "BASE_URL" | "DIALECT",
+		field: "API_KEY" | "WORKSPACE_SLUG" | "BASE_URL" | "DIALECT" | "API_RATE_LIMIT",
 	): string | undefined =>
 		options?.context
 			? process.env[ctxEnvName(options.context, field)]
@@ -156,6 +159,13 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 	const envDialect = envFor("DIALECT");
 	if (envDialect !== undefined) {
 		config.dialect = parseDialect(envDialect, dialectVariable);
+	}
+	const rateLimitVariable = options?.context
+		? ctxEnvName(options.context, "API_RATE_LIMIT")
+		: "PLANE_API_RATE_LIMIT";
+	const envRateLimit = envFor("API_RATE_LIMIT");
+	if (envRateLimit !== undefined) {
+		config.apiRateLimit = parseApiRateLimit(envRateLimit, rateLimitVariable);
 	}
 	if (process.env.PLANE_SOURCE_LABEL) {
 		config.sourceLabel = process.env.PLANE_SOURCE_LABEL;
@@ -266,7 +276,54 @@ function resolveConfig(config: CliConfig): ResolvedConfig {
 		defaultLabels: config.defaultLabels ?? [],
 		sourceLabel: config.sourceLabel ?? null,
 		maxRetries: parseMaxRetries(process.env.PLANE_MAX_RETRIES),
+		apiRateLimit:
+			config.apiRateLimit === undefined
+				? undefined
+				: parseApiRateLimit(config.apiRateLimit, "apiRateLimit"),
+		maxConcurrency:
+			config.maxConcurrency === undefined
+				? undefined
+				: parseMaxConcurrency(config.maxConcurrency, "maxConcurrency"),
+		rateHeadroom:
+			config.rateHeadroom === undefined
+				? undefined
+				: parseRateHeadroom(config.rateHeadroom, "rateHeadroom"),
 	};
+}
+
+/** Parse Plane's API_KEY_RATE_LIMIT form (or a numeric rpm) into requests per minute. */
+export function parseApiRateLimit(raw: string | number, field: string): number {
+	let rpm: number;
+	if (typeof raw === "number") {
+		rpm = raw;
+	} else {
+		const match = raw.match(/^\s*(\d+)\s*\/\s*minute\s*$/i);
+		rpm = match ? Number(match[1]) : Number.NaN;
+	}
+	if (!Number.isSafeInteger(rpm) || rpm <= 0) {
+		throw new ConfigError(
+			`Invalid config field "${field}": expected a positive integer rpm or Plane form "60/minute", got ${JSON.stringify(raw)}`,
+		);
+	}
+	return rpm;
+}
+
+function parseMaxConcurrency(raw: number, field: string): number {
+	if (!Number.isSafeInteger(raw) || raw <= 0) {
+		throw new ConfigError(
+			`Invalid config field "${field}": expected a positive integer, got ${JSON.stringify(raw)}`,
+		);
+	}
+	return raw;
+}
+
+function parseRateHeadroom(raw: number, field: string): number {
+	if (!Number.isFinite(raw) || raw <= 0 || raw > 1) {
+		throw new ConfigError(
+			`Invalid config field "${field}": expected a number in (0, 1], got ${JSON.stringify(raw)}`,
+		);
+	}
+	return raw;
 }
 
 function parseDialect(raw: string, source: string): PlaneEndpointDialect {

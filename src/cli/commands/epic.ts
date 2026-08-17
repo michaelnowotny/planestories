@@ -4,6 +4,7 @@ import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { createPlaneClient } from "../../plane/client.ts";
 import { rollupEpic } from "../../sync/rollup.ts";
+import { reportPacing } from "../pacing.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -43,6 +44,9 @@ export function registerEpicCommand(program: Command) {
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
 					dialect: config.dialect,
+					requestsPerMinute: config.apiRateLimit,
+					rateHeadroom: config.rateHeadroom,
+					maxConcurrency: config.maxConcurrency,
 				});
 
 				const { text } = await rollupEpic(client, {
@@ -53,6 +57,7 @@ export function registerEpicCommand(program: Command) {
 
 				console.log("");
 				console.log(text);
+				reportPacing(client);
 			} catch (error) {
 				handleError(error);
 			}

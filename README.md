@@ -530,6 +530,14 @@ Set optional `dialect` to `"work-items"` (or `PLANE_CTX_<NAME>_DIALECT=work-item
 self-hosted Plane instance serves dependency relations under `/work-items/`. It defaults to
 `"issues"`; a present value other than those two choices is rejected.
 
+For a self-hosted instance, set `apiRateLimit` to Plane's own `API_KEY_RATE_LIMIT` value, for
+example `"60/minute"` (a numeric requests-per-minute value is also accepted). planestories paces
+requests below that per-key limit and derives useful concurrency from observed latency; optional
+`rateHeadroom` (default `0.8`) and `maxConcurrency` (default `16`) tune the safety margins. The
+equivalent default-context environment override is `PLANE_API_RATE_LIMIT`; named contexts use only
+`PLANE_CTX_<NAME>_API_RATE_LIMIT`. Pacing is off when `apiRateLimit` is absent, preserving the
+existing Plane Cloud behavior because its actual limit is not assumed.
+
 ## Development
 
 ```bash

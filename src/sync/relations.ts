@@ -139,7 +139,8 @@ export async function reconcileProjectRelations(
 		for (const endpoint of edgeEndpoints(edge)) relationFetchIds.add(endpoint);
 	}
 	const currentByIssue = new Map<string, PlaneIssueRelations>();
-	await mapWithConcurrency([...relationFetchIds], 6, async (issueId) => {
+	const concurrency = client.concurrency() ?? 6;
+	await mapWithConcurrency([...relationFetchIds], concurrency, async (issueId) => {
 		if (issueId.startsWith("dry-run:")) {
 			currentByIssue.set(issueId, cloneRelations(EMPTY_RELATIONS));
 			return;

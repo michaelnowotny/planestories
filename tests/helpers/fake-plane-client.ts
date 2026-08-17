@@ -111,6 +111,8 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 	}
 
 	const impl = {
+		concurrency: (): number | undefined => undefined,
+		pacingSummary: (): string | undefined => undefined,
 		workItemWebUrl(projectId: string, workItemId: string): string {
 			return `https://app.plane.so/ws/projects/${projectId}/issues/${workItemId}`;
 		},

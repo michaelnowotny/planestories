@@ -7,6 +7,7 @@ import type { ProjectSnapshot, SnapshotRelations } from "./types.ts";
 
 export interface FreshnessClient {
 	readonly dialect: PlaneEndpointDialect;
+	concurrency?(): number | undefined;
 	listWorkItems<T>(projectId: string): Promise<T[]>;
 	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]>;
@@ -104,10 +105,11 @@ export async function checkFreshness(
 	const relationDrift: FreshnessReport["relationDrift"] = [];
 	if (options.deep) {
 		const present = expected.filter((item) => actualById.has(item.id));
+		const concurrency = options.concurrency ?? client.concurrency?.() ?? 4;
 		const commentSweep = await sweepFetch(
 			present,
 			(item) => client.listWorkItemComments<RawComment>(snapshot.source.projectId, item.id),
-			options.concurrency ?? 4,
+			concurrency,
 		);
 		if (commentSweep.failures.length > 0) {
 			throw new ReplicateError(
@@ -135,7 +137,7 @@ export async function checkFreshness(
 		const relationSweep = await sweepFetch(
 			present,
 			(item) => client.getRelations(snapshot.source.projectId, item.id),
-			options.concurrency ?? 4,
+			concurrency,
 		);
 		if (relationSweep.failures.length > 0) {
 			throw new ReplicateError(

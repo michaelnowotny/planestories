@@ -33,6 +33,9 @@ Don't blur these.
 - `src/plane/client.ts` — REST client. `request()` wraps every call in transient-failure retry
   (429/5xx/network, `Retry-After` or exponential backoff+jitter; `PLANE_MAX_RETRIES`). Never add
   a parallel HTTP path.
+- `src/plane/pacer.ts` — optional per-client token-bucket pacing. The configured per-key rate is
+  the throughput authority; concurrency is derived from observed latency via Little's Law. Each
+  client owns its pacer, so two-instance replication keeps independent budgets.
 - `src/plane/issues.ts` — create/update/fetch + `fetchWorkItems`, and `fetchProjectIndex`
   (ONE paginated list → `byId`/`byIdentifier`/`byNormalizedTitle`/`childrenByParent`; the shared
   read that backs the duplicate guard and hashless-linked adopt — never a per-item GET loop).

@@ -19,6 +19,7 @@ export interface SnapshotClient {
 	readonly baseUrl: string;
 	readonly workspaceSlug: string;
 	readonly dialect: PlaneEndpointDialect;
+	concurrency?(): number | undefined;
 	getProject<T>(projectId: string): Promise<T>;
 	listProjects<T>(): Promise<T[]>;
 	listStates<T>(projectId: string): Promise<T[]>;
@@ -114,7 +115,7 @@ export async function takeSnapshot(
 	options: TakeSnapshotOptions,
 ): Promise<ProjectSnapshot> {
 	const progress = options.onProgress ?? (() => {});
-	const concurrency = options.concurrency ?? 4;
+	const concurrency = options.concurrency ?? client.concurrency?.() ?? 4;
 
 	const project = await resolveProject(client, projectRef);
 	progress(`Snapshotting project ${project.identifier ?? project.id} (${project.name ?? "?"})`);

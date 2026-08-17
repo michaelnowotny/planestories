@@ -406,10 +406,15 @@ export async function generatePacket(
 
 	// One relations fetch per item in the packet (root + children), bounded.
 	const itemsNeedingRelations = [target, ...children];
-	const relationsPairs = await mapWithConcurrency(itemsNeedingRelations, 6, async (item) => {
-		const relations = await client.getRelations(project.id, item.id);
-		return [item.id, relations] as const;
-	});
+	const concurrency = client.concurrency() ?? 6;
+	const relationsPairs = await mapWithConcurrency(
+		itemsNeedingRelations,
+		concurrency,
+		async (item) => {
+			const relations = await client.getRelations(project.id, item.id);
+			return [item.id, relations] as const;
+		},
+	);
 	const relationsById = new Map<string, PlaneIssueRelations>(relationsPairs);
 
 	const emptyRelations: PlaneIssueRelations = {

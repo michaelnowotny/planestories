@@ -19,6 +19,7 @@ import { formatApplyReport, formatSnapshotSummary } from "../../replicate/report
 import { parseSnapshot, serializeSnapshot, takeSnapshot } from "../../replicate/snapshot.ts";
 import type { ProjectSnapshot } from "../../replicate/types.ts";
 import { formatVerifyReport, verifySnapshot } from "../../replicate/verify.ts";
+import { reportPacing } from "../pacing.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -48,18 +49,15 @@ async function clientFor(context: string | undefined, configPath?: string): Prom
 		baseUrl: config.baseUrl,
 		maxRetries: config.maxRetries,
 		dialect: config.dialect,
+		requestsPerMinute: config.apiRateLimit,
+		rateHeadroom: config.rateHeadroom,
+		maxConcurrency: config.maxConcurrency,
 	});
 }
 
 function withDialect(client: PlaneClient, dialect: PlaneEndpointDialect): PlaneClient {
 	if (client.dialect === dialect) return client;
-	return createPlaneClient({
-		apiKey: client.apiKey,
-		workspaceSlug: client.workspaceSlug,
-		baseUrl: client.baseUrl,
-		maxRetries: client.maxRetries,
-		dialect,
-	});
+	return client.withDialect(dialect);
 }
 
 interface RawProjectRow {
@@ -120,6 +118,7 @@ async function runSnapshot(flow: SnapshotFlow): Promise<ProjectSnapshot> {
 	await Bun.write(flow.out, serializeSnapshot(snapshot));
 	console.log(formatSnapshotSummary(snapshot));
 	console.log(`Snapshot written to ${flow.out}`);
+	reportPacing(flow.client);
 	return snapshot;
 }
 
@@ -214,7 +213,10 @@ export function registerReplicateCommand(program: Command) {
 		.option("-p, --project <name>", "Source project name or identifier")
 		.option("-o, --out <file>", "Snapshot file path (default: <IDENTIFIER>.snapshot.json)")
 		.option("--force", "Overwrite an existing snapshot file")
-		.option("--concurrency <n>", "Paced read concurrency (default 4)")
+		.option(
+			"--concurrency <n>",
+			"Paced read concurrency (overrides the rate-derived value; fallback 4)",
+		)
 		.option("--yes", "Actually write to the target (default: dry-run after the snapshot)")
 		.option("--json", "Machine-readable apply report")
 		.option("--dest-name <name>", "Destination project name (default: the source's)")
@@ -271,7 +273,10 @@ export function registerReplicateCommand(program: Command) {
 		.option("-p, --project <name>", "Source project name or identifier")
 		.requiredOption("-o, --out <file>", "Snapshot file path")
 		.option("--force", "Overwrite an existing snapshot file")
-		.option("--concurrency <n>", "Paced read concurrency (default 4)")
+		.option(
+			"--concurrency <n>",
+			"Paced read concurrency (overrides the rate-derived value; fallback 4)",
+		)
 		.action(async (options) => {
 			try {
 				if (!options.project) throw new ConfigError("snapshot needs --project <name>");
@@ -296,7 +301,10 @@ export function registerReplicateCommand(program: Command) {
 		.requiredOption("-p, --project <name>", "Source project name or identifier")
 		.requiredOption("--dir <directory>", "Backup directory")
 		.option("--retain <n>", "Backups to keep for this project", "14")
-		.option("--concurrency <n>", "Paced read concurrency (default 4)")
+		.option(
+			"--concurrency <n>",
+			"Paced read concurrency (overrides the rate-derived value; fallback 4)",
+		)
 		.option("--no-check-fresh", "Skip the post-write freshness self-check")
 		.option("--json", "Machine-readable result")
 		.action(async (options) => {
@@ -393,7 +401,10 @@ export function registerReplicateCommand(program: Command) {
 		.option("--json", "Machine-readable full report")
 		.option("-o, --out <file>", "Write the full JSON report in either output mode")
 		.option("--export-file <file>", "Cross-check a planestories markdown export")
-		.option("--concurrency <n>", "Paced read concurrency (default 4)")
+		.option(
+			"--concurrency <n>",
+			"Paced read concurrency (overrides the rate-derived value; fallback 4)",
+		)
 		.action(async (options) => {
 			try {
 				const snapshot = await readSnapshotFile(options.snapshot);
@@ -409,6 +420,7 @@ export function registerReplicateCommand(program: Command) {
 				});
 				if (options.out) await Bun.write(options.out, `${JSON.stringify(report, null, 2)}\n`);
 				console.log(formatVerifyReport(report, options.json === true));
+				reportPacing(client);
 				if (!report.summary.ok) process.exitCode = 1;
 			} catch (error) {
 				handleError(error);
@@ -454,7 +466,10 @@ export function registerReplicateCommand(program: Command) {
 		.requiredOption("--snapshot <file>", "Snapshot file produced by `replicate snapshot`")
 		.option("--json", "Machine-readable report")
 		.option("--deep", "Also compare comments and relations (paced per-item reads)")
-		.option("--concurrency <n>", "Paced read concurrency for --deep (default 4)")
+		.option(
+			"--concurrency <n>",
+			"Paced read concurrency for --deep (overrides the rate-derived value; fallback 4)",
+		)
 		.action(async (options) => {
 			try {
 				const snapshot = await readSnapshotFile(options.snapshot);
@@ -467,11 +482,13 @@ export function registerReplicateCommand(program: Command) {
 						"Freshness source context does not match snapshot.source base URL and workspace",
 					);
 				}
-				const report = await checkFreshness(withDialect(base, snapshot.source.dialect), snapshot, {
+				const client = withDialect(base, snapshot.source.dialect);
+				const report = await checkFreshness(client, snapshot, {
 					deep: options.deep === true,
 					concurrency: parseConcurrency(options.concurrency),
 				});
 				console.log(formatFreshnessReport(report, options.json === true));
+				reportPacing(client);
 				if (!report.fresh) process.exitCode = 1;
 			} catch (error) {
 				handleError(error);

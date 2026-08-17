@@ -1,4 +1,5 @@
 import { PlaneApiError } from "../errors.ts";
+import { Pacer, type PacerOptions } from "./pacer.ts";
 
 export const DEFAULT_PLANE_BASE_URL = "https://api.plane.so";
 
@@ -35,6 +36,14 @@ export interface PlaneClientOptions {
 	 * cannot land further writes.
 	 */
 	beforeWriteAttempt?: () => void;
+	/** Configured per-key API throughput. Omit to preserve legacy unpaced behavior. */
+	requestsPerMinute?: number;
+	/** Fraction of the configured rate available to this client (default 0.8). */
+	rateHeadroom?: number;
+	/** Safety cap for Little's-Law-derived concurrency (default 16). */
+	maxConcurrency?: number;
+	/** Injectable clock used by pacing and telemetry. */
+	now?: () => number;
 }
 
 export type PlaneDependencyRelationType = "blocked_by" | "blocking" | "relates_to";
@@ -119,6 +128,10 @@ export class PlaneClient {
 	private readonly sleep: (ms: number) => Promise<void>;
 	private readonly beforeWriteAttempt?: () => void;
 	private readonly options: PlaneClientOptions;
+	private readonly pacer?: Pacer;
+	private readonly now: () => number;
+	private requestCount = 0;
+	private readonly startedAt: number;
 
 	constructor(options: PlaneClientOptions) {
 		this.options = options;
@@ -132,11 +145,46 @@ export class PlaneClient {
 		this.dialect = options.dialect ?? "issues";
 		this.sleep = options.sleep ?? defaultSleep;
 		this.beforeWriteAttempt = options.beforeWriteAttempt;
+		this.now = options.now ?? Date.now;
+		this.startedAt = this.now();
+		if (options.requestsPerMinute !== undefined) {
+			const pacerOptions: PacerOptions = {
+				requestsPerMinute: options.requestsPerMinute,
+				headroom: options.rateHeadroom,
+				maxConcurrency: options.maxConcurrency,
+				now: this.now,
+				sleep: this.sleep,
+			};
+			this.pacer = new Pacer(pacerOptions);
+		}
+	}
+
+	/** Requests worth running in parallel, or undefined when pacing is not configured. */
+	concurrency(): number | undefined {
+		return this.pacer?.concurrency();
+	}
+
+	/** One-line completion telemetry for commands which perform paced sweeps. */
+	pacingSummary(): string | undefined {
+		if (!this.pacer) return undefined;
+		const stats = this.pacer.stats();
+		const headroom = this.options.rateHeadroom ?? 0.8;
+		const configured = this.options.requestsPerMinute as number;
+		const reqPerSecond = stats.effectiveRpm / 60;
+		const elapsedSeconds = Math.max(0, (this.now() - this.startedAt) / 1000);
+		const elapsed = formatDuration(elapsedSeconds);
+		const throttled = stats.throttled > 0 ? ` · ${stats.throttled} throttled` : "";
+		return `paced: ${configured}/min × ${headroom} → ${reqPerSecond.toFixed(1)} req/s · concurrency ${stats.concurrency} · ${this.requestCount.toLocaleString("en-US")} requests · ${elapsed}${throttled}`;
 	}
 
 	/** A sibling client whose every non-GET HTTP attempt first runs `hook`. */
 	withBeforeWriteAttempt(hook: () => void): PlaneClient {
 		return new PlaneClient({ ...this.options, beforeWriteAttempt: hook });
+	}
+
+	/** A sibling client for another endpoint dialect, retaining this instance's rate profile. */
+	withDialect(dialect: PlaneEndpointDialect): PlaneClient {
+		return new PlaneClient({ ...this.options, dialect });
 	}
 
 	/** The work-item API path segment for this instance's endpoint dialect. */
@@ -191,6 +239,7 @@ export class PlaneClient {
 		let attempt = 0;
 		while (true) {
 			attempt++;
+			await this.pacer?.acquire();
 			// Per-ATTEMPT write hook: a caller-side guard only sees the method
 			// call, not the retries after backoff sleeps inside this loop.
 			if (this.beforeWriteAttempt && method !== "GET") {
@@ -198,9 +247,12 @@ export class PlaneClient {
 			}
 
 			let response: Response;
+			const requestStartedAt = this.now();
 			try {
+				this.requestCount++;
 				response = await fetch(url.toString(), init);
 			} catch (error) {
+				this.pacer?.recordLatency(this.now() - requestStartedAt);
 				// Network-level failure: retry (transient) until the budget is spent.
 				if (attempt <= retryBudget) {
 					await this.sleep(this.backoffDelay(attempt));
@@ -211,6 +263,10 @@ export class PlaneClient {
 						error instanceof Error ? error.message : String(error)
 					}`,
 				);
+			}
+			this.pacer?.recordLatency(this.now() - requestStartedAt);
+			if (response.status === 429) {
+				this.pacer?.recordThrottled();
 			}
 
 			if (response.status === 404 && options.allowNotFound) {
@@ -493,6 +549,15 @@ export class PlaneClient {
 
 export function createPlaneClient(options: PlaneClientOptions): PlaneClient {
 	return new PlaneClient(options);
+}
+
+function formatDuration(totalSeconds: number): string {
+	const seconds = Math.floor(totalSeconds % 60);
+	const minutes = Math.floor(totalSeconds / 60) % 60;
+	const hours = Math.floor(totalSeconds / 3600);
+	if (hours > 0) return `${hours}h${minutes}m${seconds}s`;
+	if (minutes > 0) return `${minutes}m${seconds}s`;
+	return `${seconds}s`;
 }
 
 /**

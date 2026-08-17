@@ -124,6 +124,9 @@ export function registerRenameProjectCommand(program: Command): void {
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
 					dialect: config.dialect,
+					requestsPerMinute: config.apiRateLimit,
+					rateHeadroom: config.rateHeadroom,
+					maxConcurrency: config.maxConcurrency,
 				});
 				const result = await renameProject(client, {
 					project: options.project,

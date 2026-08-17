@@ -87,6 +87,12 @@ export interface CliConfig {
 	defaultLabels?: string[];
 	/** When set, tag every created work item with this label (auto-created). Off by default. */
 	sourceLabel?: string;
+	/** Plane API-key rate limit, in requests/minute or Plane's "60/minute" form. */
+	apiRateLimit?: string | number;
+	/** Safety ceiling for concurrency derived from the rate profile. */
+	maxConcurrency?: number;
+	/** Fraction of the configured rate available to this client. */
+	rateHeadroom?: number;
 }
 
 export interface ContextEntry {
@@ -98,6 +104,9 @@ export interface ContextEntry {
 	defaultProject?: string;
 	defaultLabels?: string[];
 	sourceLabel?: string;
+	apiRateLimit?: string | number;
+	maxConcurrency?: number;
+	rateHeadroom?: number;
 }
 
 export interface MultiContextConfig {
@@ -116,6 +125,10 @@ export interface ResolvedConfig {
 	sourceLabel: string | null;
 	/** Retry budget for transient Plane API failures (429/5xx/network). From PLANE_MAX_RETRIES. */
 	maxRetries: number;
+	/** Parsed requests per minute; undefined keeps pacing disabled for compatibility. */
+	apiRateLimit?: number;
+	maxConcurrency?: number;
+	rateHeadroom?: number;
 }
 
 export interface ExportFilters {

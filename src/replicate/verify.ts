@@ -49,6 +49,7 @@ export interface VerifyClient {
 	readonly baseUrl: string;
 	readonly workspaceSlug: string;
 	readonly dialect: PlaneEndpointDialect;
+	concurrency?(): number | undefined;
 	listWorkItems<T>(projectId: string): Promise<T[]>;
 	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	listStates<T>(projectId: string): Promise<T[]>;
@@ -534,7 +535,7 @@ async function compareComments(
 	targetMemberByEmail: Map<string, string>,
 	add: (finding: VerifyFinding) => void,
 	skipped: VerifySkipped[],
-	concurrency = 4,
+	concurrency = client.concurrency?.() ?? 4,
 ): Promise<void> {
 	const mapped = snapshot.items.filter((item) => {
 		const targetId = facts.targetBySource.get(item.id)?.id;
@@ -677,7 +678,7 @@ async function compareRelations(
 	snapshot: ProjectSnapshot,
 	targetItems: RawItem[],
 	add: (finding: VerifyFinding) => void,
-	concurrency = 4,
+	concurrency = client.concurrency?.() ?? 4,
 ): Promise<void> {
 	const sweep = await sweepFetch(
 		targetItems,

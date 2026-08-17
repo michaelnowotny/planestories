@@ -5,6 +5,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { createPlaneClient } from "../../plane/client.ts";
 import { exportStories } from "../../sync/exporter.ts";
 import type { ExportFilters } from "../../types.ts";
+import { reportPacing } from "../pacing.ts";
 
 /** Commander collector for repeatable options (e.g. multiple --status). */
 function collect(value: string, previous: string[]): string[] {
@@ -66,6 +67,9 @@ export function registerExportCommand(program: Command) {
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
 					dialect: config.dialect,
+					requestsPerMinute: config.apiRateLimit,
+					rateHeadroom: config.rateHeadroom,
+					maxConcurrency: config.maxConcurrency,
 				});
 
 				const filters: ExportFilters = {};
@@ -91,6 +95,7 @@ export function registerExportCommand(program: Command) {
 				});
 
 				console.log(chalk.green(`Exported ${result.count} stories to ${result.outputPath}`));
+				reportPacing(client);
 			} catch (error) {
 				handleError(error);
 			}

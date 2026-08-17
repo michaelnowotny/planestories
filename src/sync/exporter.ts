@@ -135,7 +135,8 @@ export async function exportStories(
 	// Relations for every exported story, with the paced rate-limit sweep — but
 	// FAIL-HARD if any lookup still fails: a file silently missing dependency
 	// lines would REMOVE those relations from the board on re-import.
-	const rel = await fetchRelationsWithSweep(client, project.id, filtered, 6);
+	const concurrency = client.concurrency() ?? 6;
+	const rel = await fetchRelationsWithSweep(client, project.id, filtered, concurrency);
 	if (rel.failed > 0) {
 		throw new PlaneApiError(
 			`${rel.failed} relation lookup(s) failed even after the paced retry pass — export aborted ` +
@@ -143,7 +144,7 @@ export async function exportStories(
 		);
 	}
 
-	const stories = await mapWithConcurrency(filtered, 6, async (item) => {
+	const stories = await mapWithConcurrency(filtered, concurrency, async (item) => {
 		const relations = rel.relationsById.get(item.id);
 		if (!relations) {
 			throw new PlaneApiError(`missing relations for ${project.identifier}-${item.sequenceId}`);

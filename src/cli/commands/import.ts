@@ -6,6 +6,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { createPlaneClient } from "../../plane/client.ts";
 import { importStories } from "../../sync/importer.ts";
 import type { ImportSummary } from "../../types.ts";
+import { reportPacing } from "../pacing.ts";
 
 /**
  * Resolve an array of file paths / glob patterns into deduplicated file paths.
@@ -283,6 +284,9 @@ export function registerImportCommand(program: Command) {
 					baseUrl: config.baseUrl,
 					maxRetries: config.maxRetries,
 					dialect: config.dialect,
+					requestsPerMinute: config.apiRateLimit,
+					rateHeadroom: config.rateHeadroom,
+					maxConcurrency: config.maxConcurrency,
 				});
 
 				// Import
@@ -314,6 +318,7 @@ export function registerImportCommand(program: Command) {
 				if (summary.failed > 0 || summary.relationErrors.length > 0) {
 					process.exit(1);
 				}
+				reportPacing(client);
 			} catch (error) {
 				handleError(error);
 			}

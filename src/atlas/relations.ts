@@ -4,6 +4,8 @@ import { mapWithConcurrency } from "../utils/concurrency.ts";
 /** The slice of PlaneClient the relation fetch needs (narrow for testability). */
 export interface RelationsClient {
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
+	/** Derived per-instance concurrency, when a rate profile is configured. */
+	concurrency?(): number | undefined;
 }
 
 export interface RelationsFetchResult {
@@ -29,7 +31,7 @@ export async function fetchRelationsWithSweep(
 	client: RelationsClient,
 	projectId: string,
 	items: ReadonlyArray<{ id: string }>,
-	concurrency = 4,
+	concurrency = client.concurrency?.() ?? 4,
 ): Promise<RelationsFetchResult> {
 	const failedItems: Array<{ id: string }> = [];
 	const pairs = await mapWithConcurrency([...items], concurrency, async (item) => {
