@@ -67,8 +67,13 @@ describe("SnapshotSource", () => {
 		// Not null — a snapshot always knows its archived inventory, so this must not be
 		// confused with the "endpoint unavailable" signal a live instance can return.
 		expect(archived).not.toBeNull();
-		const ids = new Set(rows.map((row) => row.id));
-		expect(ids.size).toBe(rows.length);
+		// The rule, stated so it CAN fail: archived items live in the main listing, so
+		// the archived call must add nothing. Returning them again would double-count
+		// every archived item in any consumer that merges both lists.
+		expect(archived).toEqual([]);
+		expect(rows.some((row) => row.id === snapshot.items.find((i) => i.archived)?.id)).toBe(
+			snapshot.items.some((i) => i.archived),
+		);
 	});
 
 	test("it announces its provenance, including the snapshot's age", () => {

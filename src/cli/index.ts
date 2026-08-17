@@ -14,6 +14,7 @@ import { registerProjectsCommand } from "./commands/projects.ts";
 import { registerRenameProjectCommand } from "./commands/rename-project.ts";
 import { registerReplicateCommand } from "./commands/replicate.ts";
 import { registerSetCommand } from "./commands/set.ts";
+import { armExitWatchdog } from "./flush.ts";
 
 const program = new Command();
 
@@ -49,9 +50,10 @@ registerRenameProjectCommand(program);
 program
 	.parseAsync()
 	.then(() => {
-		process.exit(process.exitCode ?? 0);
+		armExitWatchdog();
 	})
 	.catch((error) => {
 		console.error(error instanceof Error ? error.message : String(error));
-		process.exit(1);
+		process.exitCode = 1;
+		armExitWatchdog();
 	});

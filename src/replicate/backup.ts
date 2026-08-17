@@ -39,8 +39,13 @@ export function instanceTag(baseUrl: string, workspaceSlug: string): string {
 			return baseUrl;
 		}
 	})();
-	const shortHost = host.replace(/^api\./, "").split(".")[0] ?? host;
-	return `${shortHost}-${workspaceSlug}`.toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+	// Use the whole host, not its first label: "api.plane.so" and
+	// "plane.porcupine.works" both start with "plane", and collapsing them would
+	// recreate the cross-instance prune collision this tag exists to prevent
+	// whenever two instances share a workspace slug.
+	return `${host.replace(/^api\./, "")}-${workspaceSlug}`
+		.toLowerCase()
+		.replace(/[^a-z0-9-]+/g, "-");
 }
 
 export async function runBackup(

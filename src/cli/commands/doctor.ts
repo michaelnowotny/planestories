@@ -13,6 +13,7 @@ import { groom } from "../../sync/groomer.ts";
 import { checkHouseRules, type HouseRuleFindings } from "../../sync/house_rules.ts";
 import { checkCriteriaMigration } from "../../sync/migrate.ts";
 import { reportPacing } from "../pacing.ts";
+import { announceSnapshotSource } from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -82,7 +83,9 @@ export function registerDoctorCommand(program: Command) {
 						rateHeadroom: config.rateHeadroom,
 						maxConcurrency: config.maxConcurrency,
 					})) as unknown as PlaneClient;
-				if (snapshotSource && !options.json) console.log(chalk.dim(snapshotSource.provenance()));
+				// stderr, so --json stdout stays machine-clean; and INSIDE the payload, so a
+				// stored CI artifact cannot be mistaken for a live reading later.
+				if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
 
 				// Read-only: groom without apply is a pure analysis.
 				const report = await groom(client, { config, project: options.project });
@@ -148,6 +151,9 @@ export function registerDoctorCommand(program: Command) {
 				const reportObject = assembleDoctorReport(
 					{
 						project: project.identifier,
+						...(snapshotSource
+							? { source: { kind: "snapshot" as const, takenAt: snapshotSource.takenAt } }
+							: {}),
 						findings: baseFindings,
 						orphanedCriteria: report.orphanedCriteria,
 						duplicateTitles: report.duplicateTitles,

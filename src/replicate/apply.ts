@@ -173,6 +173,13 @@ export async function applySnapshot(
 					resume: { journalOwnsProject: journal.projectCreated?.projectId ?? null },
 					ownedSequenceIds: journal.createdSequenceIds(),
 				});
+				// Publish BEFORE the delete. Afterwards the destination is gone, the later
+				// probe sees an empty workspace, and there is nothing left to warn about —
+				// so an operator who passed --allow-divergent-target would be told nothing
+				// on the only path where the overwrite is real. That also carries the
+				// "only live items were compared" warning, which on an instance without an
+				// archived list is the entire honesty of a recreate.
+				progress(formatGateProgress(preGate.errors, preGate.warnings, snapshot, false));
 				if (!preGate.ok) throw new ReplicateError(preGate.errors.join("\n"));
 				await recreateOwnedTarget(ownershipGuardedClient(client, journal), journal);
 				journal.archivePoisoned();
@@ -218,6 +225,8 @@ export async function applySnapshot(
 			flags: options.flags,
 			resume: { journalOwnsProject },
 			destIdentifier,
+			destName,
+			ownedSequenceIds: journal?.createdSequenceIds(),
 		});
 		progress(formatGateProgress(gate.errors, gate.warnings, snapshot, false));
 		// On a FRESH run the journal must not exist yet when the gate fails: a

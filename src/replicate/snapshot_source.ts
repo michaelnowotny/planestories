@@ -111,7 +111,9 @@ export class SnapshotSource {
 				created_at: item.createdAt ?? undefined,
 				updated_at: item.updatedAt ?? undefined,
 				completed_at: item.completedAt ?? undefined,
-				archived_at: item.archived ? (item.updatedAt ?? true) : undefined,
+				// A real timestamp or nothing — never a boolean standing in for a date,
+				// which a later consumer could try to parse.
+				archived_at: item.archived ? (item.updatedAt ?? null) : undefined,
 			};
 		}) as T[];
 	}

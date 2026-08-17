@@ -170,6 +170,42 @@ describe("replication apply", () => {
 		}
 	});
 
+	test("--allow-divergent-target deletes AND says so before doing it", async () => {
+		// The override is the only notice an operator gets on the path where the
+		// overwrite is real. REPLICATE.md promises the refusal "downgrades to a warning
+		// that says the divergent work will be overwritten" — if that warning is
+		// computed and dropped, the docs are false exactly where it matters.
+		const ctx = context();
+		const fake = new FakePlane();
+		const progressLines: string[] = [];
+		try {
+			await applySnapshot(fake, sampleSnapshot(), ctx.options);
+			const project = fake.projectByIdentifier("SRC")!;
+			project.items.set("dest-only", {
+				id: "dest-only",
+				sequence_id: 9001,
+				name: "work done on the destination after cutover",
+				archived_at: null,
+			} as never);
+			const deletedBefore = fake.deletedProjects.length;
+
+			await applySnapshot(fake, sampleSnapshot(), {
+				...ctx.options,
+				flags: { ...baseFlags, recreateTarget: true, allowDivergentTarget: true },
+				onProgress: (line: string) => progressLines.push(line),
+			});
+
+			// It really did destroy the destination...
+			expect(fake.deletedProjects.length).toBeGreaterThan(deletedBefore);
+			// ...and it said so first.
+			const said = progressLines.join("\n");
+			expect(said).toMatch(/9001|diverg/i);
+			expect(said).toMatch(/overwritten/i);
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
 	test("poisons on sequence drift and only recreate-target can recover", async () => {
 		const ctx = context();
 		const fake = new FakePlane();

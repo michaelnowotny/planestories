@@ -76,8 +76,12 @@ export async function checkFreshnessQuick(
 			"The instance did not return a usable item count, so the quick check cannot conclude anything. Run the full check (omit --quick).",
 		);
 	}
-	const snapshotCount = snapshot.items.length;
-	const snapshotMax = snapshot.sequence.max;
+	// The census reads the ordinary list endpoint, whose total_count is the LIVE set.
+	// Comparing it against snapshot.items (live + archived) reports CHANGED on any
+	// board with archived items — a false alarm on the real board this was built for.
+	const liveItems = snapshot.items.filter((item) => !item.archived);
+	const snapshotCount = liveItems.length;
+	const snapshotMax = liveItems.reduce((max, item) => Math.max(max, item.sequenceId), 0);
 	const countMatches = census.totalCount === snapshotCount;
 	const maxMatches = census.maxSequenceId === null || census.maxSequenceId === snapshotMax;
 	return {
@@ -89,6 +93,7 @@ export async function checkFreshnessQuick(
 		notes: [
 			"QUICK CHECK — one request, comparing item count and highest sequence id only.",
 			"It CANNOT see edits to existing items, nor a deletion masked by an addition. A FRESH verdict here is weaker evidence than the full check; use it to catch obvious drift cheaply, not to certify a cutover.",
+			"ARCHIVED items are out of scope: the census counts the live set only, so both sides are compared live-only.",
 			...(census.maxSequenceId === null
 				? ["The instance did not return a top sequence id; only the count was compared."]
 				: []),
