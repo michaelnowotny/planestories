@@ -236,6 +236,16 @@ backup, and the next night self-heals.
 - **Version discrepancy (known, deliberate):** `package.json` and `src/cli/index.ts` both say
   `0.3.1`, the last npm publish. `main` is far ahead. The release is a planned task (§9.2), not
   an oversight — do not "fix" the version in an unrelated change.
+- **⚠ THE CUTOVER HAPPENED (2026-08-16). CE is authoritative in practice.** The finance session
+  ran the migration: 2,551 items, digest `3051b700233a`, 16 gaps reproduced, **verify 0 failures**,
+  relink committed (51 files, 858 substitutions), 1,613 criteria folded on CE, and new tickets
+  (DATA-2568…2574) authored directly on CE. **CE and cloud have genuinely diverged — a cloud→CE
+  replication would now DESTROY the fold and the new tickets. That path is closed.** Still open at
+  the time of writing: the `.mcp.json` switch (answered — `uvx plane-mcp-server@0.3.0 stdio`, env
+  `PLANE_API_KEY`/`PLANE_WORKSPACE_SLUG=archimedes`/`PLANE_BASE_URL=https://plane.porcupine.works`,
+  proven live against CE), repointing the backup cron at CE, and archiving cloud. The full
+  question-and-answer record is `finance_csv_importer/external_info/planestories-cutover-*.md`
+  (gitignored there — the durable version of everything that concerns this repo is §9.5b).
 - **CE instance** (`plane.porcupine.works`, workspace `archimedes`) holds: `SBOX` (sandbox),
   `BLOOMR` (small rehearsal replica), `DATA` (a full, exact 2,504-item replica from the
   2026-08-10 rehearsal — **now stale**, superseded by ongoing cloud work; the cutover starts
@@ -508,6 +518,49 @@ required-reading and code, which is exactly the kind of thing that produces a wr
 Either way: a regression test pinning the chosen behaviour for BOTH import and lint on a
 case-mismatched parent, and update `DESIGN_DECISIONS_tier1.md` (which currently carries a DRIFT
 note pointing here) plus `AGENTS.md`.
+
+### 9.5b Defects found by the real cutover (2026-08-16) — all reproduced, none speculative
+
+The finance session ran the real migration and it landed green (2,551 items, 0 verify failures,
+native timestamps/authorship). These are the things that cost them time. Ordered by how likely they
+are to bite the next person.
+
+1. **The pre-write gate checks identifier availability but NOT project-name availability.** Freeing
+   `DATA` with `rename-project --identifier DATAOLD` left the old project still *named* "Data
+   Platform", so the apply died mid-flight on a raw `409 {"name":"The project name is already
+   taken"}` from Plane instead of failing closed in the gate where every other precondition is
+   checked. Fix: probe the destination NAME too and surface it as a gate error with the remedy.
+   Bonus: `rename-project --identifier` could offer/warn about the name.
+2. **`relink` crashes on unrelated markdown.** It parses every `.md` in the target tree, so a
+   docker-compose example with duplicate `environment:` keys inside an unrelated planning doc
+   killed the run (`duplicated mapping key`). Fix: skip files with no `plane_*` fields before
+   parsing, and downgrade a YAML error in a non-story file to a warning. Workaround in the docs
+   meanwhile: pass only files containing `plane_id`.
+3. **A greenfield epic + children file needs THREE import passes**, not the two the docs imply:
+   children fail on `parent "…" not found`, then relations fail on unresolved targets. Cause:
+   parent and dependency resolution read the MEMOIZED project index, so items created in the same
+   run are not resolvable as targets. Fix: invalidate the index after the create phase, or resolve
+   parents in a second phase the way relations already are. Until then it is documented.
+4. **`migrate-criteria --yes` prints its completion summary and then never exits** (observed 45+
+   min, idle CPU). The work IS complete — the action returns straight after `printReport`, so every
+   write has been awaited. This is a lingering-handle / process-exit bug, not unfinished work.
+   Fix: close the client and exit explicitly on long-running commands. Killing after the summary is
+   safe and is now documented as such.
+5. **`doctor` against a rate-limited instance produces no output for 10+ minutes and then nothing.**
+   It issues one relations GET per non-criterion item (~800 on a big board) and fails hard rather
+   than report a partial scan (correct — a partial scan is a false-clean CI gate). Fix: a progress
+   indicator, so "slow" is distinguishable from "hung".
+6. **New labels are silently skipped without `--create-labels`** (one dim line in a long summary).
+   Fix: make the skip loud in the summary. Do NOT default to creating — silent creation from a typo
+   is how a board accumulates `ops`, `Ops`, and `opps`.
+7. **`freshness --quick` (new, small, genuinely useful).** A full `--deep` is unaffordable against
+   a rate-limited instance — the finance session could not get any verdict during the cutover.
+   Plane's paginated envelope already carries what a cheap check needs; a live CE response shows
+   `total_count`, `count`, `total_pages`, `total_results` alongside `next_cursor`, but our
+   `PlanePage<T>` type models only `results`/`next_cursor`/`next_page_results` and discards them.
+   Build: one request with `per_page=1&order_by=-sequence_id` → compare `total_count` + top
+   `sequence_id` against the snapshot. **It cannot see in-place edits**, so it must print a weaker,
+   explicitly-caveated verdict — never the same wording as `--deep`.
 
 ### 9.6 Multi-installation ergonomics: a default installation (small, user-facing)
 
