@@ -267,6 +267,31 @@ export async function takeSnapshot(
 						(a.createdAt ?? "").localeCompare(b.createdAt ?? "") || a.id.localeCompare(b.id),
 				);
 		}
+
+		// The one failure this feature cannot afford: a sweep that "succeeds" for
+		// every item while parsing nothing, producing a file that LOOKS like a
+		// complete archive and is empty. `listAll` returns `[]` for any envelope it
+		// does not recognize, so a response shape we have not seen degrades to
+		// silence rather than an error — and this runs ONCE, before a source
+		// instance is retired.
+		//
+		// Board-wide zero is the tell. A single item with no activity is ordinary;
+		// a whole project of items that have never been created, edited or moved is
+		// not a board, it is a parse failure. Per-item zero stays legal precisely
+		// because only the aggregate is incredible.
+		const totalEntries = Object.values(activities).reduce((sum, list) => sum + list.length, 0);
+		if (items.length > 0 && totalEntries === 0) {
+			throw new ReplicateError(
+				`Snapshot incomplete: --with-activity read ${items.length} item(s) and found NO activity ` +
+					"entries at all. A populated board always has some, so this almost certainly means the " +
+					"activity endpoint returned a response shape this build does not parse (it degrades to " +
+					"empty rather than erroring) — not that the board has no history. Refusing to write a " +
+					"file that would look like a complete archive. Verify with: curl -H 'x-api-key: …' " +
+					`'<base>/api/v1/workspaces/<slug>/projects/${project.id}/${
+						client.dialect === "work-items" ? "work-items" : "issues"
+					}/<item-id>/activities/'`,
+			);
+		}
 	}
 
 	const snapshot: ProjectSnapshot = {

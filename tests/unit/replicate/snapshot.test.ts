@@ -144,6 +144,52 @@ describe("activity capture (--with-activity)", () => {
 		).rejects.toThrow(/activity fetch failed for 1 item/);
 	});
 
+	test("a board-wide EMPTY activity result is refused, not written as a complete archive", async () => {
+		// The silent-empty path: listAll returns [] for an envelope it does not
+		// recognize, so an unseen response shape would otherwise produce a file
+		// that looks like a finished archive and contains nothing — discovered
+		// only after the source instance was retired.
+		await expect(
+			takeSnapshot(
+				snapshotClient({
+					async listWorkItemActivities<T>(): Promise<T[]> {
+						return [] as T[];
+					},
+				}),
+				{ projectId: "p" },
+				{ toolVersion: "t", now: () => "2025-01-01T00:00:00Z", withActivity: true },
+			),
+		).rejects.toThrow(/found NO activity entries at all/);
+	});
+
+	test("one item with no activity is fine — only the board-wide total is incredible", async () => {
+		// The guard must not punish an ordinary board where some items are quiet.
+		const snapshot = await takeSnapshot(
+			snapshotClient(ACTIVITY_CLIENT),
+			{ projectId: "p" },
+			{ toolVersion: "t", now: () => "2025-01-01T00:00:00Z", withActivity: true },
+		);
+		expect(snapshot.activities && "item-b" in snapshot.activities).toBe(false);
+		expect(snapshot.activities?.["item-a"]?.length).toBe(2);
+	});
+
+	test("an EMPTY project may still be captured (no items, so no expectation)", async () => {
+		const snapshot = await takeSnapshot(
+			snapshotClient({
+				async listWorkItems<T>(): Promise<T[]> {
+					return [] as T[];
+				},
+				async listWorkItemActivities<T>(): Promise<T[]> {
+					return [] as T[];
+				},
+			}),
+			{ projectId: "p" },
+			{ toolVersion: "t", now: () => "2025-01-01T00:00:00Z", withActivity: true },
+		);
+		expect(snapshot.activities).toEqual({});
+		expect(snapshot.source.activityInventory).toBe("captured");
+	});
+
 	test("a captured snapshot round-trips through parse", async () => {
 		const snapshot = await takeSnapshot(
 			snapshotClient(ACTIVITY_CLIENT),
