@@ -14,6 +14,7 @@ import {
 import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
 import { isCriterionChild } from "../../sync/board-story.ts";
+import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
 import {
 	announceSnapshotSource,
@@ -68,7 +69,7 @@ export function registerAtlasCommand(program: Command) {
 		.option("-p, --project <name>", "Render the whole live Plane project instead of a file")
 		.option(
 			"-o, --output <file>",
-			"Output file (default ./atlas.html, or ./atlas.json with --json)",
+			"Output file (default exports/atlas.html, or exports/atlas.json with --json)",
 		)
 		.option(
 			"--json",
@@ -158,7 +159,10 @@ export function registerAtlasCommand(program: Command) {
 				}
 
 				const html = options.json ? "" : renderAtlasHtml(graph);
-				const outPath = options.output ?? (options.json ? "./atlas.json" : "./atlas.html");
+				const outPath = resolveOutputPath(
+					options.output,
+					options.json ? "atlas.json" : "atlas.html",
+				);
 				const abs = resolve(outPath);
 				await Bun.write(abs, options.json ? `${JSON.stringify(graph, null, "\t")}\n` : html);
 

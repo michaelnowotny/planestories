@@ -5,6 +5,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { createPlaneClient } from "../../plane/client.ts";
 import { exportStories } from "../../sync/exporter.ts";
 import type { ExportFilters } from "../../types.ts";
+import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
 import {
 	announceSnapshotSource,
@@ -47,7 +48,7 @@ export function registerExportCommand(program: Command) {
 			"--context <name>",
 			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
 		)
-		.option("-o, --output <file>", "Output file path", "./exported-stories.md")
+		.option("-o, --output <file>", "Output file path (default exports/exported-stories.md)")
 		.option("-p, --project <name>", "Project to export from (required if no defaultProject)")
 		.option("-i, --issues <ids>", "Comma-separated work item identifiers (e.g. BLOOM-8)")
 		.option("-s, --status <state>", "Filter by status (repeatable)", collect, [])
@@ -104,7 +105,7 @@ export function registerExportCommand(program: Command) {
 					config,
 					filters,
 					project: options.project ?? config.defaultProject ?? undefined,
-					outputPath: options.output,
+					outputPath: resolveOutputPath(options.output, "exported-stories.md"),
 					syncCriteria: options.syncCriteria,
 					includeArchived: options.includeArchived,
 					orphansOnly: options.orphansOnly,

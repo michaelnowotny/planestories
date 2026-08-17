@@ -20,6 +20,33 @@ ticket.
 - **Live-test only in a SANDBOX Plane project** (creds in the gitignored `.env`) — never a
   production board. `.env` holds real credentials; never print or commit it.
 
+## Board exports go in `exports/` — always
+
+**THE RULE: everything a command writes out of a board — atlas renders, story exports, spec
+packets, snapshots, verify reports — goes under `exports/` (or a subdirectory), and `exports/`
+is gitignored. Never commit board content.**
+
+Why, concretely: a `git add -A` after a smoke run once committed **49,258 lines of live board
+content** to a feature branch — an `atlas.json` and an `exported-stories.md` sitting in the repo
+root, because those were the default output paths. The export carried internal infrastructure
+addresses. It was caught in review and purged from history only because the branch had never been
+pushed; on a pushed branch it would have been permanent.
+
+Board exports are DATA: large, private to somebody's project, occasionally carrying secrets by
+accident. Treat them like a database dump, not like build output.
+
+How the rule is enforced, weakest reliance on memory first:
+1. **Every default output path is inside `exports/`** (`src/cli/output_path.ts`), so the common
+   case is safe whether or not anyone knows the rule exists.
+2. **`.gitignore` covers `/exports/`** — and still covers the old default paths, so a stale
+   checkout cannot reintroduce the accident.
+3. **An explicit `-o` is honoured but warned about** when it lands inside the repository and
+   outside `exports/` — that is the exact shape of the accident. Writing outside the repo (a
+   scratch dir, `~/plane-replication`) is legitimate and stays quiet.
+
+When you add a command that writes a file, route it through `resolveOutputPath()`. Do not invent
+a new default path.
+
 ## Model: two sources of truth
 
 The markdown file owns **content** (title, body, criteria, priority, labels); the Plane board

@@ -5,6 +5,7 @@ import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { createPlaneClient } from "../../plane/client.ts";
 import { generatePacket } from "../../sync/packet.ts";
+import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
 import {
 	announceSnapshotSource,
@@ -77,7 +78,7 @@ export function registerPacketCommand(program: Command) {
 				});
 
 				if (options.output) {
-					const abs = resolve(options.output);
+					const abs = resolveOutputPath(options.output, `${identifier}.md`);
 					await Bun.write(abs, markdown);
 					const childNote =
 						packet.kind === "epic" ? ` (epic + ${packet.children.length} child brief(s))` : "";

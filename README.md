@@ -546,6 +546,16 @@ equivalent default-context environment override is `PLANE_API_RATE_LIMIT`; named
 `PLANE_CTX_<NAME>_API_RATE_LIMIT`. Pacing is off when `apiRateLimit` is absent, preserving the
 existing Plane Cloud behavior because its actual limit is not assumed.
 
+## Where exports go
+
+Everything planestories writes out of a board — atlas renders, story exports, spec packets,
+snapshots, reports — defaults to **`exports/`**, which is gitignored. Board exports are data:
+large, private to your project, and occasionally carrying details you would not publish. Keeping
+them in one ignored directory means a stray `git add -A` cannot commit your board.
+
+You can still write anywhere with `-o`; if the path lands inside the repository but outside
+`exports/`, the command warns you, because that is how board content ends up in git history.
+
 ## Development
 
 ```bash
