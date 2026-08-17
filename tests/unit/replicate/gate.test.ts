@@ -28,6 +28,68 @@ function probe(overrides: Partial<TargetProbeResult> = {}): TargetProbeResult {
 	};
 }
 
+describe("loss report — activity", () => {
+	/**
+	 * The loss report must describe what THIS snapshot holds. Before
+	 * --with-activity existed, one grouped line said activity was "not
+	 * inventoried … not carried and not counted per item". That sentence becomes
+	 * FALSE for a captured snapshot — the trail is carried and counted, it is
+	 * simply never replayed — and a loss report that misstates its own contents
+	 * is exactly the kind of confidently-wrong artifact the house rules ban.
+	 */
+	function losses(snapshot = sampleSnapshot()) {
+		return decideGate({
+			snapshot,
+			probe: probe(),
+			flags,
+			resume: { journalOwnsProject: null },
+			destIdentifier: "DST",
+		}).manifests.losses;
+	}
+
+	test("an uncaptured snapshot says so, and points at the flag", () => {
+		const entry = losses().find((loss) => loss.feature === "activity/audit log");
+		expect(entry?.detail).toContain("--with-activity");
+		expect(entry?.detail).toContain("never replayed");
+	});
+
+	test("a captured snapshot reports the real entry count, not 'not inventoried'", () => {
+		const snapshot = sampleSnapshot();
+		snapshot.source.activityInventory = "captured";
+		snapshot.activities = {
+			"source-1": [
+				{
+					id: "a1",
+					verb: "created",
+					field: null,
+					oldValue: null,
+					newValue: null,
+					actor: null,
+					createdAt: "2025-01-01T00:00:00Z",
+					comment: null,
+				},
+				{
+					id: "a2",
+					verb: "updated",
+					field: "state",
+					oldValue: null,
+					newValue: null,
+					actor: null,
+					createdAt: "2025-01-02T00:00:00Z",
+					comment: null,
+				},
+			],
+		};
+		const entry = losses(snapshot).find((loss) => loss.feature === "activity/audit log");
+		expect(entry?.count).toBe(2);
+		expect(entry?.detail).toContain("NOT replayed");
+		// The stale grouped wording must not resurface and re-claim activity.
+		expect(losses(snapshot).map((loss) => loss.feature)).not.toContain(
+			"attachments/activity/reactions",
+		);
+	});
+});
+
 describe("replication pre-write gate", () => {
 	test("max-ever failure names both explicit rerun flags", () => {
 		const decision = decideGate({

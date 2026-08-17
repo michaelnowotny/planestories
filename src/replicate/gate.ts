@@ -295,12 +295,39 @@ function collectLosses(snapshot: ProjectSnapshot, losses: DegradationEntry[]): v
 		count: 1,
 	});
 	losses.push({
-		feature: "attachments/activity/reactions",
+		feature: "attachments/reactions",
 		detail:
 			"Not inventoried in snapshot schema v1 — not carried and not counted per item " +
 			"(description-embedded asset URLs still point at the source instance).",
 		count: 1,
 	});
+	// Activity is reported SEPARATELY and by what this snapshot actually holds.
+	// The grouped "not inventoried" line above used to cover it, and that wording
+	// becomes a lie the moment --with-activity is used: the trail IS carried in
+	// the file and IS counted per item, it is simply never replayed. A loss report
+	// that understates what it holds is as misleading as one that overstates it.
+	if (snapshot.activities === undefined) {
+		losses.push({
+			feature: "activity/audit log",
+			detail:
+				"Not captured — re-snapshot with --with-activity to archive the source's audit " +
+				"trail before retiring it. Either way it is never replayed onto the target.",
+			count: 1,
+		});
+	} else {
+		const entries = Object.values(snapshot.activities).reduce(
+			(sum, values) => sum + values.length,
+			0,
+		);
+		losses.push({
+			feature: "activity/audit log",
+			detail:
+				"Captured in this snapshot as archival evidence, but deliberately NOT replayed: " +
+				"Plane stamps its own activity as the replica is written, and a forged audit " +
+				"trail would be worse than none. The history lives in the snapshot file.",
+			count: entries,
+		});
+	}
 	const updated = snapshot.items.filter((item) => item.updatedAt !== null).length;
 	if (updated > 0) {
 		losses.push({
