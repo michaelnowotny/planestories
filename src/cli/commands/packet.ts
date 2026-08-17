@@ -78,7 +78,7 @@ export function registerPacketCommand(program: Command) {
 				});
 
 				if (options.output) {
-					const abs = resolveOutputPath(options.output, `${identifier}.md`);
+					const abs = resolveOutputPath(options.output, `${identifier}.md`); // -o is set here
 					await Bun.write(abs, markdown);
 					const childNote =
 						packet.kind === "epic" ? ` (epic + ${packet.children.length} child brief(s))` : "";

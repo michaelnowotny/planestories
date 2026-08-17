@@ -22,9 +22,14 @@ ticket.
 
 ## Board exports go in `exports/` — always
 
-**THE RULE: everything a command writes out of a board — atlas renders, story exports, spec
-packets, snapshots, verify reports — goes under `exports/` (or a subdirectory), and `exports/`
-is gitignored. Never commit board content.**
+**THE RULE: what the board-reading commands write — `atlas` renders, `export` story files,
+`packet` briefs — goes under `exports/` at the REPOSITORY ROOT, and `exports/` is gitignored.
+Never commit board content.**
+
+**Replication artifacts are deliberately NOT covered by this rule.** `replicate snapshot -o`,
+`verify -o` and `backup --dir` all require an explicit path, and they belong OUTSIDE the repo
+(the operator keeps them in `~/plane-replication`) — see `docs/REPLICATE.md`. Do not "helpfully"
+relocate them into `exports/`; that would contradict the cutover runbook.
 
 Why, concretely: a `git add -A` after a smoke run once committed **49,258 lines of live board
 content** to a feature branch — an `atlas.json` and an `exported-stories.md` sitting in the repo

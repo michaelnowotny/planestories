@@ -54,7 +54,7 @@ acceptance criteria" the moment you write them down.
 
 ## The Project Atlas
 
-`planestories atlas --project "Data Platform" -o atlas.html` renders your live board (or
+`planestories atlas --project "Data Platform"` renders your live board to `exports/atlas.html` (or
 a stories file) into a **self-contained, offline HTML star map**. No server, no accounts —
 open it in any browser, attach it to a status email, or publish it on an intranet.
 
@@ -342,7 +342,7 @@ planestories import <files...> [options]
 
 ```
 planestories export [options]
-  -o, --output <file>       Output file (default ./exported-stories.md)
+  -o, --output <file>       Output file (default exports/exported-stories.md)
   -p, --project <name>      Project to export from (required if no defaultProject)
   -i, --issues <ids>        Comma-separated work item identifiers (e.g. ENG-8)
   -s, --status <state>      Filter by status (repeatable — keeps items matching any)
@@ -461,8 +461,8 @@ self-contained HTML file (no server, no CDN, works offline; deliberately dark-on
 it at a stories file *or* a live Plane project:
 
 ```
-planestories atlas stories/q1-2026.md -o atlas.html          # from a file (offline)
-planestories atlas --project "Data Platform" -o atlas.html   # from the live board
+planestories atlas stories/q1-2026.md                       # from a file (offline) -> exports/atlas.html
+planestories atlas --project "Data Platform"                # from the live board -> exports/atlas.html
 planestories atlas --project "Data Platform" --json -o g.json # the same graph as data
 ```
 

@@ -15,17 +15,17 @@ Plane project.
 
 ```
 # From a stories file — fully offline, no credentials needed
-planestories atlas stories/q1-2026.md -o atlas.html --open
+planestories atlas stories/q1-2026.md --open        # -> exports/atlas.html
 
 # From the live Plane board — reads work items + dependency relations
-planestories atlas --project "Data Platform" -o atlas.html
+planestories atlas --project "Data Platform"        # -> exports/atlas.html
 ```
 
 | Option | Meaning |
 |---|---|
 | `[file]` | Markdown stories file. Omit it and pass `--project` to render the live board. |
 | `-p, --project <name>` | Render a live Plane project instead of a file. |
-| `-o, --output <file>` | Output path (default `./atlas.html`; `./atlas.json` with `--json`). |
+| `-o, --output <file>` | Output path (default `exports/atlas.html`; `exports/atlas.json` with `--json`). Exports are gitignored — see the export rule in `AGENTS.md`. |
 | `--json` | Emit the graph as machine-readable JSON instead of HTML. |
 | `--open` | Open the generated file in your default browser. |
 | `--no-dependencies` | Board source: skip the per-item relation fetch (much faster, no supply lanes). |

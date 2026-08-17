@@ -1,70 +1,115 @@
-import { mkdirSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import chalk from "chalk";
 
 /**
  * Where Plane exports go.
  *
- * THE RULE: everything a command writes out of a board — atlas renders, story
- * exports, spec packets, snapshots, reports — belongs under `exports/` (or a
- * subdirectory of it), and `exports/` is gitignored.
+ * THE RULE: what the board-reading commands write — atlas renders, story exports, spec
+ * packets — belongs under `exports/` at the REPOSITORY ROOT, and `exports/` is
+ * gitignored. (Replication artifacts are deliberately NOT covered here; snapshots,
+ * journals and verify reports have their own home outside the repo — see
+ * `docs/REPLICATE.md`.)
  *
  * Why it exists: a `git add -A` after a smoke run once committed 49,258 lines of live
- * board content to a feature branch — an `atlas.json` and an `exported-stories.md`
- * sitting in the repo root because those were the default output paths. The export
- * carried internal infrastructure detail, and had it merged it would have been in
- * history permanently. Board exports are DATA: they are large, they are somebody's
- * private project content, and they must never be one careless `git add` away from a
- * public repository.
+ * board content — an `atlas.json` and an `exported-stories.md` in the repo root,
+ * because those were the default output paths. The export carried internal
+ * infrastructure detail. Board exports are DATA: large, private to somebody's project,
+ * and never one careless `git add` away from a public repository.
  *
- * How it is enforced, in order of strength:
- *   1. Every default output path points inside `exports/`, so the common case is safe
- *      without anyone knowing the rule.
- *   2. An explicit `-o` is still honoured — writing to `~/plane-replication` or a
- *      scratch directory is legitimate and common — but if the path lands INSIDE the
- *      repository and OUTSIDE `exports/`, the command says so loudly, because that is
- *      the exact shape of the accident.
+ * Two subtleties that are easy to get wrong, and were:
+ *
+ *   1. **The root is the REPOSITORY, not the working directory.** `.gitignore`'s
+ *      `/exports/` is root-anchored, so a default resolved against a subdirectory
+ *      (`src/exports/atlas.html`) is NOT ignored — the accident, one directory over.
+ *      We therefore walk up to the enclosing `.git`, exactly as `findRepoConfigPath`
+ *      does, and fall back to the cwd when there is no repository at all. Running the
+ *      CLI inside a DIFFERENT repository correctly targets that repository's
+ *      `exports/`.
+ *   2. **"Escapes the directory" is a path-SEGMENT question.** `relative()` +
+ *      `startsWith("..")` says yes for `...hidden`, which is a perfectly ordinary file
+ *      inside the directory, so such a path would have slipped through unwarned.
  */
 export const EXPORTS_DIR = "exports";
 
-/** The default output path for a command, always inside `exports/`. */
-export function defaultExportPath(filename: string): string {
-	return resolve(process.cwd(), EXPORTS_DIR, filename);
+/**
+ * Nearest enclosing git repository, or `from` when there is none.
+ *
+ * A bare `existsSync(".git")` is not sufficient: an EMPTY `.git` directory is not a
+ * repository, and one was found sitting in `/tmp` on this machine — which would make
+ * every temp directory look like a repo root and send exports somewhere no `.gitignore`
+ * covers. Require the marker to look real: a `.git` FILE (worktrees and submodules use
+ * a gitdir pointer) or a `.git` directory containing `HEAD`.
+ */
+export function findRepoRoot(from: string = process.cwd()): string {
+	let current = resolve(from);
+	const { root } = parse(current);
+	while (true) {
+		if (looksLikeGitDir(join(current, ".git"))) return current;
+		if (current === root) return resolve(from);
+		current = dirname(current);
+	}
+}
+
+function looksLikeGitDir(candidate: string): boolean {
+	if (!existsSync(candidate)) return false;
+	try {
+		if (!statSync(candidate).isDirectory()) return true; // gitdir pointer file
+	} catch {
+		return false;
+	}
+	return existsSync(join(candidate, "HEAD"));
+}
+
+/** True when `rel` leaves its base directory — segment-wise, not by string prefix. */
+function escapes(rel: string): boolean {
+	return rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel);
+}
+
+/** The default output path for a command: always `<repo>/exports/<filename>`. */
+export function defaultExportPath(filename: string, repoRoot: string = findRepoRoot()): string {
+	return resolve(repoRoot, EXPORTS_DIR, filename);
+}
+
+/** True when `target` sits inside the repo but outside `exports/`. */
+export function isInsideRepoButNotExports(target: string, repoRoot: string): boolean {
+	const absolute = resolve(target);
+	if (escapes(relative(resolve(repoRoot), absolute))) return false;
+	return escapes(relative(resolve(repoRoot, EXPORTS_DIR), absolute));
+}
+
+export interface ResolveOutputOptions {
+	repoRoot?: string;
+	/** Injectable so the warning itself can be asserted rather than assumed. */
+	warn?: (message: string) => void;
 }
 
 /**
- * Resolve a user-supplied or default output path, create its directory, and warn when
- * it lands in the repository outside `exports/`.
+ * Resolve an output path, create its directory, and warn when an explicit path lands
+ * inside the repository but outside `exports/` — the exact shape of the accident.
  *
- * @param requested   the `-o` value, or undefined to use the default
- * @param defaultName filename used under `exports/` when nothing was requested
- * @param repoRoot    injectable for tests; defaults to the current working directory
+ * The rule warns rather than forbids: writing to a scratch directory or
+ * `~/plane-replication` is legitimate and common, and refusing it would fight real
+ * workflows. Paths outside the repository stay silent.
  */
 export function resolveOutputPath(
 	requested: string | undefined,
 	defaultName: string,
-	repoRoot: string = process.cwd(),
+	options: ResolveOutputOptions = {},
 ): string {
-	const target = requested ? resolve(process.cwd(), requested) : defaultExportPath(defaultName);
+	const repoRoot = options.repoRoot ?? findRepoRoot();
+	const warn = options.warn ?? ((message: string) => console.error(chalk.yellow(message)));
+	const target = requested
+		? resolve(process.cwd(), requested)
+		: defaultExportPath(defaultName, repoRoot);
+
 	mkdirSync(dirname(target), { recursive: true });
 
-	if (requested && isInsideRepoButNotExports(target, repoRoot)) {
-		console.error(
-			chalk.yellow(
-				`⚠ Writing board content to ${relative(repoRoot, target)}, which is inside the repository and outside ${EXPORTS_DIR}/. ` +
-					`Exports are data — large, private, and one \`git add -A\` from being committed forever. Prefer ${EXPORTS_DIR}/ or a path outside the repo.`,
-			),
+	if (isInsideRepoButNotExports(target, repoRoot)) {
+		warn(
+			`⚠ Writing board content to ${relative(repoRoot, target)}, which is inside the repository and outside ${EXPORTS_DIR}/. ` +
+				`Exports are data — large, private, and one \`git add -A\` from being committed forever. Prefer ${EXPORTS_DIR}/ or a path outside the repo.`,
 		);
 	}
 	return target;
-}
-
-/** True when `target` sits in the repo but not under `exports/`. */
-export function isInsideRepoButNotExports(target: string, repoRoot: string): boolean {
-	const fromRoot = relative(repoRoot, target);
-	const escapesRepo = fromRoot.startsWith("..") || isAbsolute(fromRoot);
-	if (escapesRepo) return false;
-	const fromExports = relative(resolve(repoRoot, EXPORTS_DIR), target);
-	const outsideExports = fromExports.startsWith("..") || isAbsolute(fromExports);
-	return outsideExports;
 }
