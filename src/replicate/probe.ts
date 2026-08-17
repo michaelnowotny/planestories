@@ -46,6 +46,8 @@ export interface ProbeClient {
 export interface TargetProbeResult {
 	dialect: PlaneEndpointDialect;
 	identifierAvailable: boolean;
+	/** No other project already holds the destination NAME (Plane rejects duplicates with 409). */
+	nameAvailable?: boolean;
 	existingProjectId: string | null;
 	memberByEmail: Record<string, string>;
 	sequencesMaxEver: boolean | null;
@@ -61,6 +63,7 @@ export interface TargetProbeResult {
 interface RawProject {
 	id: string;
 	identifier?: string;
+	name?: string;
 }
 
 interface RawMember {
@@ -242,6 +245,7 @@ function isNotFoundError(error: unknown): boolean {
 export async function probeTargetReadOnly(
 	client: ProbeClient,
 	destIdentifier: string,
+	destName?: string,
 ): Promise<TargetProbeResult> {
 	const [projects, members] = await Promise.all([
 		client.listProjects<RawProject>(),
@@ -250,6 +254,12 @@ export async function probeTargetReadOnly(
 	const existing = projects.find(
 		(project) => project.identifier?.toLowerCase() === destIdentifier.toLowerCase(),
 	);
+	// Plane rejects a duplicate project NAME with its own 409, independently of the
+	// identifier. Freeing only the identifier leaves the apply to die mid-flight on a
+	// raw API error instead of failing closed here with every other precondition.
+	const nameHolder = destName
+		? projects.find((project) => project.name === destName && project.id !== (existing?.id ?? null))
+		: undefined;
 	const memberByEmail: Record<string, string> = {};
 	for (const member of members) {
 		const id = member.member ?? member.id;
@@ -258,6 +268,7 @@ export async function probeTargetReadOnly(
 	return {
 		dialect: client.dialect,
 		identifierAvailable: !existing,
+		nameAvailable: !nameHolder,
 		existingProjectId: existing?.id ?? null,
 		memberByEmail,
 		sequencesMaxEver: null,

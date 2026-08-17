@@ -526,15 +526,27 @@ export class PlaneClient {
 	 * can record "archived inventory unavailable" instead of failing.
 	 */
 	async listArchivedWorkItems<T>(projectId: string): Promise<T[] | null> {
-		const path = `/projects/${projectId}/archived-${this.itemsSegment}/`;
-		const probe = await this.request<PlanePage<T> | T[] | null>("GET", this.workspacePath(path), {
-			query: { per_page: 100 },
-			allowNotFound: true,
-		});
-		if (probe === null) {
-			return null;
+		// Plane serves the archived list ONLY under the `work-items` spelling, on the
+		// instances that have it at all — measured 2026-08-17: cloud answers
+		// `archived-work-items/` with 200 and 404s `archived-issues/`. Deriving this
+		// path from the ITEMS dialect therefore made an `issues`-dialect source report
+		// "archived endpoint unavailable" when a definitive "nothing archived" was
+		// available, and left `verify` carrying a caveat it did not need. Try the
+		// canonical spelling first, then the dialect one, and only then conclude.
+		const candidates = ["work-items", this.itemsSegment].filter(
+			(segment, index, all) => all.indexOf(segment) === index,
+		);
+		for (const segment of candidates) {
+			const path = `/projects/${projectId}/archived-${segment}/`;
+			const probe = await this.request<PlanePage<T> | T[] | null>("GET", this.workspacePath(path), {
+				query: { per_page: 100 },
+				allowNotFound: true,
+			});
+			if (probe !== null) {
+				return this.listAll<T>(path);
+			}
 		}
-		return this.listAll<T>(path);
+		return null;
 	}
 
 	/** Archive a work item (availability varies by instance version). */

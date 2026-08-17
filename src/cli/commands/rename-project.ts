@@ -28,6 +28,8 @@ export interface RenameProjectResult {
 	current: { name: string; identifier: string };
 	proposed: { name: string; identifier: string };
 	identifierChanged: boolean;
+	/** The rename was already live when a 400/409 came back — a replayed write, not a failure. */
+	alreadyApplied?: boolean;
 }
 
 export async function renameProject(
@@ -68,13 +70,34 @@ export async function renameProject(
 		try {
 			await client.updateProject(project.id, body);
 		} catch (error) {
-			if (
-				error instanceof PlaneApiError &&
-				(error.status === 400 || error.status === 409) &&
-				options.identifier !== undefined
-			) {
+			if (error instanceof PlaneApiError && (error.status === 400 || error.status === 409)) {
+				// A10: after an ambiguous write, verify DURABLE STATE before reporting.
+				// The client replays transient failures, so a PATCH that applied but
+				// hiccupped in transport comes back as 400 "already taken" — taken by
+				// THIS project. Reporting that as a failure invites a destructive retry,
+				// which is the dangerous direction. Re-read and believe the board.
+				const after = await client.listProjects<ProjectRow>();
+				const live = after.find((candidate) => candidate.id === project.id);
+				if (
+					live &&
+					live.identifier.toLowerCase() === proposed.identifier.toLowerCase() &&
+					live.name === proposed.name
+				) {
+					return {
+						dryRun: false,
+						projectId: project.id,
+						current: { name: project.name, identifier: project.identifier },
+						proposed,
+						identifierChanged: proposed.identifier !== project.identifier,
+						alreadyApplied: true,
+					};
+				}
+				const target =
+					options.identifier !== undefined
+						? `identifier to "${options.identifier}"`
+						: `name to "${options.name}"`;
 				throw new ReplicateError(
-					`Could not rename project identifier to "${options.identifier}": it is invalid or already in use (${error.message})`,
+					`Could not rename project ${target}: it is invalid or already in use (${error.message})`,
 				);
 			}
 			throw error;

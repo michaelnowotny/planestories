@@ -14,6 +14,8 @@ export interface GateInput {
 	flags: GateFlags;
 	resume: { journalOwnsProject: string | null };
 	destIdentifier: string;
+	/** Destination project name — Plane enforces uniqueness on this separately. */
+	destName?: string;
 }
 
 export interface GateDecision {
@@ -35,6 +37,14 @@ export function decideGate(input: GateInput): GateDecision {
 	if (probe.existingProjectId && probe.existingProjectId !== input.resume.journalOwnsProject) {
 		errors.push(
 			`Destination identifier ${input.destIdentifier} is already held by project ${probe.existingProjectId}; the journal does not own it.`,
+		);
+	}
+	// The name is a SEPARATE Plane uniqueness constraint from the identifier: freeing
+	// only the identifier leaves the create to fail mid-apply on a raw 409. Fail closed
+	// here, where every other precondition is checked, and name the remedy.
+	if (probe.nameAvailable === false) {
+		errors.push(
+			`Destination project name "${input.destName}" is already taken on the target. Free it (rename the holder, e.g. \`rename-project --project <ID> --name "<something else>" --yes\`) or pass --dest-name.`,
 		);
 	}
 	if (!probe.identifierAvailable && probe.existingProjectId === null) {

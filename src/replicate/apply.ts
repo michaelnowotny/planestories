@@ -124,13 +124,14 @@ export async function applySnapshot(
 	const initialMode: IdentifierMode = options.flags.noExactIdentifiers ? "renumber" : "exact";
 
 	if (!options.yes) {
-		const probe = await probeTargetReadOnly(client, destIdentifier);
+		const probe = await probeTargetReadOnly(client, destIdentifier, destName);
 		const gate = decideGate({
 			snapshot,
 			probe,
 			flags: options.flags,
 			resume: { journalOwnsProject: null },
 			destIdentifier,
+			destName,
 		});
 		progress(formatGateProgress(gate.errors, gate.warnings, snapshot, true));
 		if (!gate.ok) throw new ReplicateError(gate.errors.join("\n"));
@@ -171,6 +172,7 @@ export async function applySnapshot(
 					snapshot,
 					probe,
 					flags: options.flags,
+					destName,
 					resume: { journalOwnsProject: journal.projectCreated?.projectId ?? null },
 					destIdentifier,
 				});
@@ -180,7 +182,7 @@ export async function applySnapshot(
 
 		let probe = journal?.probeEntry?.probe;
 		if (!probe) {
-			const readOnly = await probeTargetReadOnly(client, destIdentifier);
+			const readOnly = await probeTargetReadOnly(client, destIdentifier, destName);
 			progress("Running empirical target capability probe in a temporary project...");
 			probe = await probeTargetEmpirical(client, readOnly, snapshotNeeds(snapshot), {
 				warn: progress,
