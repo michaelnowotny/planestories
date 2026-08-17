@@ -98,6 +98,36 @@ on some self-hosted versions. When a source's archived inventory is genuinely
 unavailable, sequence gaps cannot be distinguished from invisible archived items, and the
 gate fails closed until `--assume-gaps-deleted` is passed deliberately.
 
+## The divergence guard
+
+`apply` refuses to write to a destination that holds items the snapshot has never
+seen. This is the protection that matters most after a cutover: once the destination
+becomes the authoritative board it starts accumulating work the source knows nothing
+about — folded criteria, new tickets, edits — and applying a stale snapshot over it
+destroys that work **silently, totally and irreversibly**.
+
+```
+Destination project DATA holds 7 item(s) this snapshot has never seen
+(DATA-2568, DATA-2569, DATA-2570, DATA-2571, DATA-2572, and 2 more). The destination
+has diverged from this snapshot — applying it would overwrite that work irreversibly.
+Re-snapshot the destination if it is now authoritative, or pass
+--allow-divergent-target if you truly mean to overwrite it.
+```
+
+Three properties worth knowing:
+
+- **It compares CONTENT, not ownership.** The journal-ownership check is a different
+  protection, and it is satisfied the moment somebody frees the destination identifier —
+  which is exactly the ritual a normal cutover teaches. Being *able* to perform that
+  ritual must not be the same thing as being *allowed* to destroy a week of work.
+- **It fails closed on ignorance.** If the destination's inventory cannot be enumerated,
+  the run refuses rather than assuming the destination is empty.
+- **`--recreate-target` does not bypass it.** That flag destroys precisely the items the
+  guard exists to protect, so it is checked too.
+
+Only `--allow-divergent-target` proceeds, and it downgrades the refusal to a warning
+that says the divergent work will be overwritten.
+
 ## Crash safety and resume
 
 Every real apply writes an append-only, fsync'd JSONL **journal** next to the

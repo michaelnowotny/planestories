@@ -10,6 +10,7 @@ export interface ProbeClient {
 	readonly dialect: PlaneEndpointDialect;
 	listProjects<T>(): Promise<T[]>;
 	listWorkspaceMembers<T>(): Promise<T[]>;
+	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	createProject<T>(body: Record<string, unknown>, opts?: { maxRetries?: number }): Promise<T>;
 	deleteProject(projectId: string): Promise<void>;
 	createWorkItem<T>(
@@ -48,6 +49,12 @@ export interface TargetProbeResult {
 	identifierAvailable: boolean;
 	/** No other project already holds the destination NAME (Plane rejects duplicates with 409). */
 	nameAvailable?: boolean;
+	/**
+	 * Sequence ids already present in the destination project, or null when the
+	 * destination does not exist. UNDEFINED means "could not enumerate" — the gate
+	 * must fail closed on that rather than assume emptiness.
+	 */
+	targetSequenceIds?: number[] | null;
 	existingProjectId: string | null;
 	memberByEmail: Record<string, string>;
 	sequencesMaxEver: boolean | null;
@@ -265,10 +272,30 @@ export async function probeTargetReadOnly(
 		const id = member.member ?? member.id;
 		if (id && member.email) memberByEmail[member.email.toLowerCase()] = id;
 	}
+	// Enumerate what the destination already holds so the gate can detect divergence.
+	// undefined = "could not enumerate" (the gate fails closed on that); null = no
+	// destination project at all.
+	let targetSequenceIds: number[] | null | undefined;
+	if (!existing) {
+		targetSequenceIds = null;
+	} else {
+		try {
+			const live = await client.listWorkItems<{ sequence_id?: number }>(existing.id);
+			const archived =
+				(await client.listArchivedWorkItems<{ sequence_id?: number }>(existing.id)) ?? [];
+			targetSequenceIds = [...live, ...archived]
+				.map((item) => item.sequence_id)
+				.filter((sequenceId): sequenceId is number => typeof sequenceId === "number");
+		} catch {
+			targetSequenceIds = undefined;
+		}
+	}
+
 	return {
 		dialect: client.dialect,
 		identifierAvailable: !existing,
 		nameAvailable: !nameHolder,
+		targetSequenceIds,
 		existingProjectId: existing?.id ?? null,
 		memberByEmail,
 		sequencesMaxEver: null,

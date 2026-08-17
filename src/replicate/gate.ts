@@ -6,6 +6,8 @@ export interface GateFlags {
 	noExactIdentifiers: boolean;
 	assumeGapsDeleted: boolean;
 	recreateTarget: boolean;
+	/** Proceed even though the destination holds items absent from the snapshot. */
+	allowDivergentTarget?: boolean;
 }
 
 export interface GateInput {
@@ -42,6 +44,39 @@ export function decideGate(input: GateInput): GateDecision {
 	// The name is a SEPARATE Plane uniqueness constraint from the identifier: freeing
 	// only the identifier leaves the create to fail mid-apply on a raw 409. Fail closed
 	// here, where every other precondition is checked, and name the remedy.
+	// DIVERGENCE GUARD. After a cutover the destination is the authoritative board and
+	// accumulates work the snapshot never saw; applying a stale snapshot over it destroys
+	// that work silently, totally and irreversibly. Ownership is NOT a sufficient proxy:
+	// the journal-ownership check is satisfied the moment somebody frees the identifier,
+	// which is exactly the ritual a normal cutover teaches. Compare CONTENT.
+	if (probe.existingProjectId !== null) {
+		const known = new Set(input.snapshot.items.map((item) => item.sequenceId));
+		if (probe.targetSequenceIds === undefined) {
+			errors.push(
+				"Could not enumerate the destination project's existing items, so divergence cannot be ruled out. Refusing rather than assuming the destination is safe to overwrite.",
+			);
+		} else if (probe.targetSequenceIds !== null) {
+			const unknown = probe.targetSequenceIds.filter((sequenceId) => !known.has(sequenceId));
+			if (unknown.length > 0) {
+				const examples = unknown
+					.slice(0, 5)
+					.map((sequenceId) => `${input.destIdentifier}-${sequenceId}`)
+					.join(", ");
+				const more = unknown.length > 5 ? `, and ${unknown.length - 5} more` : "";
+				const detail = `Destination project ${input.destIdentifier} holds ${unknown.length} item(s) this snapshot has never seen (${examples}${more}).`;
+				if (flags.allowDivergentTarget) {
+					warnings.push(
+						`${detail} Proceeding because --allow-divergent-target was passed; work only on the destination WILL be overwritten.`,
+					);
+				} else {
+					errors.push(
+						`${detail} The destination has diverged from this snapshot — applying it would overwrite that work irreversibly. Re-snapshot the destination if it is now authoritative, or pass --allow-divergent-target if you truly mean to overwrite it.`,
+					);
+				}
+			}
+		}
+	}
+
 	if (probe.nameAvailable === false) {
 		errors.push(
 			`Destination project name "${input.destName}" is already taken on the target. Free it (rename the holder, e.g. \`rename-project --project <ID> --name "<something else>" --yes\`) or pass --dest-name.`,

@@ -132,6 +132,7 @@ interface ApplyCliOptions {
 	recreateTarget?: boolean;
 	exactIdentifiers?: boolean; // commander's --no-exact-identifiers
 	assumeGapsDeleted?: boolean;
+	allowDivergentTarget?: boolean;
 	allowSqlFinalize?: boolean;
 }
 
@@ -174,6 +175,7 @@ async function runApply(
 			allowSqlFinalize: options.allowSqlFinalize === true,
 			noExactIdentifiers: options.exactIdentifiers === false,
 			assumeGapsDeleted: options.assumeGapsDeleted === true,
+			allowDivergentTarget: options.allowDivergentTarget === true,
 			recreateTarget: options.recreateTarget === true,
 		},
 		journalPath,
@@ -225,6 +227,10 @@ export function registerReplicateCommand(program: Command) {
 		.option("--limit <n>", "Pause after N item creates (resumable)")
 		.option("--recreate-target", "Drop the run-created target project and start over")
 		.option("--no-exact-identifiers", "Accept renumbering instead of exact PROJECT-N")
+		.option(
+			"--allow-divergent-target",
+			"Proceed even though the destination holds items this snapshot has never seen (they WILL be overwritten)",
+		)
 		.option(
 			"--assume-gaps-deleted",
 			"Treat sequence gaps as deletions when archived inventory is unavailable",
@@ -369,6 +375,10 @@ export function registerReplicateCommand(program: Command) {
 		.option("--limit <n>", "Pause after N item creates (resumable)")
 		.option("--recreate-target", "Drop the run-created target project and start over")
 		.option("--no-exact-identifiers", "Accept renumbering instead of exact PROJECT-N")
+		.option(
+			"--allow-divergent-target",
+			"Proceed even though the destination holds items this snapshot has never seen (they WILL be overwritten)",
+		)
 		.option(
 			"--assume-gaps-deleted",
 			"Treat sequence gaps as deletions when archived inventory is unavailable",
