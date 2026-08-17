@@ -428,7 +428,7 @@ planestories doctor --from-snapshot backups/data.ce-archimedes.20260817-052043Z.
 `--house-rules` flags open non-epic stories without a valid `**Effort:** N dev-days` line,
 and open work whose board-authored `Depends on:` / `Blocks:` prose lacks the matching relation.
 
-`--from-snapshot` analyses a snapshot file instead of the live board: **zero API calls, works
+`--from-snapshot` (also on `atlas`, `export`, `packet`, `epic`) analyses a snapshot file instead of the live board: **zero API calls, works
 offline, and possible when the instance is rate-limiting you**. On a 2,558-item board a live
 `doctor` needs ~800 requests and can take many minutes (or fail outright against a throttled
 instance); from a snapshot the same analysis takes under a second. The report always states the

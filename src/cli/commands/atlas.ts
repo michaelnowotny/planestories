@@ -15,6 +15,12 @@ import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
 import { isCriterionChild } from "../../sync/board-story.ts";
 import { reportPacing } from "../pacing.ts";
+import {
+	announceSnapshotSource,
+	asClient,
+	FROM_SNAPSHOT_HELP,
+	openSnapshotSource,
+} from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -73,6 +79,7 @@ export function registerAtlasCommand(program: Command) {
 			"--no-dependencies",
 			"Skip fetching dependency relations for the live board (faster; hierarchy only)",
 		)
+		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (file: string | undefined, options) => {
 			try {
 				let graph: AtlasGraph;
@@ -88,22 +95,29 @@ export function registerAtlasCommand(program: Command) {
 						configPath: options.config,
 						context: options.context,
 					});
-					const projectName = options.project ?? config.defaultProject;
+					const snapshotSource = options.fromSnapshot
+						? await openSnapshotSource(String(options.fromSnapshot))
+						: null;
+					if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
+					const projectName =
+						options.project ?? snapshotSource?.projectName ?? config.defaultProject;
 					if (!projectName) {
 						throw new ConfigError(
 							"Provide a <file> argument, or --project <name> (or a defaultProject) to render the live board.",
 						);
 					}
-					const client = createPlaneClient({
-						apiKey: config.apiKey,
-						workspaceSlug: config.workspaceSlug,
-						baseUrl: config.baseUrl,
-						maxRetries: config.maxRetries,
-						dialect: config.dialect,
-						requestsPerMinute: config.apiRateLimit,
-						rateHeadroom: config.rateHeadroom,
-						maxConcurrency: config.maxConcurrency,
-					});
+					const client = snapshotSource
+						? asClient(snapshotSource)
+						: createPlaneClient({
+								apiKey: config.apiKey,
+								workspaceSlug: config.workspaceSlug,
+								baseUrl: config.baseUrl,
+								maxRetries: config.maxRetries,
+								dialect: config.dialect,
+								requestsPerMinute: config.apiRateLimit,
+								rateHeadroom: config.rateHeadroom,
+								maxConcurrency: config.maxConcurrency,
+							});
 					pacedClient = client;
 					const resolver = new Resolver(client);
 					const project = await resolver.resolveProject(projectName);

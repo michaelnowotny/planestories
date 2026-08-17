@@ -6,6 +6,12 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { createPlaneClient } from "../../plane/client.ts";
 import { generatePacket } from "../../sync/packet.ts";
 import { reportPacing } from "../pacing.ts";
+import {
+	announceSnapshotSource,
+	asClient,
+	FROM_SNAPSHOT_HELP,
+	openSnapshotSource,
+} from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -40,19 +46,26 @@ export function registerPacketCommand(program: Command) {
 			"Project the identifier belongs to (defaults to defaultProject)",
 		)
 		.option("-o, --output <file>", "Write the packet to a file instead of stdout")
+		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (identifier: string, options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
-				const client = createPlaneClient({
-					apiKey: config.apiKey,
-					workspaceSlug: config.workspaceSlug,
-					baseUrl: config.baseUrl,
-					maxRetries: config.maxRetries,
-					dialect: config.dialect,
-					requestsPerMinute: config.apiRateLimit,
-					rateHeadroom: config.rateHeadroom,
-					maxConcurrency: config.maxConcurrency,
-				});
+				const snapshotSource = options.fromSnapshot
+					? await openSnapshotSource(String(options.fromSnapshot))
+					: null;
+				if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
+				const client = snapshotSource
+					? asClient(snapshotSource)
+					: createPlaneClient({
+							apiKey: config.apiKey,
+							workspaceSlug: config.workspaceSlug,
+							baseUrl: config.baseUrl,
+							maxRetries: config.maxRetries,
+							dialect: config.dialect,
+							requestsPerMinute: config.apiRateLimit,
+							rateHeadroom: config.rateHeadroom,
+							maxConcurrency: config.maxConcurrency,
+						});
 
 				const { markdown, packet } = await generatePacket(client, {
 					config,

@@ -1,4 +1,4 @@
-import type { PlaneIssueRelations } from "../plane/client.ts";
+import { deriveWebBaseUrl, type PlaneIssueRelations } from "../plane/client.ts";
 import type { ProjectSnapshot, SnapshotRelations } from "./types.ts";
 
 /**
@@ -25,6 +25,8 @@ export class SnapshotSource {
 	readonly projectIdentifier: string;
 	readonly projectName: string;
 	private readonly snapshot: ProjectSnapshot;
+	readonly workspaceSlug: string;
+	private readonly webBaseUrl: string;
 	private readonly stateById: Map<string, { id: string; name: string; group: string }>;
 	private readonly labelById: Map<string, { id: string; name: string }>;
 
@@ -35,6 +37,8 @@ export class SnapshotSource {
 		this.projectId = snapshot.source.projectId;
 		this.projectIdentifier = snapshot.project.identifier;
 		this.projectName = snapshot.project.name;
+		this.workspaceSlug = snapshot.source.workspaceSlug;
+		this.webBaseUrl = deriveWebBaseUrl(snapshot.source.baseUrl);
 		this.stateById = new Map(
 			snapshot.states.map((state) => [
 				state.id,
@@ -125,6 +129,18 @@ export class SnapshotSource {
 
 	async listWorkItemComments<T>(_projectId: string, workItemId: string): Promise<T[]> {
 		return (this.snapshot.comments[workItemId] ?? []) as unknown as T[];
+	}
+
+	/**
+	 * Browser URLs are derived from the snapshot's OWN source instance, so a packet
+	 * built offline still links back to the board the data came from.
+	 */
+	workItemWebUrl(projectId: string, workItemId: string): string {
+		return `${this.webBaseUrl}/${this.workspaceSlug}/projects/${projectId}/issues/${workItemId}`;
+	}
+
+	projectWebUrl(projectId: string): string {
+		return `${this.webBaseUrl}/${this.workspaceSlug}/projects/${projectId}/issues`;
 	}
 
 	/** One line every consuming command must print, so a stale answer is never mistaken for a live one. */

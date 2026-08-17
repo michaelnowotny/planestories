@@ -6,6 +6,12 @@ import { createPlaneClient } from "../../plane/client.ts";
 import { exportStories } from "../../sync/exporter.ts";
 import type { ExportFilters } from "../../types.ts";
 import { reportPacing } from "../pacing.ts";
+import {
+	announceSnapshotSource,
+	asClient,
+	FROM_SNAPSHOT_HELP,
+	openSnapshotSource,
+} from "../snapshot_option.ts";
 
 /** Commander collector for repeatable options (e.g. multiple --status). */
 function collect(value: string, previous: string[]): string[] {
@@ -58,19 +64,26 @@ export function registerExportCommand(program: Command) {
 			"Orphan worksheet: only non-epic stories with no parent, plus an epics directory header",
 			false,
 		)
+		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
-				const client = createPlaneClient({
-					apiKey: config.apiKey,
-					workspaceSlug: config.workspaceSlug,
-					baseUrl: config.baseUrl,
-					maxRetries: config.maxRetries,
-					dialect: config.dialect,
-					requestsPerMinute: config.apiRateLimit,
-					rateHeadroom: config.rateHeadroom,
-					maxConcurrency: config.maxConcurrency,
-				});
+				const snapshotSource = options.fromSnapshot
+					? await openSnapshotSource(String(options.fromSnapshot))
+					: null;
+				if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
+				const client = snapshotSource
+					? asClient(snapshotSource)
+					: createPlaneClient({
+							apiKey: config.apiKey,
+							workspaceSlug: config.workspaceSlug,
+							baseUrl: config.baseUrl,
+							maxRetries: config.maxRetries,
+							dialect: config.dialect,
+							requestsPerMinute: config.apiRateLimit,
+							rateHeadroom: config.rateHeadroom,
+							maxConcurrency: config.maxConcurrency,
+						});
 
 				const filters: ExportFilters = {};
 				if (options.project) filters.project = options.project;
