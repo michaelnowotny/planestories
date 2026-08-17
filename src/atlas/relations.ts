@@ -32,16 +32,27 @@ export async function fetchRelationsWithSweep(
 	projectId: string,
 	items: ReadonlyArray<{ id: string }>,
 	concurrency = client.concurrency?.() ?? 4,
+	onProgress?: (done: number, total: number) => void,
 ): Promise<RelationsFetchResult> {
 	const failedItems: Array<{ id: string }> = [];
+	let done = 0;
+	const total = items.length;
 	const pairs = await mapWithConcurrency([...items], concurrency, async (item) => {
+		try {
+			return await fetchOne(item);
+		} finally {
+			done++;
+			onProgress?.(done, total);
+		}
+	});
+	async function fetchOne(item: { id: string }) {
 		try {
 			return [item.id, await client.getRelations(projectId, item.id)] as const;
 		} catch {
 			failedItems.push(item);
 			return null;
 		}
-	});
+	}
 	const relationsById = new Map<string, PlaneIssueRelations>(
 		pairs.filter((p): p is readonly [string, PlaneIssueRelations] => p !== null),
 	);

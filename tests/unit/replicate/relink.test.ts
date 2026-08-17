@@ -118,7 +118,9 @@ describe("replicate relink", () => {
 		const valid = join(nested, "valid.md");
 		const invalid = join(ctx.dir, "corpus", "invalid.md");
 		writeFileSync(valid, linked);
-		writeFileSync(invalid, "no stories here\n");
+		// Claims a plane_id (so relink must rewrite it) but has no H2 story heading:
+		// this is the case that must still abort before any write.
+		writeFileSync(invalid, "plane_id: 11111111-1111-4111-8111-111111111111\nno stories here\n");
 		try {
 			expect(() =>
 				relinkMarkdownCorpus(target, ctx.snapshot, {
@@ -128,6 +130,36 @@ describe("replicate relink", () => {
 				}),
 			).toThrow(/No H2 headings/);
 			expect(readFileSync(valid, "utf8")).toBe(linked);
+		} finally {
+			rmSync(ctx.dir, { recursive: true, force: true });
+		}
+	});
+
+	test("unrelated markdown in the tree is skipped, not fatal (the real cutover incident)", () => {
+		const ctx = fixture();
+		const dir = join(ctx.dir, "corpus");
+		mkdirSync(dir, { recursive: true });
+		const story = join(dir, "story.md");
+		const planningDoc = join(dir, "architecture.md");
+		writeFileSync(story, linked);
+		// A planning doc containing a docker-compose example: a fenced YAML block with
+		// TWO `environment:` keys. This killed a real relink run over planning/.
+		writeFileSync(
+			planningDoc,
+			"# Architecture\n\n```yaml\nservices:\n  api:\n    environment:\n      - A=1\n    environment:\n      - B=2\n```\n",
+		);
+		try {
+			const result = relinkMarkdownCorpus(target, ctx.snapshot, {
+				paths: [dir],
+				journalPath: ctx.journalPath,
+				yes: true,
+			});
+			// The story is rewritten; the planning doc is reported skipped, untouched.
+			expect(result.filesChanged).toBe(1);
+			const docResult = result.files.find((f) => f.path === planningDoc);
+			expect(docResult?.skipped).toBe(true);
+			expect(docResult?.rewrites).toBe(0);
+			expect(readFileSync(planningDoc, "utf8")).toContain("environment:");
 		} finally {
 			rmSync(ctx.dir, { recursive: true, force: true });
 		}

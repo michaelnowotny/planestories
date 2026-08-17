@@ -41,4 +41,17 @@ registerEpicCommand(program);
 registerReplicateCommand(program);
 registerRenameProjectCommand(program);
 
-program.parse();
+// Long runs were observed idling for ~45 MINUTES after their final output, because a
+// lingering keep-alive socket keeps the runtime alive long after every write has been
+// awaited. That made "finished" indistinguishable from "hung" and nearly cost a user a
+// completed migration. Exit deliberately once the command's work is done, preserving
+// whatever exit code the command set.
+program
+	.parseAsync()
+	.then(() => {
+		process.exit(process.exitCode ?? 0);
+	})
+	.catch((error) => {
+		console.error(error instanceof Error ? error.message : String(error));
+		process.exit(1);
+	});

@@ -143,7 +143,9 @@ export class Resolver {
 				// Warn once per distinct label, and name the remedy.
 				if (!this.warnedMissingLabels.has(key)) {
 					this.warnedMissingLabels.add(key);
-					console.warn(`Label not found, skipping: "${name}" — pass --create-labels to create it`);
+					console.warn(
+						`⚠ Label not found, NOT applied: "${name}" — the item will be created without it. Pass --create-labels to create it.`,
+					);
 				}
 				continue;
 			}

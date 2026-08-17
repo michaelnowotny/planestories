@@ -79,7 +79,23 @@ export function registerDoctorCommand(program: Command) {
 					options.project ?? config.defaultProject ?? report.project,
 				);
 				const index = await fetchProjectIndex(client, project.id, project.identifier);
-				const graph = await checkDependencyGraph(client, project.id, project.identifier, index);
+				// Doctor's relation sweep is one GET per non-criterion item — ~800 on a large board,
+				// and against a rate-limited instance it can run for many minutes. Silence there is
+				// indistinguishable from a hang, so report progress on a throttled stderr line
+				// (stderr keeps --json output clean).
+				let lastTick = 0;
+				const graph = await checkDependencyGraph(
+					client,
+					project.id,
+					project.identifier,
+					index,
+					(done, total) => {
+						if (done !== total && done - lastTick < 25) return;
+						lastTick = done;
+						process.stderr.write(`\r  scanning dependencies ${done}/${total}...`);
+						if (done === total) process.stderr.write("\n");
+					},
+				);
 
 				// Criteria-representation drift (legacy ::ac<n> children vs the
 				// description task-list model). Points the operator at `migrate-criteria`.

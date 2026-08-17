@@ -115,7 +115,7 @@ describe("archived list: try the canonical spelling before concluding 'unavailab
 	): Promise<T> {
 		const asked: string[] = [];
 		const original = globalThis.fetch;
-		globalThis.fetch = (async (input: RequestInfo | URL) => {
+		globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
 			const url = String(input);
 			asked.push(url);
 			return handler(url);

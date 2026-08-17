@@ -139,6 +139,22 @@ function prepareFile(
 	_header: JournalHeader,
 ): PreparedFile {
 	const original = readFileSync(path, "utf8");
+	// A directory of markdown is mostly NOT story files. Skip anything with no
+	// plane_id before parsing: a real cutover died here because an unrelated
+	// planning doc contained a docker-compose example whose fenced YAML has two
+	// `environment:` keys, and the parser refused it. A file we would never
+	// rewrite must not be able to fail the run.
+	if (!/^\s*plane_id\s*:/m.test(original)) {
+		return {
+			path,
+			original,
+			transformed: original,
+			result: { path, rewrites: 0, unmatchedPlaneIds: [], skipped: true },
+		};
+	}
+	// A plane_id-bearing file that will not parse STILL aborts the run: it is a file we
+	// would have had to rewrite, and silently skipping it would leave dead source UUIDs
+	// behind — precisely the breakage relink exists to prevent.
 	const parsed = parseMarkdownFile(original, path);
 	const unmatchedPlaneIds = [
 		...new Set(
