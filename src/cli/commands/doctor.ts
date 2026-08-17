@@ -13,7 +13,7 @@ import { groom } from "../../sync/groomer.ts";
 import { checkHouseRules, type HouseRuleFindings } from "../../sync/house_rules.ts";
 import { checkCriteriaMigration } from "../../sync/migrate.ts";
 import { reportPacing } from "../pacing.ts";
-import { announceSnapshotSource } from "../snapshot_option.ts";
+import { announceSnapshotSource, snapshotProvenance } from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -151,9 +151,7 @@ export function registerDoctorCommand(program: Command) {
 				const reportObject = assembleDoctorReport(
 					{
 						project: project.identifier,
-						...(snapshotSource
-							? { source: { kind: "snapshot" as const, takenAt: snapshotSource.takenAt } }
-							: {}),
+						...snapshotProvenance(snapshotSource),
 						findings: baseFindings,
 						orphanedCriteria: report.orphanedCriteria,
 						duplicateTitles: report.duplicateTitles,

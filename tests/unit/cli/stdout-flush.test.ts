@@ -31,3 +31,20 @@ test("a healthy run still exits promptly (the notice is unref'd)", async () => {
 	await proc.exited;
 	expect(performance.now() - started).toBeLessThan(3000);
 });
+
+test("the linger notice describes the situation without over-promising", async () => {
+	// On a PIPE the runtime may be alive precisely because the consumer has not
+	// finished reading, so telling the user to interrupt would invite them to truncate
+	// their own output. And a FAILED command must never be described as complete.
+	const fixture = join(import.meta.dir, "fixtures-linger-notice.ts");
+	const ok = Bun.spawnSync(["bun", "run", fixture, "ok"], { stderr: "pipe" }).stderr.toString();
+	expect(ok).toContain("its work is finished");
+	expect(ok).not.toMatch(/interrupting is safe/i); // stderr here is a pipe, not a TTY
+	expect(ok).toMatch(/could truncate/i);
+
+	const failed = Bun.spawnSync(["bun", "run", fixture, "fail"], {
+		stderr: "pipe",
+	}).stderr.toString();
+	expect(failed).toContain("has failed");
+	expect(failed).not.toContain("its work is finished");
+});

@@ -19,9 +19,13 @@ export async function openSnapshotSource(file: string): Promise<SnapshotSource> 
 	return new SnapshotSource(parseSnapshot(await handle.text()));
 }
 
-/** Announce provenance on stderr, so `--json` stdout stays machine-clean. */
-export function announceSnapshotSource(source: SnapshotSource, json: boolean): void {
-	if (json) return;
+/**
+ * Announce provenance on stderr — ALWAYS, including in `--json` mode. stderr does not
+ * pollute a machine-readable stdout, and a human running `--json` in a terminal should
+ * still be told the data is from a file and how old it is. The payload carries the same
+ * fact in `source` for anything reading the artifact later.
+ */
+export function announceSnapshotSource(source: SnapshotSource, _json = false): void {
 	console.error(chalk.dim(source.provenance()));
 }
 
@@ -32,3 +36,15 @@ export function asClient(source: SnapshotSource): PlaneClient {
 
 export const FROM_SNAPSHOT_HELP =
 	"Read a snapshot file instead of the live board: ZERO API calls, works offline, and possible when the instance is rate-limiting you. Output states the snapshot's age.";
+
+/**
+ * The provenance field embedded in machine-readable output. It lives here, and is
+ * tested through the actual command, because a stored `--json` artifact that omits it
+ * is indistinguishable from a live reading — and a test that merely passes this object
+ * through a helper would not notice if a command stopped calling it.
+ */
+export function snapshotProvenance(source: SnapshotSource | null): {
+	source?: { kind: "snapshot"; takenAt: string };
+} {
+	return source ? { source: { kind: "snapshot", takenAt: source.takenAt } } : {};
+}
