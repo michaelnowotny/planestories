@@ -14,6 +14,15 @@ export interface LoadConfigOptions {
 	cwd?: string;
 	/** Named context to select from a multi-context config */
 	context?: string;
+	/**
+	 * Skip ONLY the API-key/workspace-slug assertions. Used by the `--from-snapshot`
+	 * path, which reads a file and never builds a client, so demanding credentials
+	 * there would make an offline feature require secrets. Everything else — file
+	 * discovery, shape validation, dialect and rate-limit parsing — still applies and
+	 * still throws, so a malformed config or a bad `--config` path is never silently
+	 * swallowed.
+	 */
+	requireCredentials?: boolean;
 }
 
 /**
@@ -171,6 +180,15 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 		config.sourceLabel = process.env.PLANE_SOURCE_LABEL;
 	}
 
+	if (options?.requireCredentials === false) {
+		// Credentials are genuinely optional here; everything above has already been
+		// validated, so a present config file is fully honoured (defaultProject and
+		// friends survive) and only the two secret assertions are skipped. baseUrl is
+		// left as the file supplied it — no production default is invented for a path
+		// that must never look like a live instance.
+		return resolveConfig(config, { allowMissingCredentials: true });
+	}
+
 	if (!config.apiKey) {
 		throw new ConfigError(
 			options?.context
@@ -266,11 +284,17 @@ async function readConfigFile(filePath: string): Promise<unknown> {
  * Converts a validated CliConfig into a fully-resolved ResolvedConfig,
  * filling in defaults for optional fields.
  */
-function resolveConfig(config: CliConfig): ResolvedConfig {
+function resolveConfig(
+	config: CliConfig,
+	options: { allowMissingCredentials?: boolean } = {},
+): ResolvedConfig {
 	return {
 		apiKey: config.apiKey as string,
 		workspaceSlug: config.workspaceSlug as string,
-		baseUrl: config.baseUrl ?? DEFAULT_PLANE_BASE_URL,
+		// On the credential-free path, do NOT invent the production base URL: a
+		// snapshot run must never look like a live instance, and an empty string is
+		// visibly not one. With credentials, the default is correct as before.
+		baseUrl: config.baseUrl ?? (options.allowMissingCredentials ? "" : DEFAULT_PLANE_BASE_URL),
 		dialect: config.dialect ?? "issues",
 		defaultProject: config.defaultProject ?? null,
 		defaultLabels: config.defaultLabels ?? [],

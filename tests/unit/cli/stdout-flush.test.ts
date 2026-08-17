@@ -47,4 +47,12 @@ test("the linger notice describes the situation without over-promising", async (
 	}).stderr.toString();
 	expect(failed).toContain("has failed");
 	expect(failed).not.toContain("its work is finished");
+
+	// The TTY branch is a REAL branch, not dead wording: collapsing both cases to the
+	// (safer) pipe sentence must fail this test. The fixture stands in for a terminal.
+	const tty = Bun.spawnSync(["bun", "run", fixture, "ok", "tty"], {
+		stderr: "pipe",
+	}).stderr.toString();
+	expect(tty).toMatch(/interrupting is safe/i);
+	expect(tty).not.toMatch(/could truncate/i);
 });

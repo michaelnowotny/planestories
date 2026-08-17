@@ -1,0 +1,53 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadConfigForSnapshot } from "../../../src/cli/snapshot_option.ts";
+
+/**
+ * The offline path must not require credentials — but it must not become a place where
+ * config errors go to die either. Only the two secret assertions are optional.
+ */
+describe("loadConfigForSnapshot", () => {
+	function withDir<T>(run: (dir: string) => T): T {
+		const dir = mkdtempSync(join(tmpdir(), "planestories-cfg-"));
+		try {
+			return run(dir);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}
+
+	test("a present config file is HONOURED, not discarded", async () => {
+		await withDir(async (dir) => {
+			const file = join(dir, "conventions.json");
+			writeFileSync(file, JSON.stringify({ defaultProject: "DATA", defaultLabels: ["ops"] }));
+			const config = await loadConfigForSnapshot(file, undefined);
+			// The bug this pins: a catch-all fallback returned neutral defaults and
+			// silently threw the user's conventions away.
+			expect(config.defaultProject).toBe("DATA");
+			expect(config.defaultLabels).toEqual(["ops"]);
+		});
+	});
+
+	test("no credentials is fine, and no production URL is invented", async () => {
+		const config = await loadConfigForSnapshot(undefined, undefined);
+		expect(config.defaultProject === null || typeof config.defaultProject === "string").toBe(true);
+		// A snapshot run must never look like a live instance.
+		expect(config.baseUrl).not.toContain("api.plane.so");
+	});
+
+	test("a malformed config still fails LOUDLY", async () => {
+		await withDir(async (dir) => {
+			const file = join(dir, "broken.json");
+			writeFileSync(file, "{not json");
+			await expect(loadConfigForSnapshot(file, undefined)).rejects.toThrow();
+		});
+	});
+
+	test("a missing --config path still fails LOUDLY", async () => {
+		await expect(loadConfigForSnapshot("/no/such/config.json", undefined)).rejects.toThrow(
+			/not found/i,
+		);
+	});
+});

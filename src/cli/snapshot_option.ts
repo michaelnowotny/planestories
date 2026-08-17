@@ -54,32 +54,19 @@ export function snapshotProvenance(source: SnapshotSource | null): {
 /**
  * Config loading for a snapshot-backed run.
  *
- * `--from-snapshot` advertises that it works OFFLINE, and that has to be literally
- * true: reading a file must not require credentials. But every command loads config
- * first, and `loadConfig` refuses to start without an API key — so on a machine
- * without `.env` (a fresh clone, a CI job, a laptop on a plane) the offline path
- * could not boot, and the help text was a lie.
+ * `--from-snapshot` advertises that it works OFFLINE, so reading a file must not
+ * require credentials — every command loads config before it reads the snapshot, and
+ * `loadConfig` otherwise refuses to start without an API key.
  *
- * When a snapshot is supplied we therefore tolerate a missing/incomplete config and
- * fall back to neutral defaults. Nothing here can reach the network: no client is
- * built from it. A config that IS present is still honoured, so `defaultProject` and
- * friends keep working.
+ * This does NOT swallow config errors. Only the two secret assertions are skipped; a
+ * present config file is fully resolved (so `defaultProject` and friends still apply),
+ * and a malformed `.planestoriesrc.json` or a bad `--config` path still fails loudly —
+ * those are things the user wants to hear about, and hiding them would be the same
+ * silent-fallback habit this tool exists to avoid.
  */
 export async function loadConfigForSnapshot(
 	configPath: string | undefined,
 	context: string | undefined,
 ): Promise<ResolvedConfig> {
-	try {
-		return await loadConfig({ configPath, context });
-	} catch {
-		return {
-			apiKey: "",
-			workspaceSlug: "",
-			baseUrl: "",
-			defaultProject: null,
-			defaultLabels: [],
-			sourceLabel: null,
-			maxRetries: 0,
-		};
-	}
+	return loadConfig({ configPath, context, requireCredentials: false });
 }
