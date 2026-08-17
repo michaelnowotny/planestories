@@ -44,3 +44,12 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Vercel
 .vercel
+
+# Default CLI output paths. These are working artifacts of a real run — they contain
+# whole-board content (and can carry internal infrastructure detail), and a stray
+# `git add -A` after a smoke test is exactly how they end up in history forever.
+/atlas.json
+/atlas.html
+/exported-stories.md
+/*.snapshot.json
+/*.snapshot.json.apply-*.journal.jsonl
