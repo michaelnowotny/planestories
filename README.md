@@ -548,8 +548,10 @@ existing Plane Cloud behavior because its actual limit is not assumed.
 
 ## Where exports go
 
-Everything planestories writes out of a board — atlas renders, story exports, spec packets,
-snapshots, reports — defaults to **`exports/`**, which is gitignored. Board exports are data:
+The board-reading commands — `atlas`, `export`, `packet` — default to **`exports/`** at the
+repository root, which is gitignored. (Replication artifacts are different: `replicate snapshot`,
+`verify` and `backup` all require an explicit path and belong outside the repo — see
+[`docs/REPLICATE.md`](docs/REPLICATE.md).) Board exports are data:
 large, private to your project, and occasionally carrying details you would not publish. Keeping
 them in one ignored directory means a stray `git add -A` cannot commit your board.
 

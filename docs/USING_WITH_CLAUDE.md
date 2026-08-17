@@ -172,8 +172,8 @@ bun run src/cli/index.ts replicate backup --from cloud -p "My Project" --dir bac
 # Atlas: render the interactive, self-contained offline "Cockpit" HTML map — status as a
 # terraforming ladder (rock/ice/Mars/Earth/cinder), planet size = dev-day effort, per-cluster
 # nebula LOD, dependency supply lanes, SCAN/intercept search, epic dossier (docs/ATLAS.md).
-bun run src/cli/index.ts atlas /path/to/stories.md -o atlas.html --open   # from a file (no creds)
-bun run src/cli/index.ts atlas --project "My Project" -o atlas.html        # from the live board
+bun run src/cli/index.ts atlas /path/to/stories.md  --open   # from a file (no creds)
+bun run src/cli/index.ts atlas --project "My Project"         # from the live board
 bun run src/cli/index.ts atlas --project "My Project" --no-dependencies    # fast: skip supply lanes
 
 # Packet: emit a self-contained implementable brief for a coding agent from a board

@@ -72,6 +72,19 @@ describe("export output paths", () => {
 		});
 	});
 
+	test("an EMPTY .git is a decoy: the walk continues to the real repository above it", () => {
+		// The discriminating case. A test that only checks a lone empty .git passes
+		// even with the old existsSync-only walk; nesting the decoy inside a real repo
+		// is what distinguishes "reject the decoy" from "accept anything named .git".
+		// (One such empty .git has sat in /tmp on this machine since 2026-07-30, which
+		// is how this surfaced.)
+		withRepo((repo) => {
+			const decoy = join(repo, "vendor", "thing");
+			mkdirSync(join(decoy, ".git"), { recursive: true });
+			expect(findRepoRoot(decoy)).toBe(repo);
+		});
+	});
+
 	describe("the predicate", () => {
 		test("in-repo paths outside exports/ are flagged, including dot-prefixed names", () => {
 			withRepo((repo) => {

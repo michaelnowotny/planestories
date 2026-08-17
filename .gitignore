@@ -45,8 +45,10 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Vercel
 .vercel
 
-# EXPORTS. Everything a command writes out of a board — atlas renders, story exports,
-# spec packets, snapshots, reports — goes here, and none of it is ever committed. Board
+# EXPORTS. What the board-reading commands write — atlas renders, story exports, spec
+# packets — goes here, and none of it is ever committed. (Replication snapshots and
+# reports take an explicit path and live outside the repo; the patterns below still
+# catch them if one is ever written at the repo root.) Board
 # exports are DATA: large, private to somebody's project, and sometimes carrying
 # internal infrastructure detail. A `git add -A` after a smoke run once put 49,258 lines
 # of live board content into a branch; this directory exists so that cannot recur.
