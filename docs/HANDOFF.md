@@ -529,6 +529,24 @@ Either way: a regression test pinning the chosen behaviour for BOTH import and l
 case-mismatched parent, and update `DESIGN_DECISIONS_tier1.md` (which currently carries a DRIFT
 note pointing here) plus `AGENTS.md`.
 
+### 9.5a Known residuals as of 2026-08-17 (small, none blocking)
+
+Recorded so the next maintainer inherits them as facts rather than surprises:
+
+1. **`SnapshotSource.listWorkItems` hardcodes `assignees: []`** even though a snapshot carries
+   `assigneeIds` and `members`, so `atlas`/`export` read from a snapshot show everything as
+   unassigned. A real fidelity gap, but NOT destructive: `import` only PATCHes `assignees` when
+   the story supplies one, so a snapshot-sourced export cannot clear live assignees. Fix by
+   expanding through `members` exactly as state and labels already are.
+2. **Two test-isolation residuals.** `tests/unit/cli/doctor-provenance.test.ts` strips `PLANE_*`
+   and uses a temp cwd but does not redirect `HOME`, so a machine with
+   `~/.config/planestories/config.json` could boot through a different path. And the `baseUrl`
+   assertion in `tests/unit/config/snapshot-config.test.ts` is environmental — the useful pin is
+   `baseUrl === ""` under an isolated cwd/HOME/env.
+3. **An `isTTY`-gated `process.exit`** remains a candidate for the linger case and is deliberately
+   NOT implemented: it is unmeasured, and `src/cli/flush.ts` documents why an unmeasured forced
+   exit is not something to bless.
+
 ### 9.5b Defects found by the real cutover (2026-08-16) — all reproduced, none speculative
 
 The finance session ran the real migration and it landed green (2,551 items, 0 verify failures,
