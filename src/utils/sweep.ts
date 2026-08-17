@@ -23,12 +23,17 @@ export async function sweepFetch<T, R>(
 	items: readonly T[],
 	fn: (item: T) => Promise<R>,
 	concurrency: number,
+	onProgress?: (done: number, total: number) => void,
 ): Promise<SweepResult<T, R>> {
+	let done = 0;
 	const firstPass = await mapWithConcurrency([...items], concurrency, async (item) => {
 		try {
 			return { ok: true as const, value: await fn(item) };
 		} catch (error) {
 			return { ok: false as const, error };
+		} finally {
+			done++;
+			onProgress?.(done, items.length);
 		}
 	});
 

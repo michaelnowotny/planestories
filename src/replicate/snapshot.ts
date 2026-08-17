@@ -115,6 +115,21 @@ export async function takeSnapshot(
 	options: TakeSnapshotOptions,
 ): Promise<ProjectSnapshot> {
 	const progress = options.onProgress ?? (() => {});
+	// A 2,550-item board took 85 minutes on a real link while the runbook said "~25
+	// min" — and that uncertainty got two runs killed mid-flight. Report throughput
+	// and a running estimate so "slow" is legible instead of alarming.
+	const paced = (label: string, startedAt: number) => (doneCount: number, total: number) => {
+		if (doneCount !== total && doneCount % 100 !== 0) return;
+		const elapsedMs = Date.now() - startedAt;
+		const perItem = elapsedMs / Math.max(1, doneCount);
+		const remaining = Math.max(0, total - doneCount) * perItem;
+		const mins = (ms: number) => `${Math.max(1, Math.round(ms / 60000))}m`;
+		progress(
+			doneCount === total
+				? `  ${label}: ${total}/${total} done in ${mins(elapsedMs)}`
+				: `  ${label}: ${doneCount}/${total} (~${mins(remaining)} left)`,
+		);
+	};
 
 	const project = await resolveProject(client, projectRef);
 	progress(`Snapshotting project ${project.identifier ?? project.id} (${project.name ?? "?"})`);
@@ -145,10 +160,12 @@ export async function takeSnapshot(
 	// latency EWMA, so Little's Law sees a real L instead of the seed value.
 	const concurrency = options.concurrency ?? client.concurrency?.() ?? 4;
 	progress(`Fetching relations for ${items.length} items (paced)...`);
+	const relationsStartedAt = Date.now();
 	const relationsSweep = await sweepFetch(
 		items,
 		(item) => client.getRelations(project.id, item.id),
 		concurrency,
+		paced("relations", relationsStartedAt),
 	);
 	if (relationsSweep.failures.length > 0) {
 		throw new ReplicateError(
@@ -159,10 +176,12 @@ export async function takeSnapshot(
 	}
 
 	progress(`Fetching comments for ${items.length} items (paced)...`);
+	const commentsStartedAt = Date.now();
 	const commentsSweep = await sweepFetch(
 		items,
 		(item) => client.listWorkItemComments<RawComment>(project.id, item.id),
 		concurrency,
+		paced("comments", commentsStartedAt),
 	);
 	if (commentsSweep.failures.length > 0) {
 		throw new ReplicateError(

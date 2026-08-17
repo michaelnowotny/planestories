@@ -12,6 +12,9 @@ export interface FreshnessClient {
 	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]>;
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
+	workItemCensus?(
+		projectId: string,
+	): Promise<{ totalCount: number; maxSequenceId: number | null } | null>;
 }
 
 interface RawComment {
@@ -46,6 +49,73 @@ export interface FreshnessReport {
 	relationDrift: Array<{ id: string; sequenceId: number; detail: string }>;
 	deep: boolean;
 	notes: string[];
+}
+
+/**
+ * The CHEAP freshness signal: one request, comparing the source's item count and
+ * highest sequence id against the snapshot.
+ *
+ * Deliberately weaker than `checkFreshness`, and it says so. It cannot see an edit
+ * to an existing item — only additions, deletions that change the count, and new
+ * sequence numbers. It exists because the full check costs a complete enumeration,
+ * which a rate-limited instance cannot always pay: during a real cutover the
+ * operator could not get ANY freshness verdict because the source 429'd, and had to
+ * reason from circumstance instead. A weak answer you can afford beats a strong one
+ * you cannot.
+ */
+export async function checkFreshnessQuick(
+	client: FreshnessClient,
+	snapshot: ProjectSnapshot,
+): Promise<QuickFreshnessReport> {
+	if (!client.workItemCensus) {
+		throw new ReplicateError("This client cannot take a census; use the full freshness check.");
+	}
+	const census = await client.workItemCensus(snapshot.source.projectId);
+	if (census === null) {
+		throw new ReplicateError(
+			"The instance did not return a usable item count, so the quick check cannot conclude anything. Run the full check (omit --quick).",
+		);
+	}
+	const snapshotCount = snapshot.items.length;
+	const snapshotMax = snapshot.sequence.max;
+	const countMatches = census.totalCount === snapshotCount;
+	const maxMatches = census.maxSequenceId === null || census.maxSequenceId === snapshotMax;
+	return {
+		quick: true,
+		fresh: countMatches && maxMatches,
+		takenAt: snapshot.takenAt,
+		counts: { snapshot: snapshotCount, source: census.totalCount },
+		maxSequenceId: { snapshot: snapshotMax, source: census.maxSequenceId },
+		notes: [
+			"QUICK CHECK — one request, comparing item count and highest sequence id only.",
+			"It CANNOT see edits to existing items, nor a deletion masked by an addition. A FRESH verdict here is weaker evidence than the full check; use it to catch obvious drift cheaply, not to certify a cutover.",
+			...(census.maxSequenceId === null
+				? ["The instance did not return a top sequence id; only the count was compared."]
+				: []),
+		],
+	};
+}
+
+export interface QuickFreshnessReport {
+	quick: true;
+	fresh: boolean;
+	takenAt: string;
+	counts: { snapshot: number; source: number };
+	maxSequenceId: { snapshot: number; source: number | null };
+	notes: string[];
+}
+
+export function formatQuickFreshnessReport(report: QuickFreshnessReport, json = false): string {
+	if (json) return JSON.stringify(report, null, 1);
+	const lines = [
+		report.fresh
+			? "QUICK: no change detected (weak signal — see the note below)"
+			: "QUICK: CHANGED since the snapshot",
+		`  items         snapshot ${report.counts.snapshot} · source ${report.counts.source}`,
+		`  max sequence  snapshot ${report.maxSequenceId.snapshot} · source ${report.maxSequenceId.source ?? "unknown"}`,
+	];
+	for (const note of report.notes) lines.push(`  note: ${note}`);
+	return lines.join("\n");
 }
 
 export async function checkFreshness(

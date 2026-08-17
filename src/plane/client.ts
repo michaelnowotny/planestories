@@ -407,6 +407,31 @@ export class PlaneClient {
 		return this.listAll<T>(`/projects/${projectId}/${this.itemsSegment}/`, query);
 	}
 
+	/**
+	 * ONE request that answers "how many items, and what is the highest sequence?".
+	 * Plane's paginated envelope already carries `total_count`, so a `per_page=1`
+	 * page ordered by descending sequence yields both — the cheap freshness signal
+	 * that a rate-limited instance can still afford when a full enumeration cannot
+	 * be paid for. Returns null when the envelope does not carry a usable count,
+	 * so callers can fail closed instead of inventing one.
+	 */
+	async workItemCensus(
+		projectId: string,
+	): Promise<{ totalCount: number; maxSequenceId: number | null } | null> {
+		const page = await this.request<{
+			total_count?: number;
+			count?: number;
+			total_results?: number;
+			results?: Array<{ sequence_id?: number }>;
+		}>("GET", this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/`), {
+			query: { per_page: 1, order_by: "-sequence_id" },
+		});
+		const totalCount = page.total_count ?? page.total_results ?? page.count;
+		if (typeof totalCount !== "number") return null;
+		const top = page.results?.[0]?.sequence_id;
+		return { totalCount, maxSequenceId: typeof top === "number" ? top : null };
+	}
+
 	/** Retrieve a single work item (e.g. to read its current labels before merging). */
 	getWorkItem<T>(projectId: string, workItemId: string): Promise<T> {
 		return this.request<T>(

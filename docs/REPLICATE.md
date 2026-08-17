@@ -183,6 +183,24 @@ file and rename. Foreign/deleted IDs warn and remain untouched.
 
 ## Snapshot freshness
 
+`--quick` is a ONE-REQUEST check: it compares the source's item count and highest
+sequence id against the snapshot, using the `total_count` Plane already returns in its
+paginated envelope.
+
+```bash
+planestories replicate freshness --from ce --snapshot data.snapshot.json --quick
+```
+
+It exists because the full check costs a complete enumeration, and during a real cutover
+the operator could not obtain **any** verdict — the source rate-limited them out — and had
+to reason from circumstance instead. A weak answer you can afford beats a strong one you
+cannot.
+
+It is deliberately weaker and says so in its own output: it **cannot see an edit to an
+existing item**, nor a deletion masked by an addition. Use it to catch obvious drift
+cheaply; use the full check (and `--deep`) to certify a cutover.
+
+
 Immediately before cutover, cheaply confirm that the source has not changed:
 
 ```bash

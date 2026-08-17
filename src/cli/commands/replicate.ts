@@ -11,7 +11,12 @@ import {
 } from "../../plane/client.ts";
 import { applySnapshot } from "../../replicate/apply.ts";
 import { runBackup } from "../../replicate/backup.ts";
-import { checkFreshness, formatFreshnessReport } from "../../replicate/freshness.ts";
+import {
+	checkFreshness,
+	checkFreshnessQuick,
+	formatFreshnessReport,
+	formatQuickFreshnessReport,
+} from "../../replicate/freshness.ts";
 import { readJournal } from "../../replicate/journal.ts";
 import { detectDialect, detectSourceDialect } from "../../replicate/probe.ts";
 import { formatRelinkResult, relinkMarkdownCorpus } from "../../replicate/relink.ts";
@@ -479,6 +484,10 @@ export function registerReplicateCommand(program: Command) {
 		.option("--json", "Machine-readable report")
 		.option("--deep", "Also compare comments and relations (paced per-item reads)")
 		.option(
+			"--quick",
+			"ONE request: compares item count + highest sequence id only. Cannot see edits to existing items — a deliberately weaker verdict, for when a full enumeration is unaffordable",
+		)
+		.option(
 			"--concurrency <n>",
 			"Paced read concurrency for --deep (overrides the rate-derived value; fallback 4)",
 		)
@@ -495,6 +504,16 @@ export function registerReplicateCommand(program: Command) {
 					);
 				}
 				const client = withDialect(base, snapshot.source.dialect);
+				if (options.quick === true) {
+					if (options.deep === true) {
+						throw new ReplicateError("--quick and --deep are mutually exclusive");
+					}
+					const quick = await checkFreshnessQuick(client, snapshot);
+					console.log(formatQuickFreshnessReport(quick, options.json === true));
+					reportPacing(client);
+					if (!quick.fresh) process.exitCode = 1;
+					return;
+				}
 				const report = await checkFreshness(client, snapshot, {
 					deep: options.deep === true,
 					concurrency: parseConcurrency(options.concurrency),
