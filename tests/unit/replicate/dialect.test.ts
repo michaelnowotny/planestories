@@ -180,6 +180,9 @@ describe("relation reference normalization", () => {
 			async listWorkItemComments<T>(): Promise<T[]> {
 				return [] as T[];
 			},
+			async listWorkItemActivities<T>(): Promise<T[]> {
+				return [] as T[];
+			},
 		};
 		const snapshot = await takeSnapshot(
 			client,

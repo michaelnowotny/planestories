@@ -8,6 +8,11 @@ around an on-disk snapshot file, plus a one-shot wrapper:
 # 1. The ONE expensive paced read → a self-contained, versioned JSON file
 planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json
 
+# ...and, when you are about to RETIRE the source, also archive its audit trail
+# (+1 request per item, so opt-in — see Fidelity)
+planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json \
+    --with-activity
+
 # 2. The phased writer — ZERO source reads; dry-run by default
 planestories replicate apply --to ce --snapshot data.snapshot.json          # dry-run
 planestories replicate apply --to ce --snapshot data.snapshot.json --yes    # real
@@ -84,11 +89,47 @@ done"* is intact; only *"when it was completed"* is absent from the board. Both 
 remain in every snapshot, so they are recoverable as data, just not as board state.
 
 **3. Out of scope in v1 — implementable, simply not built.** Cycles, modules, pages,
-intake, reactions, and the **activity/audit log** (**NOT comments** — comments are
-preserved in full, with original authorship and timestamps). Formal attachments are not
-inventoried; description-embedded asset URLs still point at the source instance, so check
-your own exposure before retiring a source (a one-line scan of `descriptionHtml` for
-`<img`/external hosts answers it). Multi-assignee collapses to the first by email.
+intake and reactions. Formal attachments are not inventoried; description-embedded asset
+URLs still point at the source instance, so check your own exposure before retiring a
+source (a one-line scan of `descriptionHtml` for `<img`/external hosts answers it).
+Multi-assignee collapses to the first by email.
+
+**The activity/audit log is CAPTURABLE but never replayed.** `snapshot --with-activity`
+records each item's trail (verb, field, old/new value, actor, timestamp) so a source
+instance can be retired without destroying its history. It is deliberately archival only:
+Plane stamps its own activity as the replica is written, and forging an audit trail on the
+target would be worse than not having one. Cost is one extra request per item, which is
+why it is opt-in and why the nightly backup does not inherit it. (Comments are a separate
+matter and are **preserved in full**, with original authorship and timestamps.)
+
+Absence is never ambiguous: `source.activityInventory` is `"captured"` or
+`"not-requested"`, the `activities` section is present exactly when the former holds
+(`parseSnapshot` rejects a file where the two disagree), and because the sweep is
+fail-hard an item missing from a captured section provably has no history. A snapshot
+written before this existed carries neither field, parses unchanged, and keeps its
+original digest.
+
+### ⚠ Identifiers are preserved. Internal UUIDs are NOT.
+
+`DATA-2114` really is `DATA-2114` on the target — that is the whole point of the engine,
+and it makes it natural to assume the snapshot's *other* ids travel too. **They do not.**
+The apply MINTS new objects on the destination, so the project, every state and every
+label has a new UUID there:
+
+```
+cloud  Cancelled = eeadf60d-7929-44dc-ae7f-1150d2d01a0e
+CE     Cancelled = 3adcc2a1-7876-4a91-bd2d-2301fe8ede98
+```
+
+Using a snapshot's state id against the target gives
+`HTTP 400: state: Invalid pk … object does not exist` — loud, thankfully, but only after
+you have written the script. **Resolve state, label and project ids from the TARGET, never
+from the snapshot.** Human identifiers are the only stable cross-instance handle, which is
+why `retrieve_by_identifier` is the MCP call worth knowing.
+
+(Related trap one layer out: the wire field is named `state` — in both the REST API and
+the MCP — even though this snapshot schema calls it `stateId`. See
+`docs/USING_WITH_CLAUDE.md`.)
 
 Every fallback and every v1-out entity is counted in the apply report rather than hidden.
 

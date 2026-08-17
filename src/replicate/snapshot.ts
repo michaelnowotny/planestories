@@ -6,6 +6,7 @@ import {
 	RELATION_KINDS,
 	type SequenceMap,
 	SNAPSHOT_SCHEMA_VERSION,
+	type SnapshotActivity,
 	type SnapshotComment,
 	type SnapshotItem,
 	type SnapshotLabel,
@@ -33,6 +34,7 @@ export interface SnapshotClient {
 	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
 	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]>;
+	listWorkItemActivities<T>(projectId: string, workItemId: string): Promise<T[]>;
 }
 
 export interface TakeSnapshotOptions {
@@ -42,6 +44,13 @@ export interface TakeSnapshotOptions {
 	/** Injectable clock (ISO string) for tests. */
 	now?: () => string;
 	onProgress?: (message: string) => void;
+	/**
+	 * Also capture each item's activity trail (one extra request per item, so it
+	 * roughly doubles an already-expensive read). OPT-IN by design: this is for
+	 * archiving a source instance you are about to retire, and the nightly
+	 * backup must never inherit the cost silently.
+	 */
+	withActivity?: boolean;
 }
 
 interface RawProject {
@@ -102,6 +111,17 @@ interface RawComment {
 	created_at?: string | null;
 	created_by?: string | null;
 	actor?: string | null;
+}
+
+interface RawActivity {
+	id: string;
+	verb?: string | null;
+	field?: string | null;
+	old_value?: string | null;
+	new_value?: string | null;
+	actor?: string | null;
+	created_at?: string | null;
+	comment?: string | null;
 }
 
 /**
@@ -211,6 +231,44 @@ export async function takeSnapshot(
 			);
 	}
 
+	// Activity capture is a third full sweep, so it stays behind the flag. Like
+	// relations and comments it is FAIL-HARD, and here that is what makes the
+	// data honest: only a sweep that succeeded for EVERY item lets an omitted
+	// entry mean "this item has no history" rather than "we could not read it".
+	// Take that away and the section becomes a set of empty arrays that cannot
+	// be distinguished from real silence — the exact ambiguity that makes an
+	// archive worthless as evidence.
+	let activities: Record<string, SnapshotActivity[]> | undefined;
+	if (options.withActivity) {
+		progress(`Fetching activity for ${items.length} items (paced)...`);
+		const activityStartedAt = Date.now();
+		const activitySweep = await sweepFetch(
+			items,
+			(item) => client.listWorkItemActivities<RawActivity>(project.id, item.id),
+			concurrency,
+			paced("activity", activityStartedAt),
+		);
+		if (activitySweep.failures.length > 0) {
+			throw new ReplicateError(
+				`Snapshot incomplete: activity fetch failed for ${activitySweep.failures.length} item(s) ` +
+					`after the paced sweep (first: ${describeError(activitySweep.failures[0]?.error)}). ` +
+					"A partial snapshot is never written — re-run at a quieter hour.",
+			);
+		}
+		activities = {};
+		for (const { item, value } of activitySweep.results) {
+			if (value.length === 0) {
+				continue;
+			}
+			activities[item.id] = value
+				.map(normalizeActivity)
+				.sort(
+					(a, b) =>
+						(a.createdAt ?? "").localeCompare(b.createdAt ?? "") || a.id.localeCompare(b.id),
+				);
+		}
+	}
+
 	const snapshot: ProjectSnapshot = {
 		schemaVersion: SNAPSHOT_SCHEMA_VERSION,
 		toolVersion: options.toolVersion,
@@ -221,6 +279,7 @@ export async function takeSnapshot(
 			projectId: project.id,
 			dialect: client.dialect,
 			archivedInventory,
+			activityInventory: options.withActivity ? "captured" : "not-requested",
 		},
 		project: {
 			name: project.name ?? "",
@@ -237,6 +296,7 @@ export async function takeSnapshot(
 		items,
 		relations,
 		comments,
+		...(activities === undefined ? {} : { activities }),
 		sequence,
 		digest: "",
 	};
@@ -324,6 +384,24 @@ function normalizeComment(raw: RawComment): SnapshotComment {
 		commentHtml: raw.comment_html ?? "",
 		createdAt: raw.created_at ?? null,
 		createdBy: raw.created_by ?? raw.actor ?? null,
+	};
+}
+
+function normalizeActivity(raw: RawActivity): SnapshotActivity {
+	if (typeof raw.id !== "string") {
+		// An entry with no id cannot be ordered deterministically or deduped, and
+		// an audit record we cannot identify is not one we should silently keep.
+		throw new ReplicateError(`Malformed activity entry in source response (id=${String(raw.id)})`);
+	}
+	return {
+		id: raw.id,
+		verb: raw.verb ?? null,
+		field: raw.field ?? null,
+		oldValue: raw.old_value ?? null,
+		newValue: raw.new_value ?? null,
+		actor: raw.actor ?? null,
+		createdAt: raw.created_at ?? null,
+		comment: raw.comment ?? null,
 	};
 }
 
@@ -446,6 +524,11 @@ export function computeSnapshotDigest(
 		items: snapshot.items,
 		relations: snapshot.relations,
 		comments: snapshot.comments,
+		// Digest-bound when captured. When absent this key contributes NOTHING,
+		// because canonicalJson drops undefined values — which is precisely why
+		// every snapshot written before activity capture existed still validates
+		// against its original digest.
+		activities: snapshot.activities,
 		sequence: snapshot.sequence,
 	};
 	const hasher = new Bun.CryptoHasher("sha256");
@@ -494,6 +577,24 @@ export function parseSnapshot(text: string): ProjectSnapshot {
 		if (snapshot[section] === undefined || snapshot[section] === null) {
 			throw new ReplicateError(`Snapshot file is missing its "${section}" section`);
 		}
+	}
+	// The activity discriminator and the activity section must agree. They are
+	// two halves of one fact, and a file where they disagree is one where
+	// "no history" and "no capture" have become indistinguishable again — so
+	// reject it rather than let a reader guess which half to believe.
+	const activityInventory = snapshot.source?.activityInventory;
+	if (activityInventory === "captured" && snapshot.activities === undefined) {
+		throw new ReplicateError(
+			'Snapshot claims source.activityInventory = "captured" but carries no "activities" ' +
+				"section — the file is inconsistent and its activity coverage cannot be trusted.",
+		);
+	}
+	if (activityInventory !== "captured" && snapshot.activities !== undefined) {
+		throw new ReplicateError(
+			'Snapshot carries an "activities" section but source.activityInventory is ' +
+				`${JSON.stringify(activityInventory ?? null)} — refusing to guess whether the ` +
+				"section is complete.",
+		);
 	}
 	const expected = computeSnapshotDigest(snapshot);
 	if (snapshot.digest !== expected) {

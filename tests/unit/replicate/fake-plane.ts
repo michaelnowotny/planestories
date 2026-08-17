@@ -14,6 +14,7 @@ export interface FakeProject {
 	labels: Map<string, FakeLabel>;
 	relations: Array<{ from: string; kind: string; to: string }>;
 	comments: Map<string, FakeComment[]>;
+	activities: Map<string, FakeActivity[]>;
 }
 
 export interface FakeItem extends Record<string, unknown> {
@@ -41,6 +42,13 @@ interface FakeLabel extends Record<string, unknown> {
 interface FakeComment extends Record<string, unknown> {
 	id: string;
 	comment_html: string;
+}
+
+export interface FakeActivity extends Record<string, unknown> {
+	id: string;
+	verb: string;
+	field: string | null;
+	created_at: string;
 }
 
 const DEFAULT_STATES = [
@@ -78,6 +86,12 @@ export class FakePlane {
 	 * without tripping earlier lists (e.g. the probe's).
 	 */
 	failCommentListMatch: string | null = null;
+	/**
+	 * Activity list fails transiently (once) for THIS item id — the injection
+	 * that proves `--with-activity` is fail-hard rather than degrading into a
+	 * snapshot whose empty entries cannot be told from real silence.
+	 */
+	failActivityListFor: string | null = null;
 	/** Simulate a target that rewrites comment HTML on save (strips data-* attrs). */
 	sanitizeCommentHtml = false;
 	/**
@@ -144,6 +158,7 @@ export class FakePlane {
 			labels: new Map(),
 			relations: [],
 			comments: new Map(),
+			activities: new Map(),
 		};
 		for (const [index, [name, group]] of DEFAULT_STATES.entries()) {
 			const state: FakeState = {
@@ -440,6 +455,15 @@ export class FakePlane {
 			}
 		}
 		return { ...comment } as T;
+	}
+
+	async listWorkItemActivities<T>(projectId: string, workItemId: string): Promise<T[]> {
+		if (this.failActivityListFor === workItemId) {
+			this.failActivityListFor = null;
+			throw new PlaneApiError("activity list failed", 503);
+		}
+		const stored = this.project(projectId).activities.get(workItemId) ?? [];
+		return stored.map((activity) => ({ ...activity })) as T[];
 	}
 
 	async listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]> {

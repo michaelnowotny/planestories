@@ -31,6 +31,24 @@ export interface SnapshotSource {
 	 * from archived items — the apply gate fails closed on gaps in that case.
 	 */
 	archivedInventory: "listed" | "unavailable";
+	/**
+	 * Whether the per-item activity trail was captured (`--with-activity`).
+	 *
+	 * This exists so absence is never ambiguous. Without it, a reader finding no
+	 * activities for an item cannot tell "this item genuinely has no history"
+	 * from "nobody asked for history" — the two have opposite meanings and the
+	 * house null-ban forbids a representation that reads both ways. With it:
+	 * "captured" means the `activities` section is authoritative and an item
+	 * missing from it provably has none (the sweep is fail-hard, so a partial
+	 * read never reaches disk); "not-requested" means the section carries no
+	 * information at all.
+	 *
+	 * OPTIONAL for backward compatibility, and `undefined` may be read as
+	 * "not-requested" for a stated reason rather than as a convenient default:
+	 * every snapshot written before this field existed was taken by a build with
+	 * no way to capture activity.
+	 */
+	activityInventory?: "captured" | "not-requested";
 }
 
 /** The replicable slice of the source project's own settings. */
@@ -96,6 +114,28 @@ export interface SnapshotComment {
 	createdBy: string | null;
 }
 
+/**
+ * One entry from a work item's activity trail — the audit record of who changed
+ * what, when. Captured only under `--with-activity`; never replayed by `apply`
+ * (Plane stamps its own activity as the replica is written, and forging an audit
+ * trail would be worse than not having one). This is archival evidence, kept so
+ * a source instance can be retired without destroying its history.
+ */
+export interface SnapshotActivity {
+	id: string;
+	/** Plane's action verb: "created", "updated", "deleted". */
+	verb: string | null;
+	/** The field that changed, when the entry describes a field change. */
+	field: string | null;
+	oldValue: string | null;
+	newValue: string | null;
+	/** The acting user's UUID. */
+	actor: string | null;
+	createdAt: string | null;
+	/** Plane's human-readable rendering of the change, when present. */
+	comment: string | null;
+}
+
 /** Per-item relation edges, by kind, as SOURCE work-item UUID lists. */
 export type SnapshotRelations = Partial<Record<PlaneRelationKind, string[]>>;
 
@@ -133,12 +173,26 @@ export interface ProjectSnapshot {
 	relations: Record<string, SnapshotRelations>;
 	/** Keyed by source item UUID, in items order; comments ascending by createdAt then id. */
 	comments: Record<string, SnapshotComment[]>;
+	/**
+	 * Keyed by source item UUID, in items order; entries ascending by createdAt
+	 * then id. PRESENT if and only if `source.activityInventory === "captured"`
+	 * — `parseSnapshot` enforces that, so the pair cannot drift into the
+	 * ambiguity the discriminator exists to prevent. An item absent from a
+	 * captured section provably has no activity.
+	 */
+	activities?: Record<string, SnapshotActivity[]>;
 	sequence: SequenceMap;
 	/**
 	 * sha256 (hex) over the canonical content sections (source, project, states,
-	 * labels, members, items, relations, comments, sequence) — NOT over
-	 * takenAt/toolVersion, so identical content yields an identical digest. The
-	 * apply journal binds to this.
+	 * labels, members, items, relations, comments, activities, sequence) — NOT
+	 * over takenAt/toolVersion, so identical content yields an identical digest.
+	 * The apply journal binds to this.
+	 *
+	 * `activities` is digest-bound like every other section (archival evidence
+	 * that is not tamper-evident is worth little), and an ABSENT section
+	 * contributes nothing, because the canonical encoder drops undefined values.
+	 * That is what lets every snapshot taken before activity capture existed
+	 * keep its original digest and keep parsing.
 	 */
 	digest: string;
 }

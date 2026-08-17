@@ -101,6 +101,7 @@ interface SnapshotFlow {
 	out: string;
 	force: boolean;
 	concurrency?: number;
+	withActivity?: boolean;
 }
 
 async function runSnapshot(flow: SnapshotFlow): Promise<ProjectSnapshot> {
@@ -117,6 +118,7 @@ async function runSnapshot(flow: SnapshotFlow): Promise<ProjectSnapshot> {
 		{
 			toolVersion: TOOL_VERSION,
 			concurrency: flow.concurrency,
+			withActivity: flow.withActivity === true,
 			onProgress: (message) => console.log(chalk.dim(message)),
 		},
 	);
@@ -286,6 +288,10 @@ export function registerReplicateCommand(program: Command) {
 		.requiredOption("-o, --out <file>", "Snapshot file path")
 		.option("--force", "Overwrite an existing snapshot file")
 		.option(
+			"--with-activity",
+			"Also capture each item's audit trail (+1 request per item — for archiving a source you are retiring)",
+		)
+		.option(
 			"--concurrency <n>",
 			"Paced read concurrency (overrides the rate-derived value; fallback 4)",
 		)
@@ -298,6 +304,7 @@ export function registerReplicateCommand(program: Command) {
 					projectId: source.projectId,
 					out: options.out,
 					force: options.force === true,
+					withActivity: options.withActivity === true,
 					concurrency: parseConcurrency(options.concurrency),
 				});
 			} catch (error) {

@@ -366,6 +366,17 @@ export class PlaneClient {
 		return this.listAll<T>(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/comments/`);
 	}
 
+	/**
+	 * One work item's activity trail (who changed what, when). Served under BOTH
+	 * dialect spellings on current Plane, so unlike the archived-items list this
+	 * one correctly follows `itemsSegment` — the archived-path trap in
+	 * docs/HANDOFF.md §9.5b #8 is why that distinction is worth stating rather
+	 * than leaving the next reader to assume one rule covers both.
+	 */
+	listWorkItemActivities<T>(projectId: string, workItemId: string): Promise<T[]> {
+		return this.listAll<T>(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/activities/`);
+	}
+
 	createWorkItemComment<T>(
 		projectId: string,
 		workItemId: string,

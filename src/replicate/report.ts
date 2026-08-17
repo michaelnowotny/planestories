@@ -54,8 +54,27 @@ export function formatSnapshotSummary(snapshot: ProjectSnapshot): string {
 		`Labels      ${snapshot.labels.length}`,
 		`Comments    ${comments}`,
 		`Relations   ${relations} directed snapshot reference(s)`,
+		activityLine(snapshot),
 		`Digest      ${digest.slice(0, 12)}`,
 	].join("\n");
+}
+
+/**
+ * Report activity coverage on EVERY snapshot, not only captured ones. "Not
+ * captured" is precisely the fact an operator archiving a source instance needs
+ * to see before they retire it, and a line that appears only on success is the
+ * line nobody misses at the moment it matters.
+ */
+function activityLine(snapshot: ProjectSnapshot): string {
+	if (snapshot.activities === undefined) {
+		return "Activity    not captured (pass --with-activity to archive the audit trail)";
+	}
+	const entries = Object.values(snapshot.activities).reduce(
+		(sum, values) => sum + values.length,
+		0,
+	);
+	const items = Object.keys(snapshot.activities).length;
+	return `Activity    ${entries} entries across ${items} item(s)`;
 }
 
 function verdict(value: boolean | null): string {
