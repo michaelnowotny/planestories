@@ -216,3 +216,53 @@ describe("scoped drag relaxation", () => {
 		expect(html).toContain("if(!sIn&&!tIn)continue;");
 	});
 });
+
+describe("effort visibility (operator decisions A/B/C)", () => {
+	const html = () => renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+
+	test("R is gone — it re-solved to the same arrangement and only cost a stall", () => {
+		expect(html()).not.toContain('k==="r"');
+	});
+
+	test("the floor is embedded from the SHARED implementation, not re-derived", () => {
+		// A second copy of this arithmetic in the browser is how a headline number
+		// starts disagreeing with the command that reports it.
+		expect(html()).toContain("const CP = ");
+		expect(html()).toContain("critical-path command uses");
+	});
+
+	test("a lower-bound floor is never rendered as a bare number", () => {
+		const out = html();
+		// The gauge prefixes >= and relabels itself, and the tooltip says why.
+		expect(out).toContain('f.isLowerBound?"\\u2265":""');
+		expect(out).toContain('f.isLowerBound?"FLOOR (MIN)":"FLOOR"');
+		expect(out).toContain("the real floor is HIGHER");
+		// And it states what KIND of number it is.
+		expect(out).toContain("PARALLEL floor");
+	});
+
+	test("only unestimated stories ON A DEPENDENCY EDGE are flagged", () => {
+		const out = html();
+		// Flagging all 276 unestimated stories would take the flag from a signal to
+		// wallpaper; these ~6 are the ones that make the floor wrong.
+		expect(out).toContain("const NOEST=new Set()");
+		expect(out).toContain('if(e.type==="blocks"){onEdge.add(e.source);onEdge.add(e.target);}');
+		// The GATE, not merely the computation feeding it: an earlier version of
+		// this assertion checked the line above and stayed green when the guard
+		// was deleted and every unestimated story got flagged.
+		expect(out).toContain("if(onEdge.has(n.id))NOEST.add(n.id);");
+		// Finished work needs no estimate.
+		expect(out).toContain('if(n.statusGroup==="completed"||n.statusGroup==="cancelled")continue;');
+	});
+
+	test("the no-estimate chip filters, like the flagged chip", () => {
+		const out = html();
+		expect(out).toContain("no estimate");
+		expect(out).toContain("state.noEstOnly=!state.noEstOnly");
+		expect(out).toContain("state.noEstOnly&&!NOEST.has(n.id)");
+	});
+
+	test("a cycle shows no floor at all, rather than a zero", () => {
+		expect(html()).toContain("No floor: the dependency graph has a cycle");
+	});
+});

@@ -1,3 +1,4 @@
+import { computeCriticalPath } from "../sync/critical_path.ts";
 import { PHYSICS, settleLayout } from "./layout.ts";
 import type { AtlasGraph } from "./model.ts";
 
@@ -38,6 +39,21 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
 	// perfect 60fps, 10-16s at the rate those frames actually cost — and the whole
 	// board churned, unusable, for the duration. Measurements: src/atlas/layout.ts.
 	const settled = JSON.stringify(settleLayout(graph)).replace(/</g, "\\u003c");
+	// The dependency floor, computed HERE by the same reviewed implementation the
+	// critical-path command uses. Embedding the result rather than re-deriving it
+	// in the browser means the gauge and the CLI cannot disagree — a second copy
+	// of this arithmetic is how a headline number starts drifting from its source.
+	const cp = computeCriticalPath(graph);
+	const cpSummary = cp.ok
+		? {
+				ok: true,
+				totalDays: cp.totalDays,
+				chainLength: cp.chain.length,
+				unestimated: cp.unestimated,
+				isLowerBound: cp.isLowerBound,
+			}
+		: { ok: false, cycles: cp.cycles.slice(0, 1) };
+	const cpJson = JSON.stringify(cpSummary).replace(/</g, "\\u003c");
 
 	return `<!doctype html>
 <html lang="en">
@@ -65,6 +81,8 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
     <div class="cell"><div class="k">STORIES</div><div class="v" id="gStories">0</div></div>
     <div class="cell"><div class="k">SUPPLY LINES</div><div class="v" id="gEdges">0</div></div>
     <div class="cell warn"><div class="k">FLAGGED</div><div class="v" id="gFlag">0</div></div>
+    <div class="cell" id="cellFloor" title=""><div class="k" id="kFloor">FLOOR</div><div class="v" id="gFloor">&#8212;</div></div>
+    <div class="cell warn"><div class="k">NO EST.</div><div class="v" id="gNoEst">0</div></div>
     <div class="cell nav"><div class="k">MAG</div><div class="v" id="mag">1.00&#215;</div></div>
     <div class="cell nav"><div class="k">BRG</div><div class="v" id="brg">000&#176;</div></div>
   </div>
@@ -142,6 +160,7 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
 <script>
 const GRAPH = ${data};
 const POS0 = ${settled};
+const CP = ${cpJson};
 ${SCRIPT}
 </script>
 </body>
@@ -358,6 +377,18 @@ const parentOf=new Map(),childrenOf=new Map();
   if(n.children&&n.children.length)walk(n.children,n);}})(GRAPH.nodes,null);
 const HUBS=NODES.filter(n=>n.kind==="epic");
 const DEPS=(GRAPH.edges||[]).filter(e=>byId.has(e.source)&&byId.has(e.target));
+// Stories with NO effort estimate that sit on a dependency edge. Deliberately
+// NOT every unestimated story: 77% of the open board has no estimate, so
+// flagging all of them would take the flag from a signal to wallpaper. These are
+// the ones that make the schedule floor wrong, which is a claim worth acting on.
+const NOEST=new Set();
+{const onEdge=new Set();
+ for(const e of DEPS){if(e.type==="blocks"){onEdge.add(e.source);onEdge.add(e.target);}}
+ for(const n of NODES){
+   if(n.kind==="epic")continue;
+   if(n.statusGroup==="completed"||n.statusGroup==="cancelled")continue;
+   if(n.effortDays!==null)continue;
+   if(onEdge.has(n.id))NOEST.add(n.id);}}
 const EDGES=[];
 for(const [child,par] of parentOf)EDGES.push({s:par,t:child,type:"parent"});
 for(const e of DEPS)EDGES.push({s:e.source,t:e.target,type:e.type});
@@ -531,7 +562,7 @@ ruler.addEventListener("dblclick",()=>fitAll(true));
 
 // --- Filters ------------------------------------------------------------------
 const state={statusOn:new Set(),labelOn:new Set(),assigneeOn:new Set(),
-  flaggedOnly:false,depsOnly:false};
+  flaggedOnly:false,noEstOnly:false,depsOnly:false};
 const ASSIGNEES=GRAPH.assignees||[]; // older embeds lack the field
 const UNASSIGNED=Symbol("unassigned"); // filter key; CANNOT collide with any string
 function visible(n){return !(state.depsOnly&&!inDeps.has(n.id));}
@@ -540,6 +571,7 @@ function matches(n){
   if(state.labelOn.size&&!n.labels.some(l=>state.labelOn.has(l)))return false;
   if(state.assigneeOn.size&&!state.assigneeOn.has(n.assignee||UNASSIGNED))return false;
   if(state.flaggedOnly&&!(n.quality&&!n.quality.ok))return false;
+  if(state.noEstOnly&&!NOEST.has(n.id))return false;
   return true;}
 
 // --- Selection + scan state ---------------------------------------------------
@@ -1211,6 +1243,9 @@ function buildChips(){
   if(GRAPH.counts.flagged)chip('<span class="st" style="color:#ffb054">\\u25b2</span>'+
     GRAPH.counts.flagged+" flagged",state.flaggedOnly,
     ()=>{state.flaggedOnly=!state.flaggedOnly;buildChips();});
+  if(NOEST.size)chip('<span class="st" style="color:#ffb054">?</span>'+
+    NOEST.size+" no estimate",state.noEstOnly,
+    ()=>{state.noEstOnly=!state.noEstOnly;buildChips();});
   miniDirty=true;}
 function tog(set,v){if(set.has(v))set.delete(v);else set.add(v);}
 function toggleDeps(){state.depsOnly=!state.depsOnly;
@@ -1231,7 +1266,6 @@ window.addEventListener("keydown",e=>{
     return;}
   if(typing)return;
   if(k==="f")fitAll(true);
-  else if(k==="r")reheat(0.9);
   else if(k==="d"&&DEPS.length)toggleDeps();
   else if(k==="/"){e.preventDefault();scanEl.focus();}
 });
@@ -1260,6 +1294,24 @@ el("gEpics").textContent=String(GRAPH.counts.epics);
 el("gStories").textContent=String(GRAPH.counts.stories);
 el("gEdges").textContent=String(GRAPH.counts.edges||0);
 el("gFlag").textContent=String(GRAPH.counts.flagged||0);
+el("gNoEst").textContent=String(NOEST.size);
+// The dependency floor, computed at BUILD time by the same reviewed code the
+// critical-path command uses — never re-derived here, so the picture and the
+// number cannot disagree.
+{const f=(typeof CP!=="undefined")?CP:null;
+ const v=el("gFloor"),k=el("kFloor"),cell=el("cellFloor");
+ if(!f||!f.ok){
+   v.textContent="\\u2014";
+   k.textContent="FLOOR";
+   cell.title=f&&!f.ok?("No floor: the dependency graph has a cycle ("+(f.cycles[0]||[]).join(" \\u2192 ")+"). Break it on the board."):"No dependency chain on this board.";
+ }else{
+   // A lower bound is NEVER shown as a bare number.
+   v.textContent=(f.isLowerBound?"\\u2265":"")+f.totalDays+"d";
+   k.textContent=f.isLowerBound?"FLOOR (MIN)":"FLOOR";
+   cell.title="Longest dependency chain: "+f.totalDays+" dev-days across "+f.chainLength+" items."
+     +" This is the PARALLEL floor \\u2014 not total remaining effort."
+     +(f.isLowerBound?(" At least: "+f.unestimated+" connected stor"+(f.unestimated===1?"y has":"ies have")+" no effort estimate, so the real floor is HIGHER. Use the 'no estimate' filter to find them."):"");
+ }}
 
 // --- Run: settle silently, then continuous gentle loop ------------------------
 window.addEventListener("resize",resize);
