@@ -7,6 +7,7 @@ import { createPlaneClient, type PlaneClient, type PlaneIssueRelations } from ".
 import { fetchProjectIndex } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import { isCriterionChild } from "../sync/board-story.ts";
+import { announceTarget } from "./announce_target.ts";
 import {
 	announceSnapshotSource,
 	asClient,
@@ -72,6 +73,9 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 	if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
 
 	const projectName = options.project ?? snapshotSource?.projectName ?? config.defaultProject;
+	// Read-only commands say it too: "which board am I looking at" is the first
+	// question when a number surprises you.
+	if (!snapshotSource) announceTarget(config, options.context, projectName ?? undefined);
 	if (!projectName) {
 		throw new ConfigError(
 			"Provide a <file> argument, or --project <name> (or a defaultProject) to read the live board.",
