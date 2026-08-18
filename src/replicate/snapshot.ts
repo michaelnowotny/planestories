@@ -1,5 +1,6 @@
 import { ReplicateError } from "../errors.ts";
 import type { PlaneEndpointDialect, PlaneIssueRelations } from "../plane/client.ts";
+import { normalizeRelationRef } from "../plane/relation_refs.ts";
 import { sweepFetch } from "../utils/sweep.ts";
 import {
 	type ProjectSnapshot,
@@ -527,20 +528,6 @@ export function compactRelations(value: PlaneIssueRelations): SnapshotRelations 
 		}
 	}
 	return any ? compact : null;
-}
-
-/**
- * A relation reference is a bare work-item UUID on the `/issues/` dialect but an
- * `{project_id, issue_id}` object on `/work-items/` (observed live on the
- * operator's CE, 2026-08-09). Normalize both to the item UUID.
- */
-function normalizeRelationRef(ref: unknown): string | null {
-	if (typeof ref === "string") return ref;
-	if (ref !== null && typeof ref === "object") {
-		const issueId = (ref as { issue_id?: unknown }).issue_id;
-		if (typeof issueId === "string") return issueId;
-	}
-	return null;
 }
 
 function describeError(error: unknown): string {

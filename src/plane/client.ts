@@ -1,5 +1,6 @@
 import { PlaneApiError } from "../errors.ts";
 import { Pacer, type PacerOptions } from "./pacer.ts";
+import { normalizeRelations } from "./relation_refs.ts";
 
 export const DEFAULT_PLANE_BASE_URL = "https://api.plane.so";
 
@@ -451,11 +452,21 @@ export class PlaneClient {
 		);
 	}
 
-	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations> {
-		return this.request<PlaneIssueRelations>(
+	/**
+	 * One work item's relations, with every reference normalized to a bare id.
+	 *
+	 * The normalization is HERE, not in each caller, because the wire shape varies
+	 * by dialect (`/issues/` yields strings, `/work-items/` yields
+	 * `{project_id, issue_id}` objects) and a caller that forgets sees zero
+	 * existing relations rather than an error. See src/plane/relation_refs.ts for
+	 * what that cost us.
+	 */
+	async getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations> {
+		const raw = await this.request<unknown>(
 			"GET",
 			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/relations/`),
 		);
+		return normalizeRelations(raw);
 	}
 
 	createRelation(

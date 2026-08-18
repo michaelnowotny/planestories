@@ -148,7 +148,7 @@ export async function reconcileProjectRelations(
 		currentByIssue.set(issueId, await client.getRelations(project.id, issueId));
 	});
 
-	const current = collectCurrentEdges(currentByIssue);
+	const current = collectDependencyEdges(currentByIssue);
 	const preservedBlockEdges = [...current.values()].filter(
 		(edge): edge is BlockEdge =>
 			edge.kind === "block" && !desired.has(edge.key) && !canRemoveEdge(edge, index, syncedIds),
@@ -341,7 +341,15 @@ function addRelatesEdge(
 	edges.set(edge.key, edge);
 }
 
-function collectCurrentEdges(currentByIssue: Map<string, PlaneIssueRelations>): Map<string, Edge> {
+/**
+ * Build the current edge set from a per-item relations map. Exported so the
+ * ref-shape regression can be tested at the layer that actually broke: refs
+ * arrive here already normalized by PlaneClient.getRelations, and an object
+ * slipping through produces "[object Object]" keys that match nothing.
+ */
+export function collectDependencyEdges(
+	currentByIssue: Map<string, PlaneIssueRelations>,
+): Map<string, Edge> {
 	const edges = new Map<string, Edge>();
 	for (const [issueId, relations] of currentByIssue) {
 		for (const blocker of relations.blocked_by ?? []) {
