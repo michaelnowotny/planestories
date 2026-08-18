@@ -1,3 +1,4 @@
+import { settleLayout } from "./layout.ts";
 import type { AtlasGraph } from "./model.ts";
 
 /**
@@ -32,6 +33,11 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
 	// Escape the JSON so a title containing "</script>" can't break out of the tag.
 	const data = JSON.stringify(graph).replace(/</g, "\\u003c");
 	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
+	// Settle the layout HERE so the page opens on an arranged board. The browser
+	// used to run 325 simulation ticks at ONE PER ANIMATION FRAME — 5.4s at a
+	// perfect 60fps, 10-16s at the rate those frames actually cost — and the whole
+	// board churned, unusable, for the duration. Measurements: src/atlas/layout.ts.
+	const settled = JSON.stringify(settleLayout(graph)).replace(/</g, "\\u003c");
 
 	return `<!doctype html>
 <html lang="en">
@@ -135,6 +141,7 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
 </main>
 <script>
 const GRAPH = ${data};
+const POS0 = ${settled};
 ${SCRIPT}
 </script>
 </body>
@@ -389,11 +396,20 @@ const P=new Map();
   for(const n of NODES){const a=i*2.399963,r=R*Math.sqrt(i/NODES.length);
     // Epic world radius grows with its story count, so big epics read as big hubs.
     const wr=n.kind==="epic"?13+Math.min(11,Math.sqrt((childrenOf.get(n.id)||[]).length)*1.9):6;
-    P.set(n.id,{x:Math.cos(a)*r,y:Math.sin(a)*r,vx:0,vy:0,r:wr,pin:false});i++;}
+    // Prefer the PRE-SETTLED coordinate when the generator supplied one: the sim
+    // needs 325 ticks to cool and ran one tick per frame, so a cold start meant
+    // 5-16 seconds of an unusable, churning board. Falls back to the spiral seed
+    // so an older payload (or a hand-edited one) still lays itself out.
+    const s0=POS0&&POS0[n.id];
+    P.set(n.id,s0?{x:s0.x,y:s0.y,vx:0,vy:0,r:wr,pin:false}
+                 :{x:Math.cos(a)*r,y:Math.sin(a)*r,vx:0,vy:0,r:wr,pin:false});i++;}
 })();
+// Did every node arrive pre-settled? A PARTIAL match must still simulate, or the
+// nodes we do have would sit frozen while the rest fly around them.
+const PRESETTLED=!!POS0&&NODES.length>0&&NODES.every(n=>POS0[n.id]);
 const REP=300,SPRING={parent:0.12,blocks:0.03,relates:0.02},REST={parent:26,blocks:110,relates:120},
   GRAV=0.06,VDECAY=0.7,DECAY=0.012,AMIN=0.02;
-let alpha=1;
+let alpha=PRESETTLED?AMIN*0.5:1; // cold when the layout arrived arranged
 function tick(){
   const arr=NODES,n=arr.length;
   for(let i=0;i<n;i++){const a=P.get(arr[i].id),aEpic=arr[i].kind==="epic";
