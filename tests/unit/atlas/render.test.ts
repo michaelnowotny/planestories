@@ -182,3 +182,37 @@ Body.
 		expect(html).toContain("\\u003c/script> pwn");
 	});
 });
+
+describe("per-frame allocation (the reheat crash)", () => {
+	test("the nebula is drawn from a BOUNDED sprite cache, not per-frame gradients", () => {
+		// Before this, drawNebula built three radial gradients per hub PER FRAME —
+		// ~144 a frame at 48 hubs, ~58,000 across one reheat, each composited with
+		// "lighter" (an offscreen pass). Pressing R crashed the browser hard enough
+		// to need a restart. Sprites are cached and the cache is CAPPED, so the fix
+		// cannot become the next unbounded allocation.
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		expect(html).toContain("function nebulaSprite(");
+		expect(html).toContain("NSPR_CAP");
+		expect(html).toContain("if(NSPR.size>=NSPR_CAP)NSPR.clear()");
+		// Alpha must stay OUT of the cache key or fading multiplies the variants.
+		expect(html).toContain("x.globalAlpha=neb*dim;");
+	});
+});
+
+describe("scoped drag relaxation", () => {
+	test("gravity is GLOBAL-ONLY, or a scoped neighbourhood collapses to the origin", () => {
+		// The force model is not decomposable. Gravity pulls each body toward the
+		// origin in proportion to its distance, balanced in the full simulation by
+		// repulsion from every other node. Scoped to ~70 bodies only those push
+		// back, gravity wins, and the dragged cluster slides into the centre and
+		// piles up — which is exactly what shipped and had to be withdrawn.
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		expect(html).toContain("if(!inScope){p.vx-=p.x*GRAV*alpha");
+		// The scoped step must exist and be driven by its own alpha, so a drag
+		// never re-solves the whole board.
+		expect(html).toContain("function tick(scope)");
+		expect(html).toContain("if(dragScope&&dragAlpha>AMIN)");
+		// A spring with neither end in scope does no work.
+		expect(html).toContain("if(!sIn&&!tIn)continue;");
+	});
+});

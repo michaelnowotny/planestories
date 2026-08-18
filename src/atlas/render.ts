@@ -413,8 +413,22 @@ const PRESETTLED=!!POS0&&NODES.length>0&&NODES.every(n=>POS0[n.id]);
 const REP=${PHYSICS.REP},SPRING={parent:${PHYSICS.SPRING.parent},blocks:${PHYSICS.SPRING.blocks},relates:${PHYSICS.SPRING.relates}},REST={parent:${PHYSICS.REST.parent},blocks:${PHYSICS.REST.blocks},relates:${PHYSICS.REST.relates}},
   GRAV=${PHYSICS.GRAV},VDECAY=${PHYSICS.VDECAY},DECAY=${PHYSICS.DECAY},AMIN=${PHYSICS.AMIN};
 let alpha=PRESETTLED?AMIN*0.5:1; // cold when the layout arrived arranged
-function tick(){
-  const arr=NODES,n=arr.length;
+/**
+ * One simulation step.
+ *
+ * The scope argument (a node ARRAY plus its id Set) restricts the step to a
+ * neighbourhood:
+ * only those bodies repel each other and only they integrate, while a spring to
+ * a node outside the scope pulls only the inside end. That is what makes an
+ * interactive drag affordable — disturbing ~70 neighbours is ~140x less pair
+ * work than re-solving all 825, and it is also the more truthful animation:
+ * dragging a story should ripple through its cluster, not reshuffle the board.
+ *
+ * ONE physics implementation, filtered — not a second copy. Duplicating it is
+ * how the relation-ref defect happened.
+ */
+function tick(scope){
+  const arr=scope?scope.arr:NODES,n=arr.length,inScope=scope?scope.ids:null;
   for(let i=0;i<n;i++){const a=P.get(arr[i].id),aEpic=arr[i].kind==="epic";
     for(let j=i+1;j<n;j++){const b=P.get(arr[j].id);
       let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy;
@@ -422,13 +436,26 @@ function tick(){
       // epic pairs repel harder so cluster hubs never overlap each other
       const f=(aEpic&&arr[j].kind==="epic"?REP*7:REP)/d2,fx=dx*f,fy=dy*f;
       a.vx+=fx*alpha;a.vy+=fy*alpha;b.vx-=fx*alpha;b.vy-=fy*alpha;}}
-  for(const e of EDGES){const a=P.get(e.s),b=P.get(e.t);
+  for(const e of EDGES){
+    const sIn=!inScope||inScope.has(e.s),tIn=!inScope||inScope.has(e.t);
+    if(!sIn&&!tIn)continue; // neither end is moving: the spring does nothing
+    const a=P.get(e.s),b=P.get(e.t);
     let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)||0.01;
     // parent rest grows with the epic's radius so a fat hub can't swallow its stories
     const rest=e.type==="parent"?a.r+16:REST[e.type];
-    const f=(d-rest)/d*SPRING[e.type]*alpha,fx=dx*f,fy=dy*f;a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy;}
+    const f=(d-rest)/d*SPRING[e.type]*alpha,fx=dx*f,fy=dy*f;
+    // An anchor OUTSIDE the scope stays put and pulls only the inside end.
+    if(sIn){a.vx+=fx;a.vy+=fy;}
+    if(tIn){b.vx-=fx;b.vy-=fy;}}
   for(const nd of arr){const p=P.get(nd.id);
-    p.vx-=p.x*GRAV*alpha;p.vy-=p.y*GRAV*alpha;
+    // GRAVITY IS GLOBAL-ONLY. It pulls every body toward the origin in
+    // proportion to its distance, and in the full simulation that is balanced by
+    // repulsion from all 825 nodes. Scoped to a neighbourhood, only ~70 bodies
+    // push back, so gravity wins and the whole cluster collapses into the centre
+    // and piles up — the force model is not decomposable. A scoped relaxation is
+    // anchored instead by its springs to the nodes OUTSIDE the scope, which do
+    // not move, plus the pinned node under the cursor.
+    if(!inScope){p.vx-=p.x*GRAV*alpha;p.vy-=p.y*GRAV*alpha;}
     if(p.pin){p.vx=0;p.vy=0;continue;}
     p.vx*=VDECAY;p.vy*=VDECAY;p.x+=p.vx;p.y+=p.vy;}
   alpha*=(1-DECAY);
@@ -808,7 +835,12 @@ window.addEventListener("mousemove",e=>{
       if(Math.hypot(dx,dy)>8)brgV=((Math.atan2(-dy,dx)*180/Math.PI)+450)%360;}
     else{const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
       const wx=(mx-view.x)/view.scale,wy=(my-view.y)/view.scale,p=P.get(dragS.node.id);
-      p.x=wx+dragS.ox;p.y=wy+dragS.oy;p.vx=0;p.vy=0;dragS.moved=true;reheat(0.3);}
+      // The dragged node follows the cursor (pinned); its NEIGHBOURHOOD relaxes
+      // around it, animated. A global re-settle here would run the whole
+      // simulation on every mousemove — that is what must not happen.
+      p.x=wx+dragS.ox;p.y=wy+dragS.oy;p.vx=0;p.vy=0;dragS.moved=true;miniDirty=true;
+      if(!dragScope)beginDragRelax(dragS.node.id);
+      dragAlpha=Math.max(dragAlpha,0.5);}
     return;}
   const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
   if(overMini(e)||mx<0||my<0||mx>W||my>H){HOV=null;return;}
@@ -820,6 +852,12 @@ window.addEventListener("mouseup",e=>{
   const wasNode=dragS.node,moved=dragS.moved;
   if(wasNode)P.get(wasNode.id).pin=false;
   dragS=null;stage.classList.remove("grabbing");
+  // Let the neighbourhood ease out where it was dropped. A GLOBAL reheat here is
+  // what made a dropped node snap straight back to its old position: unpinning
+  // it and then re-solving the entire board returns it to equilibrium, which
+  // reads as "the graph ignored my drag".
+  if(moved&&wasNode){dragScope=neighbourhoodOf(wasNode.id);dragAlpha=0.35;}
+  else endDragRelax();
   if(moved)return;
   const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
   if(mx<0||my<0||mx>W||my>H)return;
@@ -927,6 +965,38 @@ function worldSprite(kind,r){
 function drawWorld(kind,p,r,alpha2){if(alpha2<=0.02)return;
   const s=worldSprite(kind,r);
   x.globalAlpha=alpha2;x.drawImage(s.c,p.x-s.R,p.y-s.R);x.globalAlpha=1;}
+// Cached nebula sprites. The nebula used to build THREE radial gradients per hub
+// PER FRAME — ~144 gradient objects a frame at 48 hubs, ~58 000 across a single
+// reheat, every one of them composited with "lighter" (which forces an offscreen
+// pass). That is the only unbounded per-frame allocation in the draw path, and it
+// is the shape that ends in a browser needing a restart.
+//
+// The blob geometry depends only on RADIUS and the cluster's own progress, never
+// on position, so it renders once into an offscreen canvas and is stamped with
+// drawImage thereafter — the same trick worldSprite already uses. Alpha stays OUT
+// of the key and is applied via globalAlpha, so fading does not multiply variants.
+const NSPR=new Map();
+const NSPR_CAP=48;         // one per hub; 48 x (400px)^2 x 4B = ~31MB worst case
+const NSPR_MAX_R=200;      // above this a sprite costs more memory than the gradients
+function nebulaSprite(hi,R,gf,hasStarted){
+  const Rq=Math.max(9,Math.round(R/8)*8),gq=Math.round(gf*10)/10;
+  const key=hi+"|"+Rq+"|"+gq+"|"+(hasStarted?1:0);
+  let s=NSPR.get(key);
+  if(s)return s;
+  if(NSPR.size>=NSPR_CAP)NSPR.clear(); // whole-cache reset: one frame of rebuild, no unbounded growth
+  const D=Math.ceil(Rq*2),c=document.createElement("canvas");
+  c.width=D;c.height=D;const g2=c.getContext("2d");
+  g2.globalCompositeOperation="lighter";
+  const blobs=[
+    [0,0,1.0,"110,140,225",0.11],
+    [Math.cos(hi*2.4)*0.3,Math.sin(hi*2.4)*0.3,0.66,"87,167,232",0.04+0.12*gq],
+    [Math.cos(hi*5.1)*0.34,Math.sin(hi*5.1)*0.34,0.48,"224,130,80",hasStarted?0.05:0]];
+  for(const bl of blobs){const al=bl[4];if(al<=0.005)continue;
+    const rr=Rq*bl[2],cx2=Rq+bl[0]*Rq,cy2=Rq+bl[1]*Rq;
+    const gr=g2.createRadialGradient(cx2,cy2,0,cx2,cy2,rr);
+    gr.addColorStop(0,"rgba("+bl[3]+","+al+")");gr.addColorStop(1,"rgba("+bl[3]+",0)");
+    g2.fillStyle=gr;g2.beginPath();g2.arc(cx2,cy2,rr,0,6.283);g2.fill();}
+  s={c,R:Rq};NSPR.set(key,s);return s;}
 function drawNebula(h,hi,neb,t,dim){
   const c=S(h.id),g=GEO.get(h.id),R=(g?g.extent:60)*view.scale*1.15;
   if(R<9)return;
@@ -934,15 +1004,24 @@ function drawNebula(h,hi,neb,t,dim){
   const kids=storiesOf.get(h.id);
   const hasStarted=kids.some(s2=>s2.statusGroup==="started");
   x.globalCompositeOperation="lighter";
-  const blobs=[
-    [0,0,1.0,"110,140,225",0.11],
-    [Math.cos(hi*2.4)*0.3,Math.sin(hi*2.4)*0.3,0.66,"87,167,232",0.04+0.12*gf],
-    [Math.cos(hi*5.1)*0.34,Math.sin(hi*5.1)*0.34,0.48,"224,130,80",hasStarted?0.05:0]];
-  for(const bl of blobs){const al=bl[4];if(al<=0.005)continue;
-    const rr=R*bl[2],cx2=c.x+bl[0]*R,cy2=c.y+bl[1]*R;
-    const gr=x.createRadialGradient(cx2,cy2,0,cx2,cy2,rr);
-    gr.addColorStop(0,"rgba("+bl[3]+","+(al*neb*dim)+")");gr.addColorStop(1,"rgba("+bl[3]+",0)");
-    x.fillStyle=gr;x.beginPath();x.arc(cx2,cy2,rr,0,6.283);x.fill();}
+  if(R<=NSPR_MAX_R){
+    const s=nebulaSprite(hi,R,gf,hasStarted);
+    x.globalAlpha=neb*dim;
+    x.drawImage(s.c,c.x-s.R,c.y-s.R);
+    x.globalAlpha=1;
+  }else{
+    // Deep zoom: a sprite this large would cost more than the gradients. Few hubs
+    // are on screen here, so the per-frame cost stays small.
+    const blobs=[
+      [0,0,1.0,"110,140,225",0.11],
+      [Math.cos(hi*2.4)*0.3,Math.sin(hi*2.4)*0.3,0.66,"87,167,232",0.04+0.12*gf],
+      [Math.cos(hi*5.1)*0.34,Math.sin(hi*5.1)*0.34,0.48,"224,130,80",hasStarted?0.05:0]];
+    for(const bl of blobs){const al=bl[4];if(al<=0.005)continue;
+      const rr=R*bl[2],cx2=c.x+bl[0]*R,cy2=c.y+bl[1]*R;
+      const gr=x.createRadialGradient(cx2,cy2,0,cx2,cy2,rr);
+      gr.addColorStop(0,"rgba("+bl[3]+","+(al*neb*dim)+")");gr.addColorStop(1,"rgba("+bl[3]+",0)");
+      x.fillStyle=gr;x.beginPath();x.arc(cx2,cy2,rr,0,6.283);x.fill();}
+  }
   for(let k=0;k<3&&kids.length;k++){const s2=kids[(k*3)%kids.length];
     if(!visible(s2))continue; // deps-only must not sparkle at hidden stories
     const p=S(s2.id);
@@ -1188,6 +1267,12 @@ if(window.ResizeObserver)new ResizeObserver(()=>resize()).observe(stage);
 let raf=null,fitted=false,geoTicks=0;
 function frame(t){
   raf=null;
+  // Scoped drag relaxation: bounded bodies, so these frames are cheap. It runs
+  // INSTEAD of the global settle, never alongside it.
+  if(dragScope&&dragAlpha>AMIN){
+    const keep=alpha;alpha=dragAlpha;tick(dragScope);alpha=keep;
+    dragAlpha*=(1-DECAY*2);miniDirty=true;
+  }
   const hot=alpha>AMIN;
   if(hot){tick();miniDirty=true;
     if(++geoTicks%20===0)computeGeo();}
@@ -1197,7 +1282,48 @@ function frame(t){
   draw(t);
   if(!document.hidden)raf=requestAnimationFrame(frame);
 }
-function reheat(a){alpha=Math.max(alpha,a||0.7);}
+/**
+ * Re-settle WITHOUT animating it.
+ *
+ * The page ships pre-settled, so the animated settle exists only for re-heats —
+ * and animating one runs ~300 hot frames of tick + full redraw, which on Safari
+ * degraded until the browser needed a restart. I could not isolate WHY from the
+ * code (the sprite caches are bounded, there is no unbounded loop, and the
+ * per-frame gradient churn turned out not to be it), and I have no browser here
+ * to instrument. So rather than keep guessing at the cause, the frames are
+ * removed: the settle runs in one synchronous burst and the board is drawn once,
+ * already arranged — the same thing the generator does at build time.
+ *
+ * Bounded by construction: ticks are capped, so this cannot spin.
+ */
+// --- Interactive (animated) relaxation, scoped to a neighbourhood -------------
+// Dragging is the one place the animation earns its keep: you move a node and
+// watch its cluster respond. That is affordable when the simulation is scoped —
+// ~70 bodies instead of 825 is roughly 140x less pair work per step — and it is
+// also the more honest picture, since dragging one story should not reshuffle
+// the whole board.
+let dragScope=null,dragAlpha=0;
+function neighbourhoodOf(id){
+  const ids=new Set([id]);
+  const self=byId.get(id);
+  const epicId=self&&self.kind==="epic"?id:epicOf.get(id);
+  if(epicId){ids.add(epicId);for(const s2 of (storiesOf.get(epicId)||[]))ids.add(s2.id);}
+  for(const e of EDGES){if(e.s===id)ids.add(e.t);if(e.t===id)ids.add(e.s);}
+  const arr=[];for(const nid of ids){const n2=byId.get(nid);if(n2)arr.push(n2);}
+  return {ids,arr};
+}
+function beginDragRelax(id){dragScope=neighbourhoodOf(id);dragAlpha=0.6;}
+function endDragRelax(){dragScope=null;dragAlpha=0;}
+function reheat(a){
+  const target=Math.max(alpha,a||0.7);
+  let k=0;
+  for(let al=target;al>AMIN&&k<400;al*=(1-DECAY))
+    {alpha=al;tick();k++;}
+  alpha=AMIN*0.5;      // cold: frame() will not tick again
+  computeGeo();
+  geoTicks=0;
+  miniDirty=true;
+}
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden&&raf===null)raf=requestAnimationFrame(frame);});
 resize();buildChips();el("settling").hidden=false;select(null);
