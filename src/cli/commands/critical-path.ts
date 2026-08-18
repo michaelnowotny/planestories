@@ -30,16 +30,14 @@ function handleError(error: unknown): never {
 export function formatCriticalPath(result: CriticalPathResult): string {
 	const lines: string[] = [];
 
-	if (result.cycles.length > 0) {
+	if (!result.ok) {
 		lines.push(chalk.red("Cannot compute a critical path: the dependency graph has a cycle."));
 		lines.push(
 			chalk.dim(
 				"  A longest path through a cycle is not a longer estimate, it is a meaningless one.",
 			),
 		);
-		for (const cycle of result.cycles) {
-			lines.push(`  ${cycle.join(" → ")}`);
-		}
+		for (const cycle of result.cycles) lines.push(`  ${cycle.join(" \u2192 ")}`);
 		lines.push(chalk.dim("  Break the cycle on the board, then re-run."));
 		return lines.join("\n");
 	}
@@ -60,11 +58,17 @@ export function formatCriticalPath(result: CriticalPathResult): string {
 			`Critical path: ${bound}${result.totalDays} dev-days across ${result.chain.length} items`,
 		),
 	);
+	// Say what the number IS. A solo developer will otherwise read it as calendar
+	// time, and it is a PARALLEL floor: independent work is excluded by design.
+	lines.push(
+		chalk.dim(
+			"  This is the dependency floor assuming work can run in parallel — not total remaining effort.",
+		),
+	);
 	if (result.isLowerBound) {
-		// Never a bare number when part of the chain is unestimated.
 		lines.push(
 			chalk.yellow(
-				`  ⚠ ${result.unestimatedOnChain} item(s) on the chain have no **Effort:** line — the real floor is HIGHER.`,
+				`  \u26a0 ${result.unestimated} connected item(s) have no **Effort:** line, on or off this chain — the real floor is HIGHER.`,
 			),
 		);
 	}
@@ -74,7 +78,7 @@ export function formatCriticalPath(result: CriticalPathResult): string {
 			node.effortDays === null ? chalk.yellow("?d") : chalk.cyan(`${node.effortDays}d`);
 		const state = node.done ? chalk.dim(" (done)") : "";
 		lines.push(
-			`  ${i === 0 ? " " : "↳"} ${chalk.bold(node.identifier ?? "?")} ${effort}${state}  ${node.title.slice(0, 60)}`,
+			`  ${i === 0 ? " " : "\u21b3"} ${chalk.bold(node.identifier ?? "?")} ${effort}${state}  ${node.title.slice(0, 60)}`,
 		);
 	}
 	if (result.biggestLever) {
@@ -84,9 +88,12 @@ export function formatCriticalPath(result: CriticalPathResult): string {
 		);
 	}
 	lines.push("");
+	const expanded = result.expandedEdges
+		? `, ${result.expandedEdges} edge(s) expanded from epic endpoints`
+		: "";
 	lines.push(
 		chalk.dim(
-			`${result.consideredLeaves} stories (${result.doneLeaves} done), ${result.connectedLeaves} carry a dependency. Items off the chain have slack and do not move the end date.`,
+			`${result.consideredLeaves} stories (${result.doneLeaves} done), ${result.connectedLeaves} carry a dependency${expanded}. Items off the chain have slack and do not move the end date.`,
 		),
 	);
 	return lines.join("\n");
@@ -103,7 +110,7 @@ export function registerCriticalPathCommand(program: Command): void {
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (file: string | undefined, options) => {
 			try {
-				const { graph, client } = await resolveGraph({
+				const { graph, client, relationFailures } = await resolveGraph({
 					file,
 					config: options.config,
 					context: options.context,
@@ -111,6 +118,29 @@ export function registerCriticalPathCommand(program: Command): void {
 					fromSnapshot: options.fromSnapshot,
 					json: options.json === true,
 				});
+				// A partial relation sweep means the graph is MISSING edges, and a
+				// missing `blocks` edge silently SHORTENS the floor or hides a cycle
+				// that should have been a refusal. Atlas may draw a picture with most
+				// of its edges; a schedule number may not be computed from most of
+				// its constraints.
+				if (relationFailures > 0) {
+					console.error(
+						chalk.red(
+							`Refusing to compute: ${relationFailures} relation lookup(s) failed, so the dependency graph is incomplete.`,
+						),
+					);
+					console.error(
+						chalk.dim(
+							"  A missing dependency edge shortens the floor or hides a cycle. Re-run at a quieter hour,",
+						),
+					);
+					console.error(
+						chalk.dim("  or use --from-snapshot, which reads a complete recorded graph."),
+					);
+					if (client) reportPacing(client);
+					process.exitCode = 1;
+					return;
+				}
 				const result = computeCriticalPath(graph);
 
 				if (options.json) {
@@ -121,7 +151,7 @@ export function registerCriticalPathCommand(program: Command): void {
 				if (client) reportPacing(client);
 				// A cycle is a real finding, not a clean run: exit non-zero so a CI
 				// gate or a script cannot mistake "refused to compute" for "fine".
-				if (result.cycles.length > 0) process.exitCode = 1;
+				if (!result.ok) process.exitCode = 1;
 			} catch (error) {
 				handleError(error);
 			}

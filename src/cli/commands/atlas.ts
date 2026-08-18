@@ -1,28 +1,12 @@
 import { resolve } from "node:path";
 import chalk from "chalk";
 import type { Command } from "commander";
-import { type AtlasGraph, buildAtlasFromBoard, buildAtlasFromFile } from "../../atlas/model.ts";
-import { fetchRelationsWithSweep } from "../../atlas/relations.ts";
 import { renderAtlasHtml } from "../../atlas/render.ts";
-import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import {
-	createPlaneClient,
-	type PlaneClient,
-	type PlaneIssueRelations,
-} from "../../plane/client.ts";
-import { fetchProjectIndex } from "../../plane/issues.ts";
-import { Resolver } from "../../plane/resolvers.ts";
-import { isCriterionChild } from "../../sync/board-story.ts";
+import { resolveGraph } from "../graph_source.ts";
 import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
-import {
-	announceSnapshotSource,
-	asClient,
-	FROM_SNAPSHOT_HELP,
-	loadConfigForSnapshot,
-	openSnapshotSource,
-} from "../snapshot_option.ts";
+import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -84,79 +68,19 @@ export function registerAtlasCommand(program: Command) {
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (file: string | undefined, options) => {
 			try {
-				let graph: AtlasGraph;
-				let pacedClient: PlaneClient | undefined;
-
-				if (file) {
-					// Offline: parse one markdown file, no config, no API.
-					const content = await Bun.file(file).text();
-					graph = buildAtlasFromFile(content, file);
-				} else {
-					// Live board: pull the whole project via the one-call index.
-					const config = options.fromSnapshot
-						? await loadConfigForSnapshot(options.config, options.context)
-						: await loadConfig({ configPath: options.config, context: options.context });
-					const snapshotSource = options.fromSnapshot
-						? await openSnapshotSource(String(options.fromSnapshot))
-						: null;
-					if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
-					const projectName =
-						options.project ?? snapshotSource?.projectName ?? config.defaultProject;
-					if (!projectName) {
-						throw new ConfigError(
-							"Provide a <file> argument, or --project <name> (or a defaultProject) to render the live board.",
-						);
-					}
-					const client = snapshotSource
-						? asClient(snapshotSource)
-						: createPlaneClient({
-								apiKey: config.apiKey,
-								workspaceSlug: config.workspaceSlug,
-								baseUrl: config.baseUrl,
-								maxRetries: config.maxRetries,
-								dialect: config.dialect,
-								requestsPerMinute: config.apiRateLimit,
-								rateHeadroom: config.rateHeadroom,
-								maxConcurrency: config.maxConcurrency,
-							});
-					pacedClient = client;
-					const resolver = new Resolver(client);
-					const project = await resolver.resolveProject(projectName);
-					const index = await fetchProjectIndex(client, project.id, project.identifier);
-					// Dependency edges need each story/epic's relations (one GET per
-					// non-criterion item). Skip with --no-dependencies. On a big board this
-					// is many calls, so keep concurrency modest and let a per-item failure
-					// (e.g. a 429 that outlived its retries) DROP that item's edges rather
-					// than abort the whole atlas — a graph with most edges beats no graph.
-					let relationsById: Map<string, PlaneIssueRelations> | undefined;
-					if (options.dependencies !== false) {
-						const items = index.items.filter((item) => !isCriterionChild(item));
-						const result = await fetchRelationsWithSweep(client, project.id, items);
-						relationsById = result.relationsById;
-						if (result.recovered > 0) {
-							console.error(
-								chalk.dim(
-									`  recovered ${result.recovered} rate-limited relation lookup${result.recovered === 1 ? "" : "s"} in a paced second pass.`,
-								),
-							);
-						}
-						if (result.failed > 0) {
-							console.error(
-								chalk.yellow(
-									`  ${result.failed}/${items.length} relation lookups failed even after the paced retry pass — some dependency edges may be missing.`,
-								),
-							);
-						}
-					}
-					graph = buildAtlasFromBoard(
-						client,
-						project.id,
-						project.identifier,
-						projectName,
-						index,
-						relationsById,
-					);
-				}
+				// ONE graph-construction path, shared with `critical-path` and `trend`.
+				// This used to be a 70-line twin of resolveGraph; two sites assembling
+				// the same graph is the shape that produced the relation-ref defect,
+				// where five call sites did one job and one did it differently.
+				const { graph, client: pacedClient } = await resolveGraph({
+					file,
+					config: options.config,
+					context: options.context,
+					project: options.project,
+					fromSnapshot: options.fromSnapshot,
+					dependencies: options.dependencies,
+					json: options.json === true,
+				});
 
 				const html = options.json ? "" : renderAtlasHtml(graph);
 				const outPath = resolveOutputPath(

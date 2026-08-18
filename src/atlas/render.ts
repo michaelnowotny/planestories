@@ -1,4 +1,4 @@
-import { settleLayout } from "./layout.ts";
+import { PHYSICS, settleLayout } from "./layout.ts";
 import type { AtlasGraph } from "./model.ts";
 
 /**
@@ -407,8 +407,11 @@ const P=new Map();
 // Did every node arrive pre-settled? A PARTIAL match must still simulate, or the
 // nodes we do have would sit frozen while the rest fly around them.
 const PRESETTLED=!!POS0&&NODES.length>0&&NODES.every(n=>POS0[n.id]);
-const REP=300,SPRING={parent:0.12,blocks:0.03,relates:0.02},REST={parent:26,blocks:110,relates:120},
-  GRAV=0.06,VDECAY=0.7,DECAY=0.012,AMIN=0.02;
+// Interpolated from PHYSICS in src/atlas/layout.ts — the generator settles with
+// these exact numbers, so a change in one place cannot leave the browser
+// reheating from a world the pre-settled positions never inhabited.
+const REP=${PHYSICS.REP},SPRING={parent:${PHYSICS.SPRING.parent},blocks:${PHYSICS.SPRING.blocks},relates:${PHYSICS.SPRING.relates}},REST={parent:${PHYSICS.REST.parent},blocks:${PHYSICS.REST.blocks},relates:${PHYSICS.REST.relates}},
+  GRAV=${PHYSICS.GRAV},VDECAY=${PHYSICS.VDECAY},DECAY=${PHYSICS.DECAY},AMIN=${PHYSICS.AMIN};
 let alpha=PRESETTLED?AMIN*0.5:1; // cold when the layout arrived arranged
 function tick(){
   const arr=NODES,n=arr.length;

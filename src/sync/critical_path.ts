@@ -38,34 +38,51 @@ export interface CriticalPathNode {
 	earliestFinish: number;
 }
 
-export interface CriticalPathResult {
+/** A refusal: the graph has a cycle, so a longest path is undefined. */
+export interface CriticalPathRefused {
+	ok: false;
+	/** Dependency cycles, as identifier lists. Always non-empty here. */
+	cycles: string[][];
+	consideredLeaves: number;
+	doneLeaves: number;
+}
+
+export interface CriticalPathComputed {
+	ok: true;
 	/** The longest dependency chain, in order. Empty when nothing is connected. */
 	chain: CriticalPathNode[];
 	/** Summed effort along the chain. A LOWER BOUND when `isLowerBound`. */
 	totalDays: number;
-	/** Chain items with no estimate. Non-zero ⇒ the total understates the truth. */
-	unestimatedOnChain: number;
+	/**
+	 * Connected, unfinished leaves with no estimate — ANYWHERE in the dependency
+	 * graph, not merely on the winning chain. An unestimated item that lost the
+	 * comparison *because* it was treated as 0 is exactly the one that can make
+	 * this total wrong, so counting only chain members would flag the harmless
+	 * case and miss the dangerous one.
+	 */
+	unestimated: number;
 	isLowerBound: boolean;
 	/** Slack in days per identifier: how long it can slip without moving the end. */
 	slackByIdentifier: Record<string, number>;
 	/**
-	 * The single item whose completion shortens the floor most, with the days it
-	 * would save. Null when nothing is on a chain or no item has an estimate.
+	 * The item whose completion shortens the floor MOST, and by how much.
+	 *
+	 * `daysSaved` is the measured drop in the floor when that item's duration goes
+	 * to zero — NOT the item's own duration. Those differ whenever a near-critical
+	 * path exists: finishing a 10-day item on a 13-day chain with an 11-day
+	 * alternative saves 2 days, not 10. The largest item is frequently not the
+	 * biggest lever.
 	 */
 	biggestLever: { identifier: string; title: string; daysSaved: number } | null;
-	/** Leaves considered (excludes epics). */
 	consideredLeaves: number;
-	/** Leaves already finished, contributing zero duration. */
 	doneLeaves: number;
-	/** Leaves with at least one dependency edge. The rest cannot constrain anything. */
 	connectedLeaves: number;
-	/**
-	 * Dependency cycles, as identifier lists. NON-EMPTY MEANS THE RESULT IS NOT
-	 * COMPUTED — every other field is at its empty value and must not be read as
-	 * "no dependencies".
-	 */
-	cycles: string[][];
+	/** `blocks` edges synthesized by expanding an epic endpoint to its leaves. */
+	expandedEdges: number;
+	cycles: [];
 }
+
+export type CriticalPathResult = CriticalPathRefused | CriticalPathComputed;
 
 interface Leaf {
 	node: AtlasNode;
@@ -144,31 +161,46 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 	const leaves = new Map<string, Leaf>();
 	collectLeaves(graph.nodes, leaves);
 
-	const empty = (cycles: string[][]): CriticalPathResult => ({
-		chain: [],
-		totalDays: 0,
-		unestimatedOnChain: 0,
-		isLowerBound: false,
-		slackByIdentifier: {},
-		biggestLever: null,
-		consideredLeaves: leaves.size,
-		doneLeaves: [...leaves.values()].filter((l) => l.done).length,
-		connectedLeaves: 0,
-		cycles,
-	});
+	// Descendant leaves per container, so a `blocks` edge touching an EPIC is
+	// expanded rather than dropped. People really do write "this spike blocks the
+	// epic", and silently discarding that edge removes a constraint from a
+	// schedule calculation — the floor comes out too short.
+	const leavesUnder = new Map<string, string[]>();
+	const collect = (node: AtlasNode): string[] => {
+		if (leaves.has(node.id)) return [node.id];
+		const out: string[] = [];
+		for (const child of node.children ?? []) out.push(...collect(child));
+		leavesUnder.set(node.id, out);
+		return out;
+	};
+	for (const node of graph.nodes) collect(node);
 
-	// "blocks" edges only: source must finish before target may start. `relates`
-	// carries no ordering, so including it would invent a constraint.
+	const endpoints = (id: string): string[] => (leaves.has(id) ? [id] : (leavesUnder.get(id) ?? []));
+
+	const doneLeaves = [...leaves.values()].filter((l) => l.done).length;
+
 	const successors = new Map<string, string[]>();
 	const predecessors = new Map<string, string[]>();
 	const connected = new Set<string>();
+	let expandedEdges = 0;
 	for (const edge of graph.edges) {
+		// "blocks" only: `relates` carries no ordering, so using it would invent a
+		// constraint that nobody declared.
 		if (edge.type !== "blocks") continue;
-		if (!leaves.has(edge.source) || !leaves.has(edge.target)) continue;
-		successors.set(edge.source, [...(successors.get(edge.source) ?? []), edge.target]);
-		predecessors.set(edge.target, [...(predecessors.get(edge.target) ?? []), edge.source]);
-		connected.add(edge.source);
-		connected.add(edge.target);
+		const sources = endpoints(edge.source);
+		const targets = endpoints(edge.target);
+		if (sources.length === 0 || targets.length === 0) continue;
+		if (sources.length > 1 || targets.length > 1)
+			expandedEdges += sources.length * targets.length - 1;
+		for (const s of sources) {
+			for (const t of targets) {
+				if (s === t) continue;
+				successors.set(s, [...(successors.get(s) ?? []), t]);
+				predecessors.set(t, [...(predecessors.get(t) ?? []), s]);
+				connected.add(s);
+				connected.add(t);
+			}
+		}
 	}
 
 	const ids = [...leaves.keys()];
@@ -176,11 +208,10 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 
 	const cycles = findCycles(ids, successors, label);
 	if (cycles.length > 0) {
-		// Refuse. A longest path through a cycle is not a longer estimate, it is a
-		// meaningless one, and a confident number here would be acted upon.
-		return empty(cycles);
+		// REFUSE, and in a shape that cannot be mistaken for success: there is no
+		// `totalDays: 0` here for a `jq .totalDays` to pick up.
+		return { ok: false, cycles, consideredLeaves: leaves.size, doneLeaves };
 	}
-	if (connected.size === 0) return empty([]);
 
 	// Topological order (Kahn). Safe now that cycles are excluded.
 	const indegree = new Map<string, number>(ids.map((id) => [id, 0]));
@@ -199,49 +230,56 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 		}
 	}
 
-	// Forward pass: earliest start/finish, remembering the predecessor that set it
-	// so the chain can be walked back without recomputing.
-	const earliestStart = new Map<string, number>();
-	const earliestFinish = new Map<string, number>();
-	const cameFrom = new Map<string, string | null>();
-	for (const id of order) {
-		let start = 0;
-		let from: string | null = null;
-		for (const pred of predecessors.get(id) ?? []) {
-			const finish = earliestFinish.get(pred) ?? 0;
-			if (finish > start) {
-				start = finish;
-				from = pred;
+	/**
+	 * One forward pass. `zeroed` lets the caller ask "what if this item were
+	 * finished?" without rebuilding anything — which is how the lever is measured
+	 * rather than guessed.
+	 */
+	const forward = (zeroed?: string) => {
+		const es = new Map<string, number>();
+		const ef = new Map<string, number>();
+		const from = new Map<string, string | null>();
+		for (const id of order) {
+			let start = 0;
+			let via: string | null = null;
+			for (const pred of predecessors.get(id) ?? []) {
+				const finish = ef.get(pred) ?? 0;
+				if (finish > start) {
+					start = finish;
+					via = pred;
+				}
 			}
+			const duration = id === zeroed ? 0 : (leaves.get(id)?.duration ?? 0);
+			es.set(id, start);
+			ef.set(id, start + duration);
+			from.set(id, via);
 		}
-		earliestStart.set(id, start);
-		earliestFinish.set(id, start + (leaves.get(id)?.duration ?? 0));
-		cameFrom.set(id, from);
-	}
+		// Connected nodes only: CPM assumes unlimited parallelism, so an item with
+		// no dependencies constrains nothing however large it is.
+		const end = Math.max(
+			0,
+			...order.filter((id) => connected.has(id)).map((id) => ef.get(id) ?? 0),
+		);
+		return { es, ef, from, end };
+	};
 
-	// Over CONNECTED nodes only. Critical-path analysis assumes unlimited
-	// parallelism, so an item with no dependencies constrains nothing however
-	// large it is — a 50-day independent task can run alongside everything else.
-	// Including it would report a "dependency floor" that is really just the
-	// biggest ticket on the board, which is a different (and misleading) claim.
-	const projectEnd = Math.max(
-		0,
-		...order.filter((id) => connected.has(id)).map((id) => earliestFinish.get(id) ?? 0),
-	);
+	const base = forward();
+	const projectEnd = base.end;
 
-	// Backward pass: latest finish/start, then slack.
+	// Backward pass for slack.
 	const latestFinish = new Map<string, number>();
 	for (const id of [...order].reverse()) {
 		const nexts = successors.get(id) ?? [];
-		const finish =
+		latestFinish.set(
+			id,
 			nexts.length === 0
 				? projectEnd
 				: Math.min(
 						...nexts.map(
 							(next) => (latestFinish.get(next) ?? projectEnd) - (leaves.get(next)?.duration ?? 0),
 						),
-					);
-		latestFinish.set(id, finish);
+					),
+		);
 	}
 	const slackByIdentifier: Record<string, number> = {};
 	for (const id of order) {
@@ -249,19 +287,15 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 		const identifier = leaves.get(id)?.node.identifier;
 		if (!identifier) continue;
 		const latestStart = (latestFinish.get(id) ?? 0) - (leaves.get(id)?.duration ?? 0);
-		slackByIdentifier[identifier] =
-			Math.round((latestStart - (earliestStart.get(id) ?? 0)) * 100) / 100;
+		slackByIdentifier[identifier] = Math.round((latestStart - (base.es.get(id) ?? 0)) * 100) / 100;
 	}
 
-	// Walk back from the latest-finishing node to recover the chain.
 	let tail: string | null = null;
 	for (const id of order) {
-		if ((earliestFinish.get(id) ?? 0) === projectEnd && connected.has(id)) tail = id;
+		if ((base.ef.get(id) ?? 0) === projectEnd && connected.has(id)) tail = id;
 	}
 	const chainIds: string[] = [];
-	for (let id = tail; id !== null; id = cameFrom.get(id) ?? null) {
-		chainIds.unshift(id);
-	}
+	for (let id = tail; id !== null; id = base.from.get(id) ?? null) chainIds.unshift(id);
 
 	const chain: CriticalPathNode[] = chainIds.map((id) => {
 		const leaf = leaves.get(id) as Leaf;
@@ -271,40 +305,51 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 			effortDays: leaf.node.effortDays,
 			status: leaf.node.status,
 			done: leaf.done,
-			earliestStart: earliestStart.get(id) ?? 0,
-			earliestFinish: earliestFinish.get(id) ?? 0,
+			earliestStart: base.es.get(id) ?? 0,
+			earliestFinish: base.ef.get(id) ?? 0,
 		};
 	});
 
-	// Unestimated = no effort line AND not already finished. A done item needs no
-	// estimate, so counting it would overstate the uncertainty.
-	const unestimatedOnChain = chain.filter((n) => n.effortDays === null && !n.done).length;
+	// Unestimated across the WHOLE connected remaining graph. The item that makes
+	// the total wrong is typically the one that LOST the comparison because it was
+	// treated as zero — counting only the chain flags the visible case and misses
+	// the dangerous one.
+	const unestimated = [...connected].filter((id) => {
+		const leaf = leaves.get(id);
+		return leaf !== undefined && !leaf.done && leaf.node.effortDays === null;
+	}).length;
 
-	// The biggest lever: finishing one item removes its duration from the floor,
-	// but only if it sits ON the critical chain — reducing a slack item changes
-	// nothing, which is exactly the insight worth surfacing.
-	let biggestLever: CriticalPathResult["biggestLever"] = null;
+	// The lever, MEASURED: zero each chain item in turn and take the real drop in
+	// the floor. A near-critical path caps the saving, so the largest item is
+	// often not the biggest lever — and sometimes saves the least.
+	let biggestLever: CriticalPathComputed["biggestLever"] = null;
 	for (const node of chain) {
-		if (node.done || node.effortDays === null) continue;
-		if (biggestLever === null || node.effortDays > biggestLever.daysSaved) {
+		if (node.done) continue;
+		const id = chainIds[chain.indexOf(node)];
+		if (id === undefined) continue;
+		const saved = Math.round((projectEnd - forward(id).end) * 100) / 100;
+		if (saved <= 0) continue;
+		if (biggestLever === null || saved > biggestLever.daysSaved) {
 			biggestLever = {
 				identifier: node.identifier ?? node.title,
 				title: node.title,
-				daysSaved: node.effortDays,
+				daysSaved: saved,
 			};
 		}
 	}
 
 	return {
+		ok: true,
 		chain,
 		totalDays: Math.round(projectEnd * 100) / 100,
-		unestimatedOnChain,
-		isLowerBound: unestimatedOnChain > 0,
+		unestimated,
+		isLowerBound: unestimated > 0,
 		slackByIdentifier,
 		biggestLever,
 		consideredLeaves: leaves.size,
-		doneLeaves: [...leaves.values()].filter((l) => l.done).length,
+		doneLeaves,
 		connectedLeaves: connected.size,
+		expandedEdges,
 		cycles: [],
 	};
 }

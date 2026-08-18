@@ -22,8 +22,11 @@ import type { AtlasGraph, AtlasNode } from "./model.ts";
  * keeps its own copy of the physics for re-heating after a drag, which is a
  * short local disturbance rather than a full cold start.
  *
- * The constants are exported and INTERPOLATED into the embedded script, so the
- * two copies of the physics cannot drift apart in their tuning.
+ * The constants below are INTERPOLATED into the embedded script (render.ts
+ * builds the `const REP=...` line from them), so the two copies of the physics
+ * cannot drift apart in their tuning. An earlier version of this comment claimed
+ * that while render.ts still carried its own literals — the claim is now true,
+ * and a test asserts the emitted HTML contains these exact numbers.
  */
 export const PHYSICS = {
 	REP: 300,

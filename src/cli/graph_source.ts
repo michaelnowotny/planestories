@@ -31,6 +31,17 @@ export interface GraphSourceResult {
 	graph: AtlasGraph;
 	/** The client used, when one was — for `reportPacing`. Absent offline. */
 	client?: PlaneClient;
+	/**
+	 * Relation lookups that failed even after the paced retry pass, so the graph
+	 * is MISSING edges. Returned rather than merely logged: a read-only view can
+	 * tolerate a dropped edge, but anything that computes a NUMBER from the
+	 * dependency structure cannot — a missing `blocks` edge shortens a schedule
+	 * floor, or hides a cycle that should have been a refusal. Callers decide;
+	 * they can only decide if they are told.
+	 */
+	relationFailures: number;
+	/** Lookups recovered by the sequential second pass (informational). */
+	relationRecovered: number;
 }
 
 /**
@@ -45,7 +56,11 @@ export interface GraphSourceResult {
 export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSourceResult> {
 	if (options.file) {
 		const content = await Bun.file(options.file).text();
-		return { graph: buildAtlasFromFile(content, options.file) };
+		return {
+			graph: buildAtlasFromFile(content, options.file),
+			relationFailures: 0,
+			relationRecovered: 0,
+		};
 	}
 
 	const config = options.fromSnapshot
@@ -86,10 +101,14 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 	// tolerate a missing edge must say so — see the note in the critical-path
 	// command, where a dropped edge could silently shorten the reported floor.
 	let relationsById: Map<string, PlaneIssueRelations> | undefined;
+	let relationFailures = 0;
+	let relationRecovered = 0;
 	if (options.dependencies !== false) {
 		const items = index.items.filter((item) => !isCriterionChild(item));
 		const result = await fetchRelationsWithSweep(client, project.id, items);
 		relationsById = result.relationsById;
+		relationFailures = result.failed;
+		relationRecovered = result.recovered;
 		if (result.recovered > 0) {
 			console.error(
 				chalk.dim(
@@ -116,5 +135,7 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 			relationsById,
 		),
 		client,
+		relationFailures,
+		relationRecovered,
 	};
 }

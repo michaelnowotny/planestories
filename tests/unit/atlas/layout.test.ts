@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { settleLayout } from "../../../src/atlas/layout.ts";
+import { PHYSICS, settleLayout } from "../../../src/atlas/layout.ts";
 import type { AtlasEdge, AtlasGraph, AtlasNode } from "../../../src/atlas/model.ts";
 import { renderAtlasHtml } from "../../../src/atlas/render.ts";
 
@@ -84,6 +84,21 @@ describe("the renderer ships the settled layout", () => {
 		// And PRESETTLED must require EVERY node, not merely some: a partial set
 		// would freeze the nodes it has while the rest fly around them.
 		expect(html).toContain("NODES.every(n=>POS0[n.id])");
+	});
+
+	test("the embedded physics are the SAME constants the generator settled with", () => {
+		// The whole point of interpolating PHYSICS. If the browser reheats with
+		// different numbers than the pre-settled positions were produced under, a
+		// drag drops the board into a world it never inhabited — and the failure is
+		// silent. An earlier version of this claim was written in a comment while
+		// render.ts still carried its own literals; this test is what makes it true.
+		const html = renderAtlasHtml(BOARD);
+		expect(html).toContain(`const REP=${PHYSICS.REP},`);
+		expect(html).toContain(`parent:${PHYSICS.SPRING.parent}`);
+		expect(html).toContain(`blocks:${PHYSICS.REST.blocks}`);
+		expect(html).toContain(`GRAV=${PHYSICS.GRAV}`);
+		expect(html).toContain(`DECAY=${PHYSICS.DECAY}`);
+		expect(html).toContain(`AMIN=${PHYSICS.AMIN}`);
 	});
 
 	test("an empty board still produces a valid page", () => {
