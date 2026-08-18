@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { ParseError } from "../../../src/errors.ts";
 import { PlaneClient } from "../../../src/plane/client.ts";
 import { normalizeRelations } from "../../../src/plane/relation_refs.ts";
 import { collectDependencyEdges } from "../../../src/sync/relations.ts";
@@ -39,6 +40,21 @@ describe("relation reference normalization", () => {
 		expect(out.blocked_by).toEqual([]);
 		expect(out.duplicate).toEqual([]);
 		expect(out.finish_after).toEqual([]);
+	});
+
+	test("a malformed payload is a ParseError, so nothing can classify it as transient", () => {
+		// It must NOT be a PlaneApiError with a 5xx status: isRetryableStatus() calls
+		// 5xx transient, and a malformed payload is DETERMINISTIC — retrying it burns
+		// the budget on a failure that cannot succeed, which is precisely what the
+		// "retry only classified-transient failures" rule forbids. Found by review.
+		let caught: unknown;
+		try {
+			normalizeRelations({ blocked_by: [{ nope: 1 }] });
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(ParseError);
+		expect((caught as { status?: number }).status).toBeUndefined();
 	});
 
 	test("an UNRECOGNIZABLE ref throws instead of vanishing", () => {

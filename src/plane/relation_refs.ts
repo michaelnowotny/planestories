@@ -1,4 +1,4 @@
-import { PlaneApiError } from "../errors.ts";
+import { ParseError } from "../errors.ts";
 import type { PlaneIssueRelations } from "./client.ts";
 
 /**
@@ -18,6 +18,12 @@ import type { PlaneIssueRelations } from "./client.ts";
  * — a cycle the guard could not prevent, because the guard reads the same blind
  * edge list. It also silently emptied the atlas dependency graph, the spec
  * packets handed to agents, the epic rollup, and doctor's dangling check.
+ *
+ * Failures here are ParseError, NOT PlaneApiError: a malformed payload is
+ * DETERMINISTIC. PlaneApiError carries an HTTP status and `isRetryableStatus`
+ * classifies 5xx as transient, so a synthetic 500 would have invited callers to
+ * retry a failure that cannot possibly succeed on a second attempt — the exact
+ * thing the "retry only classified-transient failures" rule forbids.
  *
  * So normalization happens ONCE, at the client boundary (`getRelations`), and
  * every consumer downstream sees bare id strings on every instance. Normalizing
@@ -62,18 +68,16 @@ export function normalizeRelations(raw: unknown): PlaneIssueRelations {
 			continue;
 		}
 		if (!Array.isArray(list)) {
-			throw new PlaneApiError(
+			throw new ParseError(
 				`Relations payload field "${field}" is not an array: ${JSON.stringify(list)}`,
-				500,
 			);
 		}
 		out[field] = list.map((ref) => {
 			const id = normalizeRelationRef(ref);
 			if (id === null) {
-				throw new PlaneApiError(
+				throw new ParseError(
 					`Unrecognizable ${field} relation reference from Plane: ${JSON.stringify(ref)}. ` +
 						"Refusing to treat it as absent — that would silently drop a dependency edge.",
-					500,
 				);
 			}
 			return id;
