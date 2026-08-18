@@ -703,6 +703,57 @@ in 9.5b.
    `.mcp.json` **wrapper script is the recommended default**, not a fallback: a `${VAR}`
    reference to a mistyped name yields an *empty key* and a silently-dead MCP.
 
+### 9.5e The relation-ref defect (2026-08-17) — FIXED, with three follow-ups still open
+
+**The most instructive bug this project has had, because every layer of defence missed it.**
+
+Reported by the finance session as *"import reports creating dependency relations that do not
+persist"*. **Their diagnosis was wrong and the truth was worse.** I queried CE directly: the
+relations WERE on the board. The writes had always worked; **the READ was broken**, which produces
+an identical symptom ("would create 3" on every re-run) and had far wider consequences.
+
+Cause: Plane returns relation refs as bare STRINGS on `/issues/` and as
+`{project_id, issue_id}` OBJECTS on `/work-items/`. `PlaneIssueRelations` types them `string[]`, so
+objects flowed through as ids and every lookup key became `[object Object]`. On CE, **no existing
+relation was ever visible.**
+
+What that produced, all observed rather than theorised:
+- `import` re-created every relation on every run, with the direction depending on batch membership
+  — so repeated runs wrote the REVERSED edge and **created a live two-node cycle**
+  (DATA-2569 ↔ DATA-2570). The cycle guard could not prevent it: the guard reads the same blind
+  edge list.
+- **Five consumers were silently wrong on CE** — `relations.ts`, `atlas/model.ts` (live dependency
+  graph EMPTY), `packet.ts` (**agents handed the wrong dependencies**), `rollup.ts`,
+  `graph_check.ts`. Only `snapshot.ts` normalized, which is exactly why `--from-snapshot` views
+  looked correct while live ones did not.
+
+**Fixed** at the client boundary (`9ac1217`) — see §10 fact 2. Three reasons that location:
+per-consumer normalization is what caused the bug; a new consumer inherits the fix for free; and
+the failure mode of forgetting is *silence*, not an error.
+
+**Why every defence missed it, which is the part worth carrying:**
+1. **The type lied.** `string[]` while the wire sometimes returns objects. tsc cannot help when the
+   annotation is the thing that is wrong.
+2. **No test ever presented the object shape.** Every fake returns strings, so the whole suite
+   passed identically before and after the fix. This is a NEW variant of §10b: not a test that
+   could not fail, but an INPUT SHAPE no test ever supplied. When an API's response varies by
+   configuration, the fakes must cover every variant, or the untested variant is the production one.
+3. **The documentation asserted the fix existed.** §10 fact 2 said refs "are normalized on read" —
+   true in one file, read as a guarantee.
+4. **The dry-run agreed with the apply**, because both compute from the same broken read. A preview
+   that mirrors the writer cannot catch a defect they share.
+
+**Still open (queued, in priority order):**
+- **The relation count reports INTENT, not outcome.** `created: toCreate.length` is computed before
+  any POST is issued, so "Relations created: 3" means "we meant to create 3". It must count verified
+  outcomes — and a 2xx is NOT sufficient proof either, because Plane silently drops cycle-creating
+  relations, so the honest check is a read-back.
+- **`export` omits `blocked_by`/`blocks`.** Relations therefore do not round-trip, and a field
+  export omits cannot be used to verify or to detect drift. (The finance session mis-read a missing
+  `blocked_by` in an export as evidence a relation had been cleaned up; it was not evidence.)
+- **A `doctor` check for "declared dependency not present on the board"** — worth much more now
+  that the read is trustworthy.
+
 ### 9.5c Product opportunities the real cutover revealed (bigger than defects — read before picking work)
 
 §9.5b lists things that broke. These are things the experience showed are *missing*, ordered by
@@ -945,8 +996,15 @@ observation — re-check it, don't trust it.*
 1. **Sequence ledger is max-ever.** Deleted numbers are never reused. Confirmed on both cloud
    and CE, by probe (mid-delete and top-delete). The whole exact-identifier mechanism rests on it.
 2. **Two REST dialects.** `/issues/` (legacy, past its announced deprecation) and `/work-items/`.
-   The operator's CE serves **relations only** under `/work-items/`. Work-items relation refs come
-   back as `{project_id, issue_id}` objects and are normalized on read.
+   The operator's CE serves **relations only** under `/work-items/`. **Work-items relation refs
+   come back as `{project_id, issue_id}` OBJECTS where `/issues/` returns bare id STRINGS** — and
+   `PlaneIssueRelations` declares them `string[]`, so TypeScript will not catch an object flowing
+   through as an id. Normalization happens in exactly ONE place, `PlaneClient.getRelations`
+   (`src/plane/relation_refs.ts`), so every consumer receives bare ids on every dialect, and it
+   fails closed on a shape it does not recognize. **Never normalize per consumer** — the earlier
+   version of this line said refs "are normalized on read", which was true only in `snapshot.ts`
+   while five other consumers used the raw ref as an id and saw ZERO existing relations on CE
+   (§9.5e). A general-sounding claim that holds in one file is worse than no claim at all.
 3. **Neither instance serves the archived-items endpoint.** `verify` therefore has a live-only
    mode that warns explicitly rather than pretending to full coverage.
 4. **`created_at` / `created_by` ARE settable** on create — for work items *and* comments — on
@@ -1004,6 +1062,13 @@ reported as evidence. Five real instances, because the shapes repeat:
 5. **Green for an environmental reason.** A test passed only because a gitignored `.env` happened
    to exist in that worktree; a fresh clone would have failed. *Isolate what you depend on —
    cwd, HOME, `PLANE_*` env — or you are testing the machine.*
+
+6. **The input shape no test ever supplied.** (Added 2026-08-17, §9.5e.) Every fake returned
+   Plane's `/issues/` string form for relation refs, so the entire suite passed identically before
+   and after fixing a defect that silently emptied five consumers on `/work-items/`. Nothing here
+   "could not fail" in the earlier sense — the tests were fine; the *inputs* were monocultural.
+   **When an API's response shape varies by configuration (dialect, version, tier), the fakes must
+   carry every variant, or the untested variant is the one running in production.**
 
 **The habit that catches all five: after writing a test, revert the fix and watch it fail.** Every
 fix in the 2026-08-17 work carries that red-then-green evidence in its commit message. It is

@@ -65,6 +65,15 @@ Don't blur these.
 - `src/plane/client.ts` — REST client. `request()` wraps every call in transient-failure retry
   (429/5xx/network, `Retry-After` or exponential backoff+jitter; `PLANE_MAX_RETRIES`). Never add
   a parallel HTTP path.
+- `src/plane/relation_refs.ts` — **the ONE place relation references are normalized.** Plane
+  returns them as bare id strings on `/issues/` and as `{project_id, issue_id}` objects on
+  `/work-items/`, while the type says `string[]` — so an un-normalized ref becomes an
+  `[object Object]` lookup key that matches nothing, and the failure mode is SILENCE, not an error.
+  `PlaneClient.getRelations` applies it so every consumer downstream sees bare ids on every
+  dialect. **Never normalize in a consumer**: doing it per call site is exactly how five of them
+  ended up wrong on CE while one was right (docs/HANDOFF.md §9.5e). Fails closed on an
+  unrecognizable shape — a dropped edge is invisible, and an invisible edge gets deleted or
+  re-created forever.
 - `src/plane/pacer.ts` — optional per-client token-bucket pacing. The configured per-key rate is
   the throughput authority; concurrency is derived from observed latency via Little's Law. Each
   client owns its pacer, so two-instance replication keeps independent budgets.
