@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { registerAtlasCommand } from "./commands/atlas.ts";
+import { registerCriticalPathCommand } from "./commands/critical-path.ts";
 import { registerDeleteCommand } from "./commands/delete.ts";
 import { registerDoctorCommand } from "./commands/doctor.ts";
 import { registerEpicCommand } from "./commands/epic.ts";
@@ -39,6 +40,7 @@ registerAtlasCommand(program);
 registerLintCommand(program);
 registerPacketCommand(program);
 registerEpicCommand(program);
+registerCriticalPathCommand(program);
 registerReplicateCommand(program);
 registerRenameProjectCommand(program);
 
