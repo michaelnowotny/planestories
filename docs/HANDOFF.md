@@ -999,9 +999,14 @@ observation — re-check it, don't trust it.*
    The operator's CE serves **relations only** under `/work-items/`. **Work-items relation refs
    come back as `{project_id, issue_id}` OBJECTS where `/issues/` returns bare id STRINGS** — and
    `PlaneIssueRelations` declares them `string[]`, so TypeScript will not catch an object flowing
-   through as an id. Normalization happens in exactly ONE place, `PlaneClient.getRelations`
-   (`src/plane/relation_refs.ts`), so every consumer receives bare ids on every dialect, and it
-   fails closed on a shape it does not recognize. **Never normalize per consumer** — the earlier
+   through as an id. **The live HTTP boundary is `PlaneClient.getRelations`**
+   (`src/plane/relation_refs.ts`): it normalizes, so every consumer receives bare ids on every
+   dialect, and it fails closed BOTH on an unrecognizable ref and on a non-object payload (a bad
+   envelope silently becoming "no relations" was the same defect on a different input — review
+   caught it). `compactRelations` in `snapshot.ts` re-checks deliberately: its `SnapshotClient` is
+   duck-typed and is not always a real `PlaneClient`, so that is a second guarded ENTRANCE, not a
+   duplicate — which is why an earlier draft of this line saying "exactly ONE place" was too
+   strong. **Never normalize in a CONSUMER** — the earlier
    version of this line said refs "are normalized on read", which was true only in `snapshot.ts`
    while five other consumers used the raw ref as an id and saw ZERO existing relations on CE
    (§9.5e). A general-sounding claim that holds in one file is worse than no claim at all.
@@ -1067,8 +1072,13 @@ reported as evidence. Five real instances, because the shapes repeat:
    Plane's `/issues/` string form for relation refs, so the entire suite passed identically before
    and after fixing a defect that silently emptied five consumers on `/work-items/`. Nothing here
    "could not fail" in the earlier sense — the tests were fine; the *inputs* were monocultural.
-   **When an API's response shape varies by configuration (dialect, version, tier), the fakes must
-   carry every variant, or the untested variant is the one running in production.**
+   **The rule is about WHICH fake, and review sharpened it:** a fake that stands in for the
+   *client* must carry the client's post-normalization contract (and `makeFakeClient` now returns
+   `normalizeRelations(state)`, so it cannot drift from production); a fake that stands in for
+   `fetch`/`request` must carry **every wire variant**, because that is the layer where a
+   configuration-dependent shape actually differs. Retrofitting wire shapes into consumer fakes
+   would test a state production can no longer produce. The 694-test suite staying green was
+   therefore expected — the gap was that nothing faked the WIRE.
 
 **The habit that catches all five: after writing a test, revert the fix and watch it fail.** Every
 fix in the 2026-08-17 work carries that red-then-green evidence in its commit message. It is

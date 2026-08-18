@@ -6,17 +6,11 @@ import type { PlaneEndpointDialect, PlaneRelationKind } from "../plane/client.ts
  */
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
-/** All relation kinds, in canonical order (used for deterministic serialization). */
-export const RELATION_KINDS: readonly PlaneRelationKind[] = [
-	"blocked_by",
-	"blocking",
-	"relates_to",
-	"duplicate",
-	"start_before",
-	"start_after",
-	"finish_before",
-	"finish_after",
-];
+// All relation kinds, in canonical order (used for deterministic serialization).
+// Defined ONCE in src/plane/relation_refs.ts and re-exported here: two copies
+// would let a new kind be added to one list and silently dropped by the other,
+// which is the same silent-loss class the normalizer exists to prevent.
+export { RELATION_KINDS } from "../plane/relation_refs.ts";
 
 /** Where the snapshot was taken from. Never contains credentials. */
 export interface SnapshotSource {

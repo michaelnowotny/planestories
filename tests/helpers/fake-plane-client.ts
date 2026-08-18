@@ -3,6 +3,7 @@ import type {
 	PlaneDependencyRelationType,
 	PlaneIssueRelations,
 } from "../../src/plane/client.ts";
+import { normalizeRelations } from "../../src/plane/relation_refs.ts";
 
 export interface FakeProject {
 	id: string;
@@ -283,19 +284,20 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			return (found ?? { id: workItemId, labels: [] }) as unknown as T;
 		},
 
+		/**
+		 * Returns relations through the REAL normalizer, so this fake honours the
+		 * same post-normalization contract as `PlaneClient.getRelations`.
+		 *
+		 * That means a test MAY seed the CE `{project_id, issue_id}` shape and get
+		 * bare ids back, exactly as production does. What it deliberately does NOT
+		 * do is emit raw objects to consumers: this fake stands in for the CLIENT,
+		 * not for the wire, and a consumer can no longer receive an un-normalized
+		 * ref. Wire-shape variance is covered where it actually lives — at the HTTP
+		 * boundary, in tests/unit/plane/relation-refs.test.ts.
+		 */
 		async getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations> {
 			record("getRelations", [projectId, workItemId]);
-			const state = relationState(workItemId);
-			return {
-				blocking: [...state.blocking],
-				blocked_by: [...state.blocked_by],
-				relates_to: [...state.relates_to],
-				duplicate: [...state.duplicate],
-				start_before: [...state.start_before],
-				start_after: [...state.start_after],
-				finish_before: [...state.finish_before],
-				finish_after: [...state.finish_after],
-			};
+			return normalizeRelations(relationState(workItemId));
 		},
 
 		async createRelation(

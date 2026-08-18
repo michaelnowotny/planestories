@@ -57,6 +57,26 @@ describe("relation reference normalization", () => {
 		expect((caught as { status?: number }).status).toBeUndefined();
 	});
 
+	test("a NON-OBJECT payload throws — it is not an empty relation set", () => {
+		// The regression this fix originally introduced, caught in review. `request()`
+		// returns undefined for a 200 whose body is empty, truncated or HTML, so every
+		// one of these is reachable. Turning them into eight empty arrays reports "no
+		// dependencies" for an item whose edges we merely failed to read — the exact
+		// defect this module exists to prevent, on a different input.
+		for (const payload of [undefined, null, [], 42, "oops", true]) {
+			expect(() => normalizeRelations(payload)).toThrow(/not an object/);
+		}
+	});
+
+	test("an EMPTY-STRING ref is rejected, not passed through", () => {
+		// "" would build a lookup key like "block:>item-a" that matches nothing —
+		// the same silent miss as the object shape, with a different empty value.
+		expect(() => normalizeRelations({ blocked_by: [""] })).toThrow(/Unrecognizable/);
+		expect(() => normalizeRelations({ blocked_by: [{ issue_id: "  " }] })).toThrow(
+			/Unrecognizable/,
+		);
+	});
+
 	test("an UNRECOGNIZABLE ref throws instead of vanishing", () => {
 		// Dropping it would hide an edge, and a caller that cannot see an edge
 		// either deletes it from the board or re-creates it forever. Absence must
@@ -78,6 +98,26 @@ describe("PlaneClient.getRelations normalizes at the boundary", () => {
 
 	test("issues dialect: unchanged behaviour", async () => {
 		const relations = await clientReturning(CLOUD_STYLE, "issues").getRelations("p", "item-a");
+		expect(relations.blocked_by).toEqual(["item-b"]);
+	});
+});
+
+describe("the shared fake honours the post-normalization contract", () => {
+	test("a CE-shaped seed is returned to consumers as bare ids", async () => {
+		// Review's suggestion, and the right granularity: the fake stands in for the
+		// CLIENT, so it must expose what the client exposes. Seeding the wire shape
+		// here proves the fake cannot drift from production's contract — while wire
+		// variance itself stays tested at the HTTP boundary above, where it lives.
+		const { makeFakeClient } = await import("../../helpers/fake-plane-client.ts");
+		const { client } = makeFakeClient({
+			projects: [{ id: "p", name: "P", identifier: "P" }],
+			relations: {
+				"item-a": {
+					blocked_by: [{ project_id: "p", issue_id: "item-b" }] as unknown as string[],
+				},
+			},
+		});
+		const relations = await client.getRelations("p", "item-a");
 		expect(relations.blocked_by).toEqual(["item-b"]);
 	});
 });
