@@ -1,0 +1,55 @@
+import chalk from "chalk";
+import type { Command } from "commander";
+import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
+import { diffGraphs, formatGraphDiff } from "../../sync/graph_diff.ts";
+import { resolveGraph } from "../graph_source.ts";
+import { openSnapshotSource } from "../snapshot_option.ts";
+
+function handleError(error: unknown): never {
+	if (
+		error instanceof ConfigError ||
+		error instanceof ParseError ||
+		error instanceof PlaneApiError ||
+		error instanceof ResolverError
+	) {
+		console.error(chalk.red(`${error.name}: ${error.message}`));
+	} else if (error instanceof Error) {
+		console.error(chalk.red(`Error: ${error.message}`));
+	} else {
+		console.error(chalk.red(`Error: ${String(error)}`));
+	}
+	process.exit(1);
+}
+
+export function registerDiffCommand(program: Command): void {
+	program
+		.command("diff <before> <after>")
+		.description("Structural difference between two snapshots — dependencies, epics, status")
+		.option("--json", "Emit the diff as JSON", false)
+		.action(async (beforePath: string, afterPath: string, options) => {
+			try {
+				// Snapshots only. A live board cannot be a diff operand: it moves while
+				// you read it, so "what changed" would include your own read window.
+				const [sa, sb] = [
+					await openSnapshotSource(beforePath),
+					await openSnapshotSource(afterPath),
+				];
+				const [ga, gb] = [
+					await resolveGraph({ fromSnapshot: beforePath, project: sa.projectName, json: true }),
+					await resolveGraph({ fromSnapshot: afterPath, project: sb.projectName, json: true }),
+				];
+
+				const diff = diffGraphs(ga.graph, gb.graph, {
+					beforeLabel: `${sa.projectIdentifier} @ ${sa.takenAt.slice(0, 19)}Z`,
+					afterLabel: `${sb.projectIdentifier} @ ${sb.takenAt.slice(0, 19)}Z`,
+					beforeInstance: sa.workspaceSlug,
+					afterInstance: sb.workspaceSlug,
+				});
+
+				if (options.json) console.log(JSON.stringify(diff, null, 1));
+				else console.log(formatGraphDiff(diff));
+			} catch (error) {
+				handleError(error);
+			}
+		});
+}
