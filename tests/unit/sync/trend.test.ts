@@ -130,3 +130,26 @@ describe("trend series", () => {
 		expect(formatTrend([])).toContain("No snapshots matched");
 	});
 });
+
+describe("trend series key", () => {
+	test("two PROJECTS in one workspace are never one series", () => {
+		// The CLI keys on host/workspace/PROJECT. Keying on the workspace alone
+		// merged DATA (770 stories) with SBOX (12) into a single line reading
+		// "stories -758" — a change of project drawn as a board collapse.
+		const series = buildTrend([
+			row({ instance: "plane-so-bloomenkohlberg/DATA", stories: 770 }),
+			row({ instance: "plane-so-bloomenkohlberg/SBOX", stories: 12 }),
+		]);
+		expect(series.every((r) => r.delta === null)).toBe(true);
+	});
+
+	test("two HOSTS sharing a workspace slug are never one series", () => {
+		// backup.ts already carries instanceTag() for exactly this: two instances
+		// can share a slug, which is why the key includes the host.
+		const series = buildTrend([
+			row({ instance: "plane-so-archimedes/DATA", stories: 100 }),
+			row({ instance: "plane-porcupine-works-archimedes/DATA", stories: 900 }),
+		]);
+		expect(series.every((r) => r.delta === null)).toBe(true);
+	});
+});

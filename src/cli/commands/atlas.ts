@@ -72,7 +72,11 @@ export function registerAtlasCommand(program: Command) {
 				// This used to be a 70-line twin of resolveGraph; two sites assembling
 				// the same graph is the shape that produced the relation-ref defect,
 				// where five call sites did one job and one did it differently.
-				const { graph, client: pacedClient } = await resolveGraph({
+				const {
+					graph,
+					client: pacedClient,
+					relationFailures,
+				} = await resolveGraph({
 					file,
 					config: options.config,
 					context: options.context,
@@ -82,7 +86,14 @@ export function registerAtlasCommand(program: Command) {
 					json: options.json === true,
 				});
 
-				const html = options.json ? "" : renderAtlasHtml(graph);
+				// The HTML outlives the stderr warning about a partial sweep, so the caveat
+				// travels INSIDE the artifact rather than beside it.
+				const html = options.json
+					? ""
+					: renderAtlasHtml(graph, {
+							relationsComplete: relationFailures === 0,
+							relationFailures,
+						});
 				const outPath = resolveOutputPath(
 					options.output,
 					options.json ? "atlas.json" : "atlas.html",

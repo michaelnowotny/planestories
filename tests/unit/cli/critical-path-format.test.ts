@@ -24,6 +24,7 @@ function computed(over: Partial<Extract<CriticalPathResult, { ok: true }>> = {})
 		],
 		totalDays: 2,
 		unestimated: 0,
+		unestimatedIdentifiers: [],
 		isLowerBound: false,
 		slackByIdentifier: {},
 		biggestLever: null,

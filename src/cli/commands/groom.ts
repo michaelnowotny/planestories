@@ -5,6 +5,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { createPlaneClient } from "../../plane/client.ts";
 import { type GroomReport, groom } from "../../sync/groomer.ts";
 import { reverseSyncCriteria, type WriteBackReport } from "../../sync/writeback.ts";
+import { announceTarget } from "../announce_target.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -145,6 +146,7 @@ export function registerGroomCommand(program: Command) {
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
+				announceTarget(config, options.context, options.project);
 				const client = createPlaneClient({
 					apiKey: config.apiKey,
 					workspaceSlug: config.workspaceSlug,

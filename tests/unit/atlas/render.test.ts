@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildAtlasFromFile } from "../../../src/atlas/model.ts";
 import { renderAtlasHtml } from "../../../src/atlas/render.ts";
+import { computeCriticalPath } from "../../../src/sync/critical_path.ts";
 
 const FILE = `---
 project: "P"
@@ -218,51 +219,127 @@ describe("scoped drag relaxation", () => {
 });
 
 describe("effort visibility (operator decisions A/B/C)", () => {
-	const html = () => renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+	// These parse the EMBEDDED PAYLOAD instead of grepping the template. An earlier
+	// version of this block asserted that source strings existed, which let a
+	// mutation replace the whole computation and stay green — the review called it
+	// theatre, correctly.
+	const embedded = (html: string, name: string) => {
+		const m = html.match(new RegExp(`const ${name} = ([\\s\\S]*?);\\n`));
+		if (!m) throw new Error(`no embedded ${name}`);
+		return JSON.parse((m[1] as string).replace(/\\u003c/g, "<"));
+	};
 
 	test("R is gone — it re-solved to the same arrangement and only cost a stall", () => {
-		expect(html()).not.toContain('k==="r"');
+		expect(renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"))).not.toContain('k==="r"');
 	});
 
-	test("the floor is embedded from the SHARED implementation, not re-derived", () => {
-		// A second copy of this arithmetic in the browser is how a headline number
-		// starts disagreeing with the command that reports it.
-		expect(html()).toContain("const CP = ");
-		expect(html()).toContain("critical-path command uses");
+	test("the embedded floor EQUALS what computeCriticalPath returns", () => {
+		const graph = buildAtlasFromFile(FILE, "x.md");
+		const cp = computeCriticalPath(graph);
+		const got = embedded(renderAtlasHtml(graph), "CP");
+		// The fixture has no dependency edges, so the honest answer is "none" —
+		// NOT a floor of 0 dev-days, which is absence dressed as a measurement.
+		expect(cp.ok && cp.chain.length).toBe(0);
+		expect(got).toEqual({ state: "none" });
 	});
 
-	test("a lower-bound floor is never rendered as a bare number", () => {
-		const out = html();
-		// The gauge prefixes >= and relabels itself, and the tooltip says why.
-		expect(out).toContain('f.isLowerBound?"\\u2265":""');
-		expect(out).toContain('f.isLowerBound?"FLOOR (MIN)":"FLOOR"');
-		expect(out).toContain("the real floor is HIGHER");
-		// And it states what KIND of number it is.
-		expect(out).toContain("PARALLEL floor");
+	test("a partial relation sweep embeds INCOMPLETE, never a number", () => {
+		// The HTML outlives the stderr warning. Emailed and opened tomorrow, a
+		// floor computed from a graph with missing edges reads as exact.
+		const got = embedded(
+			renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+				relationsComplete: false,
+				relationFailures: 3,
+			}),
+			"CP",
+		);
+		expect(got.state).toBe("incomplete");
+		expect(got.missing).toBe(3);
+		expect(got).not.toHaveProperty("totalDays");
 	});
 
-	test("only unestimated stories ON A DEPENDENCY EDGE are flagged", () => {
-		const out = html();
-		// Flagging all 276 unestimated stories would take the flag from a signal to
-		// wallpaper; these ~6 are the ones that make the floor wrong.
-		expect(out).toContain("const NOEST=new Set()");
-		expect(out).toContain('if(e.type==="blocks"){onEdge.add(e.source);onEdge.add(e.target);}');
-		// The GATE, not merely the computation feeding it: an earlier version of
-		// this assertion checked the line above and stayed green when the guard
-		// was deleted and every unestimated story got flagged.
-		expect(out).toContain("if(onEdge.has(n.id))NOEST.add(n.id);");
-		// Finished work needs no estimate.
-		expect(out).toContain('if(n.statusGroup==="completed"||n.statusGroup==="cancelled")continue;');
+	// A fixture that actually EXERCISES the set: two linked stories, one with no
+	// estimate. The plain FILE fixture has no dependency edges, so both sides come
+	// out empty and the comparison passes no matter what — the review's point
+	// about tests that cannot discriminate, arriving in the replacement for a test
+	// that could not discriminate.
+	const LINKED = [
+		"---",
+		'project: "P"',
+		"---",
+		"",
+		"## The epic",
+		"",
+		"```yaml",
+		"kind: epic",
+		"plane_identifier: P-1",
+		"```",
+		"",
+		"### Why is this needed?",
+		"Because.",
+		"",
+		"## As a dev, I want A, so that B",
+		"",
+		"```yaml",
+		"plane_identifier: P-2",
+		"parent: P-1",
+		"blocked_by: [P-3]",
+		"```",
+		"",
+		"**Effort:** 2 dev-days",
+		"",
+		"Body text that is long enough to be meaningful.",
+		"",
+		"### Acceptance Criteria",
+		"- [ ] something concrete",
+		"",
+		"## As a dev, I want C, so that D",
+		"",
+		"```yaml",
+		"plane_identifier: P-3",
+		"parent: P-1",
+		"```",
+		"",
+		"Body text that is long enough to be meaningful.",
+		"",
+		"### Acceptance Criteria",
+		"- [ ] something concrete",
+		"",
+	].join("\n");
+
+	test("the no-estimate set is NON-EMPTY and matches the floor's basis", () => {
+		const graph = buildAtlasFromFile(LINKED, "linked.md");
+		const cp = computeCriticalPath(graph);
+		if (!cp.ok) throw new Error("expected a computed result");
+		// P-3 is connected by a dependency and has no effort line.
+		expect(cp.unestimatedIdentifiers).toEqual(["P-3"]);
+		expect(embedded(renderAtlasHtml(graph), "NOEST_IDS")).toEqual(["P-3"]);
 	});
 
-	test("the no-estimate chip filters, like the flagged chip", () => {
-		const out = html();
-		expect(out).toContain("no estimate");
-		expect(out).toContain("state.noEstOnly=!state.noEstOnly");
-		expect(out).toContain("state.noEstOnly&&!NOEST.has(n.id)");
+	test("the no-estimate set is the SAME set the floor's lower bound rests on", () => {
+		// Two derivations disagreed one commit apart: the tooltip counted expanded
+		// connected leaves, the filter counted literal edge endpoints. After an epic
+		// edge expanded, the stories making the floor a bound were invisible to the
+		// filter the tooltip named.
+		const graph = buildAtlasFromFile(FILE, "x.md");
+		const cp = computeCriticalPath(graph);
+		expect(embedded(renderAtlasHtml(graph), "NOEST_IDS")).toEqual(
+			cp.ok ? cp.unestimatedIdentifiers : [],
+		);
 	});
 
-	test("a cycle shows no floor at all, rather than a zero", () => {
-		expect(html()).toContain("No floor: the dependency graph has a cycle");
+	test("the browser CONSUMES that set rather than re-deriving it", () => {
+		const out = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		expect(out).toContain("const want=new Set(NOEST_IDS||[]);");
+		// The old re-derivation must not come back.
+		expect(out).not.toContain("if(onEdge.has(n.id))NOEST.add(n.id);");
+	});
+
+	test("the gauge distinguishes all four states", () => {
+		const out = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		expect(out).toContain('if(st==="ok")');
+		expect(out).toContain('st==="cycle"');
+		expect(out).toContain('st==="incomplete"');
+		expect(out).toContain("No dependency chain on this board");
 	});
 });

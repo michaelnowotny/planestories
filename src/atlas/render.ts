@@ -30,7 +30,13 @@ import type { AtlasGraph } from "./model.ts";
  * Inspired by Project Atlas in linearstories (Ijonas Kisselbach), rethought for
  * planestories and Plane.
  */
-export function renderAtlasHtml(graph: AtlasGraph): string {
+export interface RenderOptions {
+	/** False when the relation sweep dropped edges — the graph is missing constraints. */
+	relationsComplete?: boolean;
+	relationFailures?: number;
+}
+
+export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions = {}): string {
 	// Escape the JSON so a title containing "</script>" can't break out of the tag.
 	const data = JSON.stringify(graph).replace(/</g, "\\u003c");
 	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
@@ -44,16 +50,34 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
 	// in the browser means the gauge and the CLI cannot disagree — a second copy
 	// of this arithmetic is how a headline number starts drifting from its source.
 	const cp = computeCriticalPath(graph);
-	const cpSummary = cp.ok
-		? {
-				ok: true,
-				totalDays: cp.totalDays,
-				chainLength: cp.chain.length,
-				unestimated: cp.unestimated,
-				isLowerBound: cp.isLowerBound,
-			}
-		: { ok: false, cycles: cp.cycles.slice(0, 1) };
+	// THREE states, not two. "Incomplete" is distinct from "cycle": a partial
+	// relation sweep means edges are MISSING, so a floor computed from it may be
+	// too short or may hide a cycle. The CLI already refuses in that case; the
+	// HTML outlives the stderr warning that accompanied it, so the artifact has to
+	// carry the caveat itself. A number in a file someone opens tomorrow cannot
+	// rely on a warning printed today.
+	//
+	// A chain of length 0 is also NOT a floor of zero — it is the absence of any
+	// dependency chain, and rendering it as "0d" is absence coerced into a
+	// valid-looking value.
+	const cpSummary =
+		options.relationsComplete === false
+			? { state: "incomplete" as const, missing: options.relationFailures ?? 0 }
+			: cp.ok
+				? cp.chain.length === 0
+					? { state: "none" as const }
+					: {
+							state: "ok" as const,
+							totalDays: cp.totalDays,
+							chainLength: cp.chain.length,
+							unestimated: cp.unestimated,
+							isLowerBound: cp.isLowerBound,
+						}
+				: { state: "cycle" as const, cycles: cp.cycles.slice(0, 1) };
 	const cpJson = JSON.stringify(cpSummary).replace(/</g, "\\u003c");
+	// The SAME set the floor's lower-bound claim is based on, so the filter the
+	// tooltip names selects exactly the stories that make the number a bound.
+	const noEstJson = JSON.stringify(cp.ok ? cp.unestimatedIdentifiers : []).replace(/</g, "\\u003c");
 
 	return `<!doctype html>
 <html lang="en">
@@ -161,6 +185,7 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
 const GRAPH = ${data};
 const POS0 = ${settled};
 const CP = ${cpJson};
+const NOEST_IDS = ${noEstJson};
 ${SCRIPT}
 </script>
 </body>
@@ -381,14 +406,15 @@ const DEPS=(GRAPH.edges||[]).filter(e=>byId.has(e.source)&&byId.has(e.target));
 // NOT every unestimated story: 77% of the open board has no estimate, so
 // flagging all of them would take the flag from a signal to wallpaper. These are
 // the ones that make the schedule floor wrong, which is a claim worth acting on.
+// Supplied by computeCriticalPath at build time — the SAME connected-leaf set
+// the floor's lower-bound claim rests on. Re-deriving it here is what made the
+// tooltip and the filter disagree: the tooltip counted expanded connected
+// leaves while this counted literal edge endpoints, so once an epic edge was
+// expanded the stories that made the floor a bound were invisible to the filter
+// the tooltip told you to use.
 const NOEST=new Set();
-{const onEdge=new Set();
- for(const e of DEPS){if(e.type==="blocks"){onEdge.add(e.source);onEdge.add(e.target);}}
- for(const n of NODES){
-   if(n.kind==="epic")continue;
-   if(n.statusGroup==="completed"||n.statusGroup==="cancelled")continue;
-   if(n.effortDays!==null)continue;
-   if(onEdge.has(n.id))NOEST.add(n.id);}}
+{const want=new Set(NOEST_IDS||[]);
+ for(const n of NODES)if(n.identifier&&want.has(n.identifier))NOEST.add(n.id);}
 const EDGES=[];
 for(const [child,par] of parentOf)EDGES.push({s:par,t:child,type:"parent"});
 for(const e of DEPS)EDGES.push({s:e.source,t:e.target,type:e.type});
@@ -1300,17 +1326,22 @@ el("gNoEst").textContent=String(NOEST.size);
 // number cannot disagree.
 {const f=(typeof CP!=="undefined")?CP:null;
  const v=el("gFloor"),k=el("kFloor"),cell=el("cellFloor");
- if(!f||!f.ok){
-   v.textContent="\\u2014";
-   k.textContent="FLOOR";
-   cell.title=f&&!f.ok?("No floor: the dependency graph has a cycle ("+(f.cycles[0]||[]).join(" \\u2192 ")+"). Break it on the board."):"No dependency chain on this board.";
- }else{
+ const st=f?f.state:"none";
+ if(st==="ok"){
    // A lower bound is NEVER shown as a bare number.
    v.textContent=(f.isLowerBound?"\\u2265":"")+f.totalDays+"d";
    k.textContent=f.isLowerBound?"FLOOR (MIN)":"FLOOR";
    cell.title="Longest dependency chain: "+f.totalDays+" dev-days across "+f.chainLength+" items."
      +" This is the PARALLEL floor \\u2014 not total remaining effort."
      +(f.isLowerBound?(" At least: "+f.unestimated+" connected stor"+(f.unestimated===1?"y has":"ies have")+" no effort estimate, so the real floor is HIGHER. Use the 'no estimate' filter to find them."):"");
+ }else{
+   v.textContent="\\u2014";
+   k.textContent="FLOOR";
+   cell.title=st==="cycle"
+     ?("No floor: the dependency graph has a cycle ("+((f.cycles&&f.cycles[0])||[]).join(" \\u2192 ")+"). Break it on the board, then re-render.")
+     :st==="incomplete"
+       ?("No floor: "+f.missing+" relation lookup(s) failed while reading the board, so dependency edges are MISSING. A floor computed from a partial graph can be too short, or can hide a cycle. Re-render at a quieter hour, or from a snapshot.")
+       :"No dependency chain on this board \\u2014 nothing blocks anything else.";
  }}
 
 // --- Run: settle silently, then continuous gentle loop ------------------------
@@ -1333,48 +1364,6 @@ function frame(t){
   el("settling").hidden=!hot;
   draw(t);
   if(!document.hidden)raf=requestAnimationFrame(frame);
-}
-/**
- * Re-settle WITHOUT animating it.
- *
- * The page ships pre-settled, so the animated settle exists only for re-heats —
- * and animating one runs ~300 hot frames of tick + full redraw, which on Safari
- * degraded until the browser needed a restart. I could not isolate WHY from the
- * code (the sprite caches are bounded, there is no unbounded loop, and the
- * per-frame gradient churn turned out not to be it), and I have no browser here
- * to instrument. So rather than keep guessing at the cause, the frames are
- * removed: the settle runs in one synchronous burst and the board is drawn once,
- * already arranged — the same thing the generator does at build time.
- *
- * Bounded by construction: ticks are capped, so this cannot spin.
- */
-// --- Interactive (animated) relaxation, scoped to a neighbourhood -------------
-// Dragging is the one place the animation earns its keep: you move a node and
-// watch its cluster respond. That is affordable when the simulation is scoped —
-// ~70 bodies instead of 825 is roughly 140x less pair work per step — and it is
-// also the more honest picture, since dragging one story should not reshuffle
-// the whole board.
-let dragScope=null,dragAlpha=0;
-function neighbourhoodOf(id){
-  const ids=new Set([id]);
-  const self=byId.get(id);
-  const epicId=self&&self.kind==="epic"?id:epicOf.get(id);
-  if(epicId){ids.add(epicId);for(const s2 of (storiesOf.get(epicId)||[]))ids.add(s2.id);}
-  for(const e of EDGES){if(e.s===id)ids.add(e.t);if(e.t===id)ids.add(e.s);}
-  const arr=[];for(const nid of ids){const n2=byId.get(nid);if(n2)arr.push(n2);}
-  return {ids,arr};
-}
-function beginDragRelax(id){dragScope=neighbourhoodOf(id);dragAlpha=0.6;}
-function endDragRelax(){dragScope=null;dragAlpha=0;}
-function reheat(a){
-  const target=Math.max(alpha,a||0.7);
-  let k=0;
-  for(let al=target;al>AMIN&&k<400;al*=(1-DECAY))
-    {alpha=al;tick();k++;}
-  alpha=AMIN*0.5;      // cold: frame() will not tick again
-  computeGeo();
-  geoTicks=0;
-  miniDirty=true;
 }
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden&&raf===null)raf=requestAnimationFrame(frame);});

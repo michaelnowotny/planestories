@@ -61,6 +61,18 @@ export interface CriticalPathComputed {
 	 * case and miss the dangerous one.
 	 */
 	unestimated: number;
+	/**
+	 * IDENTIFIERS of those stories, not merely how many.
+	 *
+	 * The atlas tooltip tells the operator to "use the no-estimate filter to find
+	 * them", so the filter must select exactly this set. Deriving it a second way
+	 * in the browser produced two different definitions one commit apart — the
+	 * tooltip counted expanded connected LEAVES while the filter counted literal
+	 * edge endpoints, so after an epic edge was expanded the very stories that
+	 * made the floor a lower bound were invisible to the control named for
+	 * finding them.
+	 */
+	unestimatedIdentifiers: string[];
 	isLowerBound: boolean;
 	/** Slack in days per identifier: how long it can slip without moving the end. */
 	slackByIdentifier: Record<string, number>;
@@ -314,10 +326,15 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 	// the total wrong is typically the one that LOST the comparison because it was
 	// treated as zero — counting only the chain flags the visible case and misses
 	// the dangerous one.
-	const unestimated = [...connected].filter((id) => {
+	const unestimatedLeaves = [...connected].filter((id) => {
 		const leaf = leaves.get(id);
 		return leaf !== undefined && !leaf.done && leaf.node.effortDays === null;
-	}).length;
+	});
+	const unestimated = unestimatedLeaves.length;
+	const unestimatedIdentifiers = unestimatedLeaves
+		.map((id) => leaves.get(id)?.node.identifier)
+		.filter((v): v is string => typeof v === "string")
+		.sort();
 
 	// The lever, MEASURED: zero each chain item in turn and take the real drop in
 	// the floor. A near-critical path caps the saving, so the largest item is
@@ -343,6 +360,7 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 		chain,
 		totalDays: Math.round(projectEnd * 100) / 100,
 		unestimated,
+		unestimatedIdentifiers,
 		isLowerBound: unestimated > 0,
 		slackByIdentifier,
 		biggestLever,

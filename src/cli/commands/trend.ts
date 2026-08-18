@@ -3,6 +3,7 @@ import { join } from "node:path";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
+import { instanceTag } from "../../replicate/backup.ts";
 import { boardHealth, buildTrend, formatTrend } from "../../sync/trend.ts";
 import { resolveGraph } from "../graph_source.ts";
 import { openSnapshotSource } from "../snapshot_option.ts";
@@ -62,7 +63,14 @@ export function registerTrendCommand(program: Command): void {
 						// Workspace slug is the series key: it distinguishes the cloud
 						// workspace from the self-hosted one, which is exactly the boundary
 						// across which a trend line would be fiction.
-						rows.push(boardHealth(graph, source.takenAt, source.workspaceSlug));
+						// Series key = host + workspace + PROJECT. A workspace slug alone
+						// merges two different projects from one workspace into a single
+						// line (DATA 770 -> SBOX 12 reads as a board collapse), and two
+						// hosts can share a slug — which is exactly why backup.ts already
+						// has instanceTag(). Reusing it rather than inventing a third
+						// spelling of "which board is this".
+						const key = `${instanceTag(source.baseUrl, source.workspaceSlug)}/${source.projectIdentifier}`;
+						rows.push(boardHealth(graph, source.takenAt, key));
 					} catch (error) {
 						failures.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
 					}
