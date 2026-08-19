@@ -331,24 +331,49 @@ red first. Ordered as the roadmap sections that produced them.
 
 ## 8d. ⚠ WHERE TO PICK UP (2026-08-18) — READ THIS FIRST, IT SUPERSEDES §8c
 
-**State: branch `feat/critical-path`, 10 commits, 761 tests green, tsc clean, UNMERGED. Working
-tree clean. A Grok review is IN FLIGHT and its verdict has not been read.**
+**State: branch `feat/critical-path`, 14 commits, 768 tests green, tsc clean, UNMERGED. Working
+tree clean. Round 4 was IN FLIGHT when this was written; read its verdict before anything else.**
 
 ### The very first thing to do
 
 ```bash
-cat /tmp/claude-1000/*/385a3468-*/scratchpad/grok_report_d3.md   # round-3 verdict
+cat /tmp/claude-1000/*/385a3468-*/scratchpad/grok_report_d5.md   # round-4 verdict
 ```
 That path is a session scratchpad and **may be gone**. If it is, re-run the review — the brief is
-`grok_brief_d3.md` in the same directory; recreate it from §8d if needed:
+`grok_brief_d5.md` in the same directory:
 
 ```bash
-git worktree add --detach /tmp/wt-d3 HEAD          # NEVER let a worktree carry .env
-~/PycharmProjects/finance_csv_importer/scripts/external_review.sh grok /tmp/wt-d3 <brief> <report>
+git worktree add --detach /tmp/wt HEAD             # NEVER let a worktree carry .env
+~/PycharmProjects/finance_csv_importer/scripts/external_review.sh grok /tmp/wt <brief> <report>
 ```
 
-**DO NOT MERGE while anything major is open** — standing operator instruction. Rounds 1 and 2 both
-returned BLOCK on real defects; round 2 found a P0 in code that had already passed round 1.
+**DO NOT MERGE while anything major is open** — standing operator instruction. Rounds 1, 2 and 3 ALL
+returned BLOCK on real defects. Round 2 found a P0 in code that had already passed round 1; round 3
+found a P0 *introduced by the round-2 fix commit*. This branch has never survived a first pass.
+
+### Round 3 (2026-08-18) — every finding addressed, and one of them was severe
+
+**The P0: the atlas never painted.** `c6ef04c`, the commit that fixed the round-2 findings, deleted
+`let dragScope,dragAlpha` / `neighbourhoodOf` / `beginDragRelax` / `endDragRelax` along with the
+genuinely dead `reheat()`, and left every call site. Under the embedded script's `"use strict"`,
+`frame()` is started by `requestAnimationFrame` at load and reads `dragScope` on its FIRST line,
+before `draw()` — so the first animation frame threw `ReferenceError`, the canvas stayed blank, and
+"ARRANGING…" never cleared. **Every atlas built from `c6ef04c` or `afbf07c` was a dead page**, while
+761 tests stayed green, because nothing executes the embedded script and the test that looked like
+it covered this asserted that call-site STRINGS existed and that `new Function(script)` parses. An
+undeclared binding is valid syntax.
+
+Fixed in `3608c8d` with `tests/unit/atlas/embedded-script-integrity.test.ts` (strips comments and
+literals, fails on any called name nothing declares; separate case for `dragScope`/`dragAlpha`,
+which are reads and so invisible to a call-site sweep). **Known limit:** the guard is static. Grok
+asked for a test that EXECUTES the first frame, which needs a DOM+canvas stub; the static check
+would have caught this defect but cannot catch a bad property access. Round 4 was asked to rule on
+whether that is sufficient.
+
+Also fixed: `--no-dependencies` publishing "nothing blocks anything else" from an unfetched graph
+(`c2780e7`); `--json` handing `jq .totalDays` a `0` for an empty chain; the diff banner printing
+"DIFFERENT INSTANCES (x vs x)" when only the project differed; atlas `--json` carrying no
+completeness flag; and two smaller gaps in the no-estimate set (`dd6e018`).
 
 ### What is on the branch
 
@@ -362,13 +387,17 @@ returned BLOCK on real defects; round 2 found a P0 in code that had already pass
 | `41d1950` | floor gauge, no-estimate flag + filter, `R` removed |
 | `999ce1a` | resolved-target announcement (the wrong-instance footgun) |
 | `b305313` | `diff` — structural difference between two snapshots |
-| `c6ef04c` | round-2 BLOCK fixes (P0 + four P1s) |
+| `c6ef04c` | round-2 BLOCK fixes (P0 + four P1s) — **also deleted the drag helpers; see above** |
 | `6c772a1` | diff/trend board-identity alignment |
+| `afbf07c` | handoff §8d |
+| `3608c8d` | round-3 P0: restore the drag helpers + the embedded-script guard |
+| `c2780e7` | **the structural fix** — dependency coverage is a TYPE, not a comment |
+| `dd6e018` | round-3 residual gaps in the no-estimate set |
 
 ### ⚠ THE PATTERN THAT KEPT RECURRING — fix the CAUSE, not a fourth instance
 
-Three separate reviews found the same shape: **a rule established in one place and not carried to
-its siblings.**
+FOUR separate reviews found the same shape: **a rule established in one place and not carried to its
+siblings.**
 
 1. Relation refs normalized in `snapshot.ts` only — five other consumers silently saw ZERO relations
    on CE (§9.5e).
@@ -376,28 +405,46 @@ its siblings.**
    lower-bound, cycle = refusal) and was then embedded in the atlas HTML with none of them.
 3. "Same board" defined as workspace-slug in `diff` and as host+slug+project in `trend`, one commit
    apart.
+4. `trend` and `diff` both destructured `{ graph }` from `resolveGraph` and discarded
+   `relationFailures` — the field whose own doc comment said callers must decide.
 
 **The common cause: the invariant was written as a COMMENT and relied on memory.** `graph_source.ts`
-still says *"callers that cannot tolerate a missing edge must say so"* — and `atlas` did not.
+said *"callers that cannot tolerate a missing edge must say so"* — and `atlas`, `trend` and `diff`
+all did not.
 
-**What actually worked, both times it was applied:** making the invariant a TYPE. The discriminated
-`CriticalPathResult` (refusal carries no `totalDays`) has not regressed since. Prose invariants
-regressed three times.
+**What actually worked, every time it was applied:** making the invariant a TYPE. The discriminated
+`CriticalPathResult` (a refusal carries no `totalDays`) has not regressed since it was introduced.
+Prose invariants regressed four times.
 
-**Recommended next structural work, ahead of new features:**
-- One publication path for any derived figure, returning a value that CANNOT be destructured to a
-  bare number — consumers get `{state, value, caveats}` or nothing.
-- ONE definition of board identity (`instanceTag(host, slug) + project`), imported everywhere;
-  today three call sites agree by convention.
-- Apply rule A11 (from the operator's other repo, and stated in AGENTS.md house rules): when
-  changing anything shared, ENUMERATE the consumers and say in the commit why each does or does not
-  need updating. All three instances would have been caught by that grep.
+### The structural fix — DONE in `c2780e7`, and it is the template
+
+`GraphSourceResult` has **no `graph` property**. The graph is reachable only through
+`requireCompleteGraph(purpose)` (throws `IncompleteGraphError` unless coverage is complete) or
+`acceptPartialGraph(reason)`. `const { graph } = await resolveGraph(...)` — the exact line `trend`
+and `diff` were using — no longer compiles.
+
+`DependencyCoverage` is `complete | partial | skipped`, three states rather than a boolean, because
+`relationFailures === 0` could not distinguish "we swept and everything succeeded" from "we never
+swept" (`--no-dependencies`). The second rendered as a finding about the BOARD. It lives in
+`atlas/model.ts`, not `cli/`, because the renderer needs it and a renderer must not import from the
+CLI layer.
+
+**Still to do (the other two items from the original recommendation):**
+- ONE definition of board identity (`instanceTag(host, slug) + project`), imported everywhere; today
+  `trend` and `diff` agree by convention and a comment in each says so.
+- Apply rule A11 as a habit, not a one-off: when changing anything shared, ENUMERATE the consumers
+  and say in the commit why each does or does not need updating. `c2780e7` does this (six consumers,
+  each named); it is what found instance 4 before the review did.
 
 ### Known-open, smaller
 
 - **`doctor` declared-vs-actual relation provenance** — the finance session's best request. `doctor`
   already detects dangling relations; what is missing is whether a relation came from a yaml field,
   a body directive, or exists only on the board. Their 2026-08-18 incident is the argument for it.
+- **The embedded-script guard is STATIC, not executing.** It would have caught the round-3 P0 and is
+  not parse-only, but it cannot catch a bad property access or a wrong argument count. Grok asked
+  for a test that runs the first frame against a DOM+canvas stub. Round 4 was asked to rule on
+  whether static is sufficient; if it said no, that stub is the next piece of work.
 - **The atlas crash was never root-caused.** Six hypotheses measured and discarded (§9.5f). The
   animated global settle was REMOVED, which deleted the reproduction. If it resurfaces, that is the
   thread. Residual: `frame()` still ticks a scope per rAF while dragging.
