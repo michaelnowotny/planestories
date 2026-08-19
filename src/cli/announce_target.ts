@@ -20,7 +20,15 @@ export function announceTarget(
 	project?: string,
 ): void {
 	const host = config.baseUrl ? config.baseUrl.replace(/^https?:\/\//, "") : "(no base url)";
-	const where = context ? `--context ${context}` : "default (bare PLANE_* env)";
+	// Prefer the context ACTUALLY in force. With `defaultContext` or a
+	// single-context config it is selected implicitly, so the command line the
+	// user typed no longer answers "which installation is this?" — which is the
+	// whole question this line exists to answer.
+	const where = context
+		? `--context ${context}`
+		: config.contextName
+			? `context ${config.contextName} (implicit)`
+			: "default (bare PLANE_* env)";
 	const proj = project ?? config.defaultProject;
 	console.error(
 		chalk.dim(

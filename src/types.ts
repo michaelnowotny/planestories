@@ -111,6 +111,12 @@ export interface ContextEntry {
 
 export interface MultiContextConfig {
 	contexts: ContextEntry[];
+	/**
+	 * Which context applies when `--context` is omitted. Optional; must name an
+	 * existing context — a dangling value is a startup error, never a silent
+	 * fallback to some other installation.
+	 */
+	defaultContext?: string;
 }
 
 export interface ResolvedConfig {
@@ -125,6 +131,13 @@ export interface ResolvedConfig {
 	sourceLabel: string | null;
 	/** Retry budget for transient Plane API failures (429/5xx/network). From PLANE_MAX_RETRIES. */
 	maxRetries: number;
+	/**
+	 * The context actually in force, however it was chosen — `--context`,
+	 * `defaultContext`, or being the only one. Undefined on the bare-env default
+	 * path. Reported to the user, because with implicit selection "which board did
+	 * I just hit" is no longer answerable from the command line they typed.
+	 */
+	contextName?: string;
 	/** Parsed requests per minute; undefined keeps pacing disabled for compatibility. */
 	apiRateLimit?: number;
 	maxConcurrency?: number;

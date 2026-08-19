@@ -58,6 +58,14 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 
 	// Resolve multi-context → flat CliConfig
 	let config: CliConfig;
+	// The context ACTUALLY in force — explicit `--context`, or one selected
+	// implicitly by `defaultContext` / being the only one. Every per-context
+	// lookup below keys off THIS, never off `options.context`: an implicitly
+	// selected context must be as isolated from the bare `PLANE_*` env vars as an
+	// explicit one, or a cloud key sitting in the environment could silently
+	// authenticate a command aimed at CE. That isolation is the whole point of the
+	// credential contract, and a convenience default must not become a hole in it.
+	let resolvedContext: string | undefined = options?.context;
 
 	if (options?.context !== undefined && normalizeCtx(options.context) === "") {
 		throw new ConfigError(
@@ -68,7 +76,6 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 
 	if (isMultiContextConfig(raw)) {
 		const multiConfig = raw as MultiContextConfig;
-		const contextName = options?.context;
 
 		// Two context names that normalize to the same env name (e.g. "a-b" and
 		// "a_b" -> PLANE_CTX_A_B_*) would share credential overrides — the exact
@@ -92,23 +99,47 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 			byNorm.set(norm, c.name);
 		}
 
-		if (!contextName) {
-			const names = multiConfig.contexts.map((c) => c.name).join(", ");
-			throw new ConfigError(
-				`Config file contains multiple contexts. Use --context <name> to select one. Available contexts: ${names}`,
-			);
+		// Resolution order: explicit --context -> defaultContext -> the ONLY context
+		// -> refuse and list the names. A config with one installation should not
+		// demand a flag naming the only thing it could possibly mean.
+		if (multiConfig.defaultContext !== undefined) {
+			const named = multiConfig.contexts.some((c) => c.name === multiConfig.defaultContext);
+			if (!named) {
+				// Present-but-invalid config fails loudly; a dangling default must never
+				// degrade into "use some other context", which would silently point a
+				// command at the wrong Plane installation.
+				const names = multiConfig.contexts.map((c) => c.name).join(", ");
+				throw new ConfigError(
+					`defaultContext "${multiConfig.defaultContext}" does not name any context in this config. ` +
+						`Available contexts: ${names}.`,
+				);
+			}
+		}
+		if (!resolvedContext) {
+			const implied =
+				multiConfig.defaultContext ??
+				(multiConfig.contexts.length === 1 ? multiConfig.contexts[0]?.name : undefined);
+			if (implied === undefined) {
+				const names = multiConfig.contexts.map((c) => c.name).join(", ");
+				throw new ConfigError(
+					`Config file contains multiple contexts. Use --context <name> to select one, ` +
+						`or set "defaultContext" in the config. Available contexts: ${names}`,
+				);
+			}
+			resolvedContext = implied;
 		}
 
-		const entry = multiConfig.contexts.find((c) => c.name === contextName);
+		const entry = multiConfig.contexts.find((c) => c.name === resolvedContext);
 		if (!entry) {
 			// Env-only context: synthesized purely from PLANE_CTX_<NAME>_* vars.
-			if (process.env[ctxEnvName(contextName, "API_KEY")]) {
+			const wanted = resolvedContext as string;
+			if (process.env[ctxEnvName(wanted, "API_KEY")]) {
 				config = {};
 			} else {
 				const names = multiConfig.contexts.map((c) => c.name).join(", ");
 				throw new ConfigError(
-					`Context "${contextName}" not found. Available contexts: ${names}. ` +
-						`(An env-only context needs ${ctxEnvName(contextName, "API_KEY")} set.)`,
+					`Context "${wanted}" not found. Available contexts: ${names}. ` +
+						`(An env-only context needs ${ctxEnvName(wanted, "API_KEY")} set.)`,
 				);
 			}
 		} else {
@@ -147,8 +178,8 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 	const envFor = (
 		field: "API_KEY" | "WORKSPACE_SLUG" | "BASE_URL" | "DIALECT" | "API_RATE_LIMIT",
 	): string | undefined =>
-		options?.context
-			? process.env[ctxEnvName(options.context, field)]
+		resolvedContext
+			? process.env[ctxEnvName(resolvedContext, field)]
 			: process.env[`PLANE_${field}`];
 	const envApiKey = envFor("API_KEY");
 	if (envApiKey) {
@@ -162,15 +193,15 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 	if (envBaseUrl) {
 		config.baseUrl = envBaseUrl;
 	}
-	const dialectVariable = options?.context
-		? ctxEnvName(options.context, "DIALECT")
+	const dialectVariable = resolvedContext
+		? ctxEnvName(resolvedContext, "DIALECT")
 		: "PLANE_DIALECT";
 	const envDialect = envFor("DIALECT");
 	if (envDialect !== undefined) {
 		config.dialect = parseDialect(envDialect, dialectVariable);
 	}
-	const rateLimitVariable = options?.context
-		? ctxEnvName(options.context, "API_RATE_LIMIT")
+	const rateLimitVariable = resolvedContext
+		? ctxEnvName(resolvedContext, "API_RATE_LIMIT")
 		: "PLANE_API_RATE_LIMIT";
 	const envRateLimit = envFor("API_RATE_LIMIT");
 	if (envRateLimit !== undefined) {
@@ -186,7 +217,7 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 		// friends survive) and only the two secret assertions are skipped. baseUrl is
 		// left as the file supplied it — no production default is invented for a path
 		// that must never look like a live instance.
-		return resolveConfig(config, { allowMissingCredentials: true });
+		return resolveConfig(config, { allowMissingCredentials: true, contextName: resolvedContext });
 	}
 
 	if (!config.apiKey) {
@@ -209,7 +240,7 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 		);
 	}
 
-	return resolveConfig(config);
+	return resolveConfig(config, { contextName: resolvedContext });
 }
 
 // ---------------------------------------------------------------------------
@@ -286,9 +317,11 @@ async function readConfigFile(filePath: string): Promise<unknown> {
  */
 function resolveConfig(
 	config: CliConfig,
-	options: { allowMissingCredentials?: boolean } = {},
+	options: { allowMissingCredentials?: boolean; contextName?: string } = {},
 ): ResolvedConfig {
 	return {
+		// However the context was chosen — flag, default, or being the only one.
+		contextName: options.contextName,
 		apiKey: config.apiKey as string,
 		workspaceSlug: config.workspaceSlug as string,
 		// On the credential-free path, do NOT invent the production base URL: a

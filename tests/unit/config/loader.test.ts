@@ -211,7 +211,7 @@ describe("loadConfig", () => {
 		test("throws when config has contexts but no --context provided", async () => {
 			const configPath = join(FIXTURES_DIR, "multi-context.json");
 			expect(loadConfig({ configPath })).rejects.toThrow(
-				"Config file contains multiple contexts. Use --context <name> to select one. Available contexts: orgA, orgB",
+				'Config file contains multiple contexts. Use --context <name> to select one, or set "defaultContext" in the config. Available contexts: orgA, orgB',
 			);
 		});
 

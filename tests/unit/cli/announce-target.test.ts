@@ -57,4 +57,21 @@ describe("resolved-target announcement", () => {
 		}
 		expect(stdout).toBe("");
 	});
+
+	test("an IMPLICIT context is named, and marked implicit", () => {
+		// With `defaultContext` or a single-context config the command line no
+		// longer says which installation was used, so the announcement has to —
+		// and it must distinguish "you asked for this" from "I chose it for you",
+		// because only one of those is a mistake the user can see in their shell
+		// history.
+		const out = capture(() =>
+			announceTarget(
+				{ ...config, contextName: "ce" } as unknown as ResolvedConfig,
+				undefined,
+				"Data Platform",
+			),
+		);
+		expect(out).toContain("context ce (implicit)");
+		expect(out).not.toContain("bare PLANE_* env");
+	});
 });
