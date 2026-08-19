@@ -1,6 +1,6 @@
 import { computeCriticalPath } from "../sync/critical_path.ts";
 import { PHYSICS, settleLayout } from "./layout.ts";
-import type { AtlasGraph } from "./model.ts";
+import type { AtlasGraph, DependencyCoverage } from "./model.ts";
 
 /**
  * Render a self-contained Project Atlas HTML page for a graph — the "Cockpit"
@@ -31,12 +31,20 @@ import type { AtlasGraph } from "./model.ts";
  * planestories and Plane.
  */
 export interface RenderOptions {
-	/** False when the relation sweep dropped edges — the graph is missing constraints. */
-	relationsComplete?: boolean;
-	relationFailures?: number;
+	/**
+	 * How much of the dependency structure was observed. Not optional and not a
+	 * boolean: `relationsComplete === false` could not tell a partial sweep from
+	 * one that never ran, so `--no-dependencies` rendered as "nothing blocks
+	 * anything else" — an assertion about the board built from an unfetched graph.
+	 * A caller with no sweep to describe passes `{ kind: "complete" }` explicitly.
+	 */
+	coverage: DependencyCoverage;
 }
 
-export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions = {}): string {
+export function renderAtlasHtml(
+	graph: AtlasGraph,
+	options: RenderOptions = { coverage: { kind: "complete" } },
+): string {
 	// Escape the JSON so a title containing "</script>" can't break out of the tag.
 	const data = JSON.stringify(graph).replace(/</g, "\\u003c");
 	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
@@ -50,30 +58,36 @@ export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions = {}):
 	// in the browser means the gauge and the CLI cannot disagree — a second copy
 	// of this arithmetic is how a headline number starts drifting from its source.
 	const cp = computeCriticalPath(graph);
-	// THREE states, not two. "Incomplete" is distinct from "cycle": a partial
-	// relation sweep means edges are MISSING, so a floor computed from it may be
-	// too short or may hide a cycle. The CLI already refuses in that case; the
-	// HTML outlives the stderr warning that accompanied it, so the artifact has to
-	// carry the caveat itself. A number in a file someone opens tomorrow cannot
-	// rely on a warning printed today.
-	//
-	// A chain of length 0 is also NOT a floor of zero — it is the absence of any
-	// dependency chain, and rendering it as "0d" is absence coerced into a
-	// valid-looking value.
+	// FIVE states. Each removed one way the panel could read as a measurement it
+	// is not:
+	//   incomplete — the sweep ran and dropped edges, so a floor may be too short
+	//                or may hide a cycle. The CLI refuses; the HTML outlives the
+	//                stderr warning beside it, so the artifact carries its own
+	//                caveat. A number in a file opened tomorrow cannot rely on a
+	//                warning printed today.
+	//   skipped    — no sweep ran at all (`--no-dependencies`). Distinct from
+	//                `none`, which is a FINDING about the board. Reporting "nothing
+	//                blocks anything else" from a graph nobody fetched is absence
+	//                of observation published as observed absence.
+	//   none       — swept, and genuinely nothing is connected.
+	//   cycle      — a refusal, not a zero.
+	//   ok         — a real floor. A chain of length 0 is NOT a floor of zero.
 	const cpSummary =
-		options.relationsComplete === false
-			? { state: "incomplete" as const, missing: options.relationFailures ?? 0 }
-			: cp.ok
-				? cp.chain.length === 0
-					? { state: "none" as const }
-					: {
-							state: "ok" as const,
-							totalDays: cp.totalDays,
-							chainLength: cp.chain.length,
-							unestimated: cp.unestimated,
-							isLowerBound: cp.isLowerBound,
-						}
-				: { state: "cycle" as const, cycles: cp.cycles.slice(0, 1) };
+		options.coverage.kind === "partial"
+			? { state: "incomplete" as const, missing: options.coverage.failures }
+			: options.coverage.kind === "skipped"
+				? { state: "skipped" as const }
+				: cp.ok
+					? cp.chain.length === 0
+						? { state: "none" as const }
+						: {
+								state: "ok" as const,
+								totalDays: cp.totalDays,
+								chainLength: cp.chain.length,
+								unestimated: cp.unestimated,
+								isLowerBound: cp.isLowerBound,
+							}
+					: { state: "cycle" as const, cycles: cp.cycles.slice(0, 1) };
 	const cpJson = JSON.stringify(cpSummary).replace(/</g, "\\u003c");
 	// The SAME set the floor's lower-bound claim is based on, so the filter the
 	// tooltip names selects exactly the stories that make the number a bound.
@@ -1318,9 +1332,17 @@ el("projectName").textContent=GRAPH.project;
 el("projectSub").textContent=GRAPH.source==="board"?"LIVE PLANE BOARD":"MARKDOWN FILE";
 el("gEpics").textContent=String(GRAPH.counts.epics);
 el("gStories").textContent=String(GRAPH.counts.stories);
-el("gEdges").textContent=String(GRAPH.counts.edges||0);
+// Both of these are DERIVED FROM EDGES, so when no sweep ran they are not zero —
+// they are unknown, and a zero in a numeric cell reads as a measurement. The
+// floor cell is not the only one that has to hold this line.
+{const swept=(typeof CP==="undefined")||CP.state!=="skipped";
+ el("gEdges").textContent=swept?String(GRAPH.counts.edges||0):"\\u2014";
+ el("gNoEst").textContent=swept?String(NOEST.size):"\\u2014";
+ if(!swept){
+   const t="Not measured: rendered with --no-dependencies, so relations were never fetched.";
+   el("gEdges").parentElement.title=t;el("gNoEst").parentElement.title=t;
+ }}
 el("gFlag").textContent=String(GRAPH.counts.flagged||0);
-el("gNoEst").textContent=String(NOEST.size);
 // The dependency floor, computed at BUILD time by the same reviewed code the
 // critical-path command uses — never re-derived here, so the picture and the
 // number cannot disagree.
@@ -1341,13 +1363,38 @@ el("gNoEst").textContent=String(NOEST.size);
      ?("No floor: the dependency graph has a cycle ("+((f.cycles&&f.cycles[0])||[]).join(" \\u2192 ")+"). Break it on the board, then re-render.")
      :st==="incomplete"
        ?("No floor: "+f.missing+" relation lookup(s) failed while reading the board, so dependency edges are MISSING. A floor computed from a partial graph can be too short, or can hide a cycle. Re-render at a quieter hour, or from a snapshot.")
-       :"No dependency chain on this board \\u2014 nothing blocks anything else.";
+       :st==="skipped"
+         ?("No floor: this atlas was rendered with --no-dependencies, so relations were never fetched. This is NOT a finding that the board has no dependencies \\u2014 it is the absence of the question. Re-render without that flag.")
+         :"No dependency chain on this board \\u2014 nothing blocks anything else.";
  }}
 
 // --- Run: settle silently, then continuous gentle loop ------------------------
 window.addEventListener("resize",resize);
 if(window.ResizeObserver)new ResizeObserver(()=>resize()).observe(stage);
 let raf=null,fitted=false,geoTicks=0;
+// --- Interactive (animated) relaxation, scoped to ONE cluster -----------------
+// Dragging is the one place the animation earns its keep: you move a node and
+// watch its cluster respond. Affordable because the simulation is scoped — ~70
+// bodies instead of 825 — and more honest, since dragging one story should not
+// reshuffle the whole board.
+//
+// Scope is the dragged node's OWN cluster only. It deliberately does NOT pull in
+// dependency partners: extracting a node's blockers from their own clusters made
+// distant, unrelated groups lurch whenever you touched anything. Cross-cluster
+// springs still act on the dragged node itself via the one-ended boundary rule
+// in tick(), so the dependency structure is still felt — it is just not allowed
+// to teleport other people's nodes.
+let dragScope=null,dragAlpha=0;
+function neighbourhoodOf(id){
+  const ids=new Set([id]);
+  const self=byId.get(id);
+  const epicId=self&&self.kind==="epic"?id:epicOf.get(id);
+  if(epicId){ids.add(epicId);for(const s2 of (storiesOf.get(epicId)||[]))ids.add(s2.id);}
+  const arr=[];for(const nid of ids){const n2=byId.get(nid);if(n2)arr.push(n2);}
+  return {ids,arr};
+}
+function beginDragRelax(id){dragScope=neighbourhoodOf(id);dragAlpha=0.6;}
+function endDragRelax(){dragScope=null;dragAlpha=0;}
 function frame(t){
   raf=null;
   // Scoped drag relaxation: bounded bodies, so these frames are cheap. It runs
