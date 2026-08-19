@@ -23,7 +23,7 @@ function states(
 
 /** An H2 story section carrying a yaml `plane_id` block, ready to join with "\n". */
 function linked(planeId: string, title: string, ...body: string[]): string[] {
-	return ["## " + title, "", "```yaml", "plane_id: " + planeId, "```", "", ...body];
+	return [`## ${title}`, "", "```yaml", `plane_id: ${planeId}`, "```", "", ...body];
 }
 
 describe("applyCheckboxStates (pure, plane_id-keyed reverse-sync)", () => {

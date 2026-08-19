@@ -47,8 +47,12 @@ describe("pacer invariants that guard against misconfiguration", () => {
 		let t = 0;
 		return {
 			now: () => t,
-			sleep: async (ms: number) => void (t += ms),
-			advance: (ms: number) => void (t += ms),
+			sleep: async (ms: number) => {
+				t += ms;
+			},
+			advance: (ms: number) => {
+				t += ms;
+			},
 		};
 	}
 

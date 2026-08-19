@@ -34,7 +34,6 @@ export interface ProbeClient {
 	): Promise<void>;
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
 	archiveWorkItem(projectId: string, workItemId: string): Promise<void>;
-	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	createWorkItemComment<T>(
 		projectId: string,
 		workItemId: string,

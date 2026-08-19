@@ -311,8 +311,8 @@ describe("per-context credential isolation (replicate P1)", () => {
 	});
 
 	test("context names normalize for env lookup (dashes -> underscores, case-insensitive)", async () => {
-		process.env["PLANE_CTX_MY_VPS_API_KEY"] = "vps-key";
-		process.env["PLANE_CTX_MY_VPS_WORKSPACE_SLUG"] = "vps-ws";
+		process.env.PLANE_CTX_MY_VPS_API_KEY = "vps-key";
+		process.env.PLANE_CTX_MY_VPS_WORKSPACE_SLUG = "vps-ws";
 		const config = await loadConfig({
 			configPath: join(FIXTURES_DIR, "valid.json"),
 			context: "my-vps",
@@ -399,7 +399,7 @@ describe("context-name normalization safety (Codex P1)", () => {
 	});
 
 	test("a context name that normalizes to nothing is rejected", async () => {
-		process.env["PLANE_CTX__API_KEY"] = "k";
+		process.env.PLANE_CTX__API_KEY = "k";
 		await expect(
 			loadConfig({ configPath: join(FIXTURES_DIR, "valid.json"), context: "--" }),
 		).rejects.toThrow("normalizes to nothing");

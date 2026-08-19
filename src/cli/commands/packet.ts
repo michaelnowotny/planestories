@@ -1,4 +1,3 @@
-import { resolve } from "node:path";
 import chalk from "chalk";
 import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
