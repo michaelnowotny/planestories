@@ -20,6 +20,44 @@ ticket.
 - **Live-test only in a SANDBOX Plane project** (creds in the gitignored `.env`) — never a
   production board. `.env` holds real credentials; never print or commit it.
 
+## Review protocol — how a change merges, and how the loop TERMINATES
+
+Substantive changes get an adversarial review from an external engine (`external_review.sh grok
+<worktree> <brief> <report>` in the operator's other repo). A reader who did not write the code
+finds things the author cannot: one round caught an atlas that **never painted** — a blank page
+sitting behind 761 green tests, because nothing executes the embedded script.
+
+That same review also once ran five rounds and sixteen commits. These rules exist so the value is
+kept and the loop is not.
+
+**Severity, and what blocks:**
+- **P0** — a user hits it on a normal path. Blocks.
+- **P1** — the tool tells the operator something FALSE, on a path they use. Blocks.
+- **P2 and below** — internal inconsistency, wording, a test that could be stronger, a sibling that
+  could be more consistent. RECORD it; do not block. Fix it next time you are in that file.
+
+**Merge when there is no P0 and no P1.** Declare that bar in the brief BEFORE the round. *"No major
+problems"* is not a bar — it has no floor, and it is how four rounds became five.
+
+**One round is the default.** Go again only when a round finds a P0/P1 **that a previous fix
+introduced**. A regression inside a repair means the change is not understood yet; a residue of P2s
+means the reviewer is working and you should stop. (Both real: round 3 found a P0 created by the
+round-2 fix commit — worth another pass. Round 4's finding was a P2 promoted to P1 by a brief that
+asked for it — not worth one.)
+
+**Never ask the brief for "another instance of the pattern."** Rounds 3–5 each returned an instance
+of the same drift pattern because the brief requested one verbatim: *"the highest-value finding you
+can give me is a fourth instance."* The engine obliged, and the finding was then read as independent
+confirmation the pattern was everywhere. Ask what a USER hits, ranked by consequence. If a pattern is
+real it will surface unprompted.
+
+**A brief states** the gate result and the exact SHA, what the previous round found and what you did
+about each item, and what you are least sure of. It does not argue for a verdict.
+
+**Trust a reviewer that declines to escalate.** When it says a finding is real but not worth closing
+— *"closing it would hide a useful filter on a still-legible map"* — that is judgment, and
+overriding it to be thorough is how the loop restarts.
+
 ## Board exports go in `exports/` — always
 
 **THE RULE: what the board-reading commands write — `atlas` renders, `export` story files,
@@ -114,35 +152,67 @@ Don't blur these.
   `src/plane/client.ts` gains `getRelations`/`createRelation`/`removeRelation`.
 - `src/lint/` — `rules.ts` (10 offline mechanical rules) + `linter.ts` (parse fileset → run rules →
   exit code). Rules index stories under BOTH an exact and a normalized identifier map; DEPENDENCY
-  rules resolve NORMALIZED (matching `relations.ts`). ⚠ **Known discrepancy:** `import` now
-  normalizes `parent:` through `normalizeIdentifier` (`importer.ts`), so a parent spelled `eng-7`
-  is accepted by import while an exact-keyed check would call it dangling — lint can be stricter
-  than import on parent case. Either unify on one shared resolution contract (updating the tests)
-  or keep it deliberate, but do not assume the two agree. Reuses the shared raw
-  `classifyFileEpics` from `atlas/model.ts`.
+  rules resolve NORMALIZED (matching `relations.ts`). **PARENT CASE IS DELIBERATELY STRICTER THAN
+  IMPORT — decided, not open.** `import` normalizes `parent:` through `normalizeIdentifier`
+  (`importer.ts`), so `parent: eng-7` really does attach to `ENG-7` on the board; lint resolves
+  parents EXACTLY and reports the mismatch as `dangling-reference`. That is intentional: lint is a
+  consistency gate over the corpus, and identifier spelling is a thing worth keeping consistent even
+  where import would cope. Pinned by `linter.test.ts` → *"parent resolution is exact while dependency
+  resolution is normalized"*. **Do not "unify" this** — a half-unification makes the two parent rules
+  contradict each other (`dangling-reference` says the parent does not exist while `bad-parent` says
+  it exists and is not an epic, about the same parent). If you ever do want them unified, change both
+  rules and that test together, deliberately. This entry previously read "either unify or keep it
+  deliberate, but do not assume the two agree", which is an open question a reviewer can re-ask every
+  round without it ever closing. Reuses the shared raw `classifyFileEpics` from `atlas/model.ts`.
 - `src/atlas/` — the **Project Atlas** visualizer (FORCE-DIRECTED dependency graph). `model.ts` builds an
   `AtlasGraph` (nodes + dependency `edges`) from either a parsed file (`buildAtlasFromFile`) or the shared
   `fetchProjectIndex` (`buildAtlasFromBoard(…, relationsById?)` — folds `kind: criterion` children into
   their parent's AC ring; any item parenting a non-criterion child is an epic). Edges: blocked_by/blocks →
   directed `"blocks"`, relates_to → undirected `"relates"`, deduped (mirror + unordered pair), self/dangling
-  dropped. `quality.ts` = the light spec-quality overlay. `render.ts` = `renderAtlasHtml(graph)` → one
-  self-contained HTML (inlined CSS/JS + embedded JSON with `</script>` unicode-escaped; NO D3/CDN) running a
-  hand-rolled `<canvas>` force sim (repulsion + parent/dependency springs + gravity, alpha cooling; a
-  ResizeObserver keeps the bitmap matched to its box). Polished visuals: soft **convex-hull cluster blobs**
-  per epic in a stable golden-angle hue (so a big board reads as grouped regions), a **"Dependencies only"**
-  toggle (`visible()`/`inDeps` — hides pure-hierarchy nodes to focus the web), a hover **tooltip**
-  (`esc()`-escaped — the only innerHTML sink; the panel uses textContent/createElement), pill-backed labels
-  (epics always, stories on zoom-in), curved edges + arrowheads, glow on hover/selected. ALL nodes shown by
-  default; drag/pan/zoom/hover/click-details (progress bar + clickable dependency list). The `atlas` command
-  fetches per-item relations (bounded, per-item failures DROP that item's edges + warn, `--no-dependencies`
-  skips). Node ids reset per build (diff-stable). Verified via headless screenshots (overview, deps-only, zoomed) on the live DATA board
-  as it stood in July 2026 (~665 items then; `docs/HANDOFF.md` owns current board figures).
+  dropped. `quality.ts` = the light spec-quality overlay.
+  - `layout.ts` — **the force simulation runs at BUILD TIME** (`settleLayout`, exported `PHYSICS`).
+    The browser receives settled coordinates in `POS0` and draws once. It used to settle in the
+    browser at one tick per frame; 325 frames of that was the "unbelievably sluggish" report, and
+    the sim being *in the page* is no longer true however natural it reads.
+  - `render.ts` — `renderAtlasHtml(graph, { coverage })` → one self-contained HTML (inlined CSS/JS +
+    embedded JSON with `</script>` unicode-escaped; NO D3/CDN). **`coverage` is REQUIRED and has no
+    default** (`DependencyCoverage` in `model.ts`: `complete | partial | skipped`) — a default of
+    "complete" would let a caller publish a floor as fully-observed without saying so. The header
+    gauges are computed at build time by the SAME `computeCriticalPath` the CLI uses, never
+    re-derived in the browser, and the floor has five states (`ok` / `none` / `cycle` / `incomplete`
+    / `skipped`) because each removed one way a cell could read as a measurement it is not.
+    Interactive physics survives ONLY as a drag relaxation scoped to the dragged node's own cluster
+    (`neighbourhoodOf` — deliberately NOT its dependency partners, which made unrelated clusters
+    lurch). A hover **tooltip** is the only innerHTML sink (`esc()`-escaped; the panel uses
+    textContent/createElement); a **"Dependencies only"** toggle (`visible()`/`inDeps`) hides
+    pure-hierarchy nodes. ALL nodes shown by default; drag/pan/zoom/hover/click-details.
+  - ⚠ **No test executes the embedded script** — it is a string here and a program only in a
+    browser. `tests/unit/atlas/embedded-script-integrity.test.ts` is the static stand-in (every
+    called name declared; nothing assigned that was never declared). Its known holes are listed in
+    `docs/HANDOFF.md` §8d. This gap once shipped a page that never painted.
+  - The `atlas` command fetches per-item relations (bounded; per-item failures DROP that item's edges
+    and become `coverage: partial`; `--no-dependencies` becomes `skipped`, which is NOT the same as
+    "this board has no dependencies"). Node ids reset per build (diff-stable). Cockpit design +
+    rejected alternatives: `docs/DESIGN_atlas-cockpit.md`.
 
 ## House engineering rules (inherited from the operator's other repo, and they apply here)
 
 The operator's market-data platform (`finance_csv_importer`) carries a large rules catalogue built
 from real incidents. Most of it is domain-specific (ClickHouse, ZFS, market data) and irrelevant
 here. These are the ones that genuinely transfer — they are house rules, not suggestions:
+
+**⚠ First, calibrate.** planestories is a personal CLI: one operator, reversible outputs, no
+production dataset behind it, nothing that pages anyone at 03:00. The other repo's heavier machinery
+— the A1–A12 catalogue, the three-lane model, schema lockfiles, same-turn board sync, tombstone
+registries — does **NOT** apply here, and importing it by analogy is how a two-hour change becomes a
+five-round review. That repo says so itself: its three-lane model exists because "the rules catalogue
+applied universally converted iteration into administrative burden." A rule that is load-bearing at
+4.39 billion rows can be pure ceremony at 800 work items.
+
+**Adding a rule to this file is itself a change with a cost.** State the incident it prevents, or
+do not add it. A rule nobody can point to an incident for is a rule that will be selectively ignored,
+which is worse than not having it — see the canonical gate, which was mandatory and unpassable for
+months while every branch carried "9 pre-existing findings, not mine" as a standing exemption.
 
 - **The three-lookup ritual before you touch anything.** Before changing a module: (1) read the
   module and its neighbours; (2) read its DESIGN doc (`docs/DESIGN_*.md`, `docs/REPLICATE.md`) —
@@ -158,6 +228,15 @@ here. These are the ones that genuinely transfer — they are house rules, not s
   `false` standing in for "unknown". Preserve null, omit the field, or return an explicit
   status/note. In this repo the recurring form is a preview or report that invents certainty it
   does not have.
+  **SCOPE — values PUBLISHED as claims to the operator:** a number in a report, a gauge cell, a
+  `--json` field, a preview line. It does NOT govern ordinary internal defaults, nor a control's own
+  cardinality, nor a measured zero. Worked example, because this distinction is what keeps the rule
+  finite: on a board where nothing is connected, `unestimated: 0` is a MEASURED zero (the connected
+  set is empty, so the count really is zero) and is correct; a *floor* of `0` on that same board is a
+  fabricated measurement and is banned. Likewise a filter chip reading "3 no estimate" is exact for
+  the control — it selects 3 nodes — even where the board-level claim would be a lower bound. **If
+  you cannot state what the value CLAIMS to a reader, this rule does not apply to it.** Applied
+  without that scope the rule has no natural stopping point and will generate findings indefinitely.
 - **Present-but-invalid configuration fails loudly at startup**; defaults apply only when a value
   is ABSENT. Never silently normalize a broken setting into a working one (see `repo_config.ts`,
   and rule 3 of the installation-defaults work in `docs/HANDOFF.md` §9.6).
@@ -259,108 +338,13 @@ point, read it first.** Design + locked decisions: `docs/DESIGN_DECISIONS_tier1.
 
 ---
 
-Default to using Bun instead of Node.js.
+## Bun, concretely
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+`bun <file>` not `node`/`ts-node` · `bun test` not jest/vitest · `bun install` not npm/yarn/pnpm ·
+`bun run <script>` · `bunx <pkg>` not `npx` · prefer `Bun.file` over `node:fs` read/write ·
+Bun loads `.env` automatically, so no `dotenv`.
 
-## APIs
-
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
-
-## Testing
-
-Use `bun test` to run tests.
-
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
-```
-
-## Frontend
-
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
-
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
-```
-
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
-
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
-
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+(The generic Bun starter docs that used to fill the rest of this file — `Bun.serve`, WebSockets,
+`bun:sqlite`, `Bun.redis`, `Bun.sql`, HTML imports, a React frontend — were ~105 lines describing
+APIs this repo does not use even once. planestories is a CLI: no server, no frontend, no database.
+They are in the Bun docs if that ever changes.)

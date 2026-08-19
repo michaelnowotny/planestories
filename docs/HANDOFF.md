@@ -448,9 +448,11 @@ CLI layer.
   thread. Residual: `frame()` still ticks a scope per rAF while dragging.
 - **Interpenetration on drag**: scoped bodies cannot repel unscoped ones, so an epic dragged onto
   another cluster can overlap it. Accepted knowingly; round 2 flagged it.
-- **9 pre-existing biome findings** on `main` since `a41559a`, in files this branch does not touch —
-  so `bunx biome check --write .` (step 1 of the documented gate) exits non-zero on a clean
-  checkout. Worth its own small commit.
+- ~~9 pre-existing biome findings~~ **FIXED.** They made step 1 of the documented gate exit
+  non-zero on a clean checkout, and because the gate is an `&&` chain, `tsc` and the tests never
+  ran — a mandatory rule that could not be satisfied on unmodified code. Seven were auto-fixable;
+  two were real (`ProbeClient` declared `listArchivedWorkItems` twice; two assignment-in-expression
+  arrow bodies). The gate now passes end to end on `main`.
 - `export` has no `announceTarget` (no `loadConfig` call in the same shape).
 
 ### The finance session
