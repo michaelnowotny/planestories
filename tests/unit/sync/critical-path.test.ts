@@ -157,6 +157,16 @@ describe("critical path", () => {
 		expect(result.chain).toEqual([]);
 	});
 
+	test("an empty chain carries NO totalDays for `jq .totalDays` to read as 0", () => {
+		// The cycle refusal was shaped so a script cannot read a fabricated floor off
+		// it. The empty-chain success shape is the same escape one discriminator over:
+		// the human formatter and the atlas gauge both special-cased it, and `--json`
+		// did not — so a board with no dependency structure reported a floor of 0.
+		const result = computed(graph([story("a", "P-1", 2), story("b", "P-2", 3)], []));
+		expect(result.chain).toEqual([]);
+		expect(result).not.toHaveProperty("totalDays");
+	});
+
 	test("epics are containers: their children carry the duration, not them", () => {
 		const epic: AtlasNode = {
 			...story("e", "P-0", 999),

@@ -55,11 +55,19 @@ export function registerTrendCommand(program: Command): void {
 					// that nobody is told about reads as "nothing changed that week".
 					try {
 						const source = await openSnapshotSource(path);
-						const { graph } = await resolveGraph({
-							fromSnapshot: path,
-							project: source.projectName,
-							json: true, // keep provenance on stderr, out of --json stdout
-						});
+						// `boardHealth` counts dependency edges, so a graph missing some of
+						// them reports a board shedding structure it never shed. Snapshot
+						// reads cannot fail this way today — but that is a property of the
+						// current wiring, not a guarantee, and this command used to discard
+						// the completeness field outright. Throwing lands in the catch below,
+						// which records an unreadable point instead of a quiet fiction.
+						const graph = (
+							await resolveGraph({
+								fromSnapshot: path,
+								project: source.projectName,
+								json: true, // keep provenance on stderr, out of --json stdout
+							})
+						).requireCompleteGraph("a board-health point");
 						// Workspace slug is the series key: it distinguishes the cloud
 						// workspace from the self-hosted one, which is exactly the boundary
 						// across which a trend line would be fiction.

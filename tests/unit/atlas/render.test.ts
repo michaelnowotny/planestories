@@ -248,14 +248,30 @@ describe("effort visibility (operator decisions A/B/C)", () => {
 		// floor computed from a graph with missing edges reads as exact.
 		const got = embedded(
 			renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
-				relationsComplete: false,
-				relationFailures: 3,
+				coverage: { kind: "partial", failures: 3 },
 			}),
 			"CP",
 		);
 		expect(got.state).toBe("incomplete");
 		expect(got.missing).toBe(3);
 		expect(got).not.toHaveProperty("totalDays");
+	});
+
+	test("a SKIPPED sweep is not published as a board with no dependencies", () => {
+		// `--no-dependencies` used to arrive here as `relationFailures === 0` and
+		// render as state `none`, whose tooltip is a statement of fact about the
+		// BOARD: "nothing blocks anything else". The graph had no edges because
+		// nobody fetched any — absence of the question published as its answer.
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "skipped" },
+		});
+		const got = embedded(html, "CP");
+		expect(got.state).toBe("skipped");
+		expect(got).not.toHaveProperty("totalDays");
+		expect(html).toContain("relations were never fetched");
+		// The sibling cells derived from edges must not print 0 either — three cells
+		// agreeing on a graph nobody fetched is three lies, not one.
+		expect(html).toContain("Not measured");
 	});
 
 	// A fixture that actually EXERCISES the set: two linked stories, one with no

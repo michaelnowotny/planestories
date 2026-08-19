@@ -1,8 +1,9 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import type { AtlasGraph } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { type CriticalPathResult, computeCriticalPath } from "../../sync/critical_path.ts";
-import { resolveGraph } from "../graph_source.ts";
+import { IncompleteGraphError, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
@@ -110,7 +111,7 @@ export function registerCriticalPathCommand(program: Command): void {
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (file: string | undefined, options) => {
 			try {
-				const { graph, client, relationFailures } = await resolveGraph({
+				const source = await resolveGraph({
 					file,
 					config: options.config,
 					context: options.context,
@@ -118,17 +119,18 @@ export function registerCriticalPathCommand(program: Command): void {
 					fromSnapshot: options.fromSnapshot,
 					json: options.json === true,
 				});
-				// A partial relation sweep means the graph is MISSING edges, and a
-				// missing `blocks` edge silently SHORTENS the floor or hides a cycle
-				// that should have been a refusal. Atlas may draw a picture with most
-				// of its edges; a schedule number may not be computed from most of
-				// its constraints.
-				if (relationFailures > 0) {
-					console.error(
-						chalk.red(
-							`Refusing to compute: ${relationFailures} relation lookup(s) failed, so the dependency graph is incomplete.`,
-						),
-					);
+				// A partial sweep means the graph is MISSING edges, and a missing
+				// `blocks` edge silently SHORTENS the floor or hides a cycle that should
+				// have been a refusal. Atlas may draw a picture with most of its edges;
+				// a schedule number may not be computed from most of its constraints.
+				// The refusal is now the TYPE's — there is no way to reach the graph
+				// without answering this.
+				let graph: AtlasGraph;
+				try {
+					graph = source.requireCompleteGraph("the dependency floor");
+				} catch (error) {
+					if (!(error instanceof IncompleteGraphError)) throw error;
+					console.error(chalk.red(error.message));
 					console.error(
 						chalk.dim(
 							"  A missing dependency edge shortens the floor or hides a cycle. Re-run at a quieter hour,",
@@ -137,10 +139,11 @@ export function registerCriticalPathCommand(program: Command): void {
 					console.error(
 						chalk.dim("  or use --from-snapshot, which reads a complete recorded graph."),
 					);
-					if (client) reportPacing(client);
+					if (source.client) reportPacing(source.client);
 					process.exitCode = 1;
 					return;
 				}
+				const client = source.client;
 				const result = computeCriticalPath(graph);
 
 				if (options.json) {

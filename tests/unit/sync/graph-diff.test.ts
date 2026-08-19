@@ -120,7 +120,7 @@ describe("graph diff", () => {
 			beforeInstance: "bloomenkohlberg",
 			afterInstance: "archimedes",
 		});
-		expect(d.sameInstance).toBe(false);
+		expect(d.sameBoard).toBe(false);
 		const out = formatGraphDiff(d);
 		expect(out).toContain("DIFFERENT INSTANCES");
 		expect(out).toContain("DIVERGENCE");
@@ -137,7 +137,7 @@ describe("graph diff", () => {
 			beforeInstance: "plane-so-archimedes",
 			afterInstance: "plane-porcupine-works-archimedes",
 		});
-		expect(d.sameInstance).toBe(false);
+		expect(d.sameBoard).toBe(false);
 		expect(formatGraphDiff(d)).toContain("DIVERGENCE");
 	});
 
@@ -149,7 +149,7 @@ describe("graph diff", () => {
 			beforeProject: "DATA",
 			afterProject: "SBOX",
 		});
-		expect(d.sameInstance).toBe(false);
+		expect(d.sameBoard).toBe(false);
 	});
 
 	test("same instance carries no divergence warning", () => {
@@ -158,7 +158,7 @@ describe("graph diff", () => {
 			beforeProject: "DATA",
 			afterProject: "DATA",
 		});
-		expect(d.sameInstance).toBe(true);
+		expect(d.sameBoard).toBe(true);
 		expect(formatGraphDiff(d)).not.toContain("DIVERGENCE");
 	});
 

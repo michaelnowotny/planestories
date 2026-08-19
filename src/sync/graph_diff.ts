@@ -41,9 +41,21 @@ export interface FieldChange {
 
 export interface GraphDiff {
 	/** True when both sides came from the same workspace — change over TIME. */
-	sameInstance: boolean;
-	before: { label: string; instance: string; stories: number; edges: number };
-	after: { label: string; instance: string; stories: number; edges: number };
+	sameBoard: boolean;
+	before: {
+		label: string;
+		instance: string;
+		project: string | null;
+		stories: number;
+		edges: number;
+	};
+	after: {
+		label: string;
+		instance: string;
+		project: string | null;
+		stories: number;
+		edges: number;
+	};
 	addedStories: Array<{ identifier: string; title: string }>;
 	removedStories: Array<{ identifier: string; title: string }>;
 	addedEdges: EdgeChange[];
@@ -158,11 +170,21 @@ export function diffGraphs(
 		// projects reports every story as added and removed, which is obvious
 		// garbage — but it should still say WHY rather than let the reader assume
 		// the board was rebuilt.
-		sameInstance:
+		sameBoard:
 			meta.beforeInstance === meta.afterInstance &&
 			(meta.beforeProject ?? null) === (meta.afterProject ?? null),
-		before: { label: meta.beforeLabel, instance: meta.beforeInstance, ...count(before, a) },
-		after: { label: meta.afterLabel, instance: meta.afterInstance, ...count(after, b) },
+		before: {
+			label: meta.beforeLabel,
+			instance: meta.beforeInstance,
+			project: meta.beforeProject ?? null,
+			...count(before, a),
+		},
+		after: {
+			label: meta.afterLabel,
+			instance: meta.afterInstance,
+			project: meta.afterProject ?? null,
+			...count(after, b),
+		},
 		addedStories: addedStories.sort((x, y) => x.identifier.localeCompare(y.identifier)),
 		removedStories: removedStories.sort((x, y) => x.identifier.localeCompare(y.identifier)),
 		addedEdges: addedEdges.sort((x, y) => edgeKey(x).localeCompare(edgeKey(y))),
@@ -182,12 +204,17 @@ export function formatGraphDiff(d: GraphDiff): string {
 	lines.push(
 		`  ${d.before.stories} stories / ${d.before.edges} edges   →   ${d.after.stories} stories / ${d.after.edges} edges`,
 	);
-	if (!d.sameInstance) {
-		// The same numbers mean a different thing here, so say which thing.
+	if (!d.sameBoard) {
+		// The same numbers mean a different thing here, so say which thing — and name
+		// the difference that actually exists. "DIFFERENT INSTANCES (x vs x)" printed
+		// the same string twice whenever only the PROJECT differed, which is the one
+		// case where the reader most needs to be told what they are looking at.
+		const differsBy =
+			d.before.instance !== d.after.instance
+				? `DIFFERENT INSTANCES (${d.before.instance} vs ${d.after.instance})`
+				: `DIFFERENT PROJECTS (${d.before.project ?? "?"} vs ${d.after.project ?? "?"}) on ${d.before.instance}`;
 		lines.push("");
-		lines.push(
-			`  ⚠ DIFFERENT INSTANCES (${d.before.instance} vs ${d.after.instance}): this is DIVERGENCE`,
-		);
+		lines.push(`  ⚠ ${differsBy}: this is DIVERGENCE`);
 		lines.push("    between two boards, not change over time. Neither side is authoritative and");
 		lines.push("    nothing here reconciles them — this reports difference only.");
 	}

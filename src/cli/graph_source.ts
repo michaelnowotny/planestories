@@ -1,5 +1,10 @@
 import chalk from "chalk";
-import { type AtlasGraph, buildAtlasFromBoard, buildAtlasFromFile } from "../atlas/model.ts";
+import {
+	type AtlasGraph,
+	buildAtlasFromBoard,
+	buildAtlasFromFile,
+	type DependencyCoverage,
+} from "../atlas/model.ts";
 import { fetchRelationsWithSweep } from "../atlas/relations.ts";
 import { loadConfig } from "../config/loader.ts";
 import { ConfigError } from "../errors.ts";
@@ -28,21 +33,50 @@ export interface GraphSourceOptions {
 	json?: boolean;
 }
 
+/** Thrown by `requireCompleteGraph`. Carries the coverage so callers can explain it. */
+export class IncompleteGraphError extends Error {
+	constructor(
+		readonly coverage: DependencyCoverage,
+		readonly purpose: string,
+	) {
+		super(
+			coverage.kind === "skipped"
+				? `Refusing to compute ${purpose}: dependency relations were not fetched, so the graph has no edges.`
+				: `Refusing to compute ${purpose}: ${coverage.kind === "partial" ? coverage.failures : 0} relation lookup(s) failed, so the dependency graph is incomplete.`,
+		);
+		this.name = "IncompleteGraphError";
+	}
+}
+
+/**
+ * The graph, reachable ONLY through a method that names what the caller is doing
+ * with it.
+ *
+ * There is deliberately no `graph` property. Three review rounds found the same
+ * defect — a completeness rule honoured at one call site and forgotten at the
+ * next — because the rule lived in a COMMENT and `const { graph } = await
+ * resolveGraph(...)` compiled fine without it. `trend` and `diff` both did
+ * exactly that. Now that line does not type-check, so the question has to be
+ * answered rather than remembered.
+ */
 export interface GraphSourceResult {
-	graph: AtlasGraph;
 	/** The client used, when one was — for `reportPacing`. Absent offline. */
 	client?: PlaneClient;
-	/**
-	 * Relation lookups that failed even after the paced retry pass, so the graph
-	 * is MISSING edges. Returned rather than merely logged: a read-only view can
-	 * tolerate a dropped edge, but anything that computes a NUMBER from the
-	 * dependency structure cannot — a missing `blocks` edge shortens a schedule
-	 * floor, or hides a cycle that should have been a refusal. Callers decide;
-	 * they can only decide if they are told.
-	 */
-	relationFailures: number;
+	coverage: DependencyCoverage;
 	/** Lookups recovered by the sequential second pass (informational). */
 	relationRecovered: number;
+	/**
+	 * For anything that computes a FIGURE from the dependency structure. A missing
+	 * `blocks` edge silently shortens a schedule floor or hides a cycle that should
+	 * have been a refusal, so this throws unless coverage is complete.
+	 */
+	requireCompleteGraph(purpose: string): AtlasGraph;
+	/**
+	 * For read-only views that can live with a dropped edge. The `reason` is not
+	 * used at runtime — it exists so the choice is visible at the call site and in
+	 * review, rather than being the silent default it used to be.
+	 */
+	acceptPartialGraph(reason: string): AtlasGraph;
 }
 
 /**
@@ -57,11 +91,10 @@ export interface GraphSourceResult {
 export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSourceResult> {
 	if (options.file) {
 		const content = await Bun.file(options.file).text();
-		return {
-			graph: buildAtlasFromFile(content, options.file),
-			relationFailures: 0,
-			relationRecovered: 0,
-		};
+		// A stories file carries its own `blocks:` lines, so the dependency
+		// structure is fully present by construction — nothing was fetched, and
+		// nothing was skipped either.
+		return graphSourceResult(buildAtlasFromFile(content, options.file), { kind: "complete" }, 0);
 	}
 
 	const config = options.fromSnapshot
@@ -129,17 +162,37 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 		}
 	}
 
-	return {
-		graph: buildAtlasFromBoard(
-			client,
-			project.id,
-			project.identifier,
-			projectName,
-			index,
-			relationsById,
-		),
-		client,
-		relationFailures,
+	const coverage: DependencyCoverage =
+		options.dependencies === false
+			? { kind: "skipped" }
+			: relationFailures > 0
+				? { kind: "partial", failures: relationFailures }
+				: { kind: "complete" };
+
+	return graphSourceResult(
+		buildAtlasFromBoard(client, project.id, project.identifier, projectName, index, relationsById),
+		coverage,
 		relationRecovered,
+		client,
+	);
+}
+
+function graphSourceResult(
+	graph: AtlasGraph,
+	coverage: DependencyCoverage,
+	relationRecovered: number,
+	client?: PlaneClient,
+): GraphSourceResult {
+	return {
+		client,
+		coverage,
+		relationRecovered,
+		requireCompleteGraph(purpose: string): AtlasGraph {
+			if (coverage.kind !== "complete") throw new IncompleteGraphError(coverage, purpose);
+			return graph;
+		},
+		acceptPartialGraph(_reason: string): AtlasGraph {
+			return graph;
+		},
 	};
 }

@@ -51,8 +51,13 @@ export interface CriticalPathComputed {
 	ok: true;
 	/** The longest dependency chain, in order. Empty when nothing is connected. */
 	chain: CriticalPathNode[];
-	/** Summed effort along the chain. A LOWER BOUND when `isLowerBound`. */
-	totalDays: number;
+	/**
+	 * Summed effort along the chain. A LOWER BOUND when `isLowerBound`.
+	 *
+	 * ABSENT when `chain` is empty. Nothing connected is not a floor of zero, and
+	 * a `0` sitting under this key is exactly what a script reads as one.
+	 */
+	totalDays?: number;
 	/**
 	 * Connected, unfinished leaves with no estimate — ANYWHERE in the dependency
 	 * graph, not merely on the winning chain. An unestimated item that lost the
@@ -358,7 +363,12 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 	return {
 		ok: true,
 		chain,
-		totalDays: Math.round(projectEnd * 100) / 100,
+		// Omitted entirely when nothing is connected — the same discipline as the
+		// cycle refusal above, for the same reason. The human formatter and the
+		// atlas gauge both special-cased the empty chain; `--json` did not, so
+		// `jq .totalDays` read `0` off a board with no dependency structure and got
+		// a floor that was never computed. An absent key cannot be misread.
+		...(chain.length > 0 ? { totalDays: Math.round(projectEnd * 100) / 100 } : {}),
 		unestimated,
 		unestimatedIdentifiers,
 		isLowerBound: unestimated > 0,

@@ -72,11 +72,7 @@ export function registerAtlasCommand(program: Command) {
 				// This used to be a 70-line twin of resolveGraph; two sites assembling
 				// the same graph is the shape that produced the relation-ref defect,
 				// where five call sites did one job and one did it differently.
-				const {
-					graph,
-					client: pacedClient,
-					relationFailures,
-				} = await resolveGraph({
+				const source = await resolveGraph({
 					file,
 					config: options.config,
 					context: options.context,
@@ -85,21 +81,28 @@ export function registerAtlasCommand(program: Command) {
 					dependencies: options.dependencies,
 					json: options.json === true,
 				});
+				const pacedClient = source.client;
+				// The one consumer for which a picture with some edges missing is still a
+				// useful picture — and it now says so out loud rather than by omission.
+				const graph = source.acceptPartialGraph("a map is legible with some edges missing");
 
-				// The HTML outlives the stderr warning about a partial sweep, so the caveat
-				// travels INSIDE the artifact rather than beside it.
-				const html = options.json
-					? ""
-					: renderAtlasHtml(graph, {
-							relationsComplete: relationFailures === 0,
-							relationFailures,
-						});
+				// The HTML outlives the stderr warning about the sweep, so the caveat
+				// travels INSIDE the artifact rather than beside it. Coverage is passed
+				// WHOLE: `--no-dependencies` used to arrive here as `failures === 0` and
+				// render as "nothing blocks anything else" — a claim about the board
+				// derived from a sweep nobody ran.
+				const html = options.json ? "" : renderAtlasHtml(graph, { coverage: source.coverage });
 				const outPath = resolveOutputPath(
 					options.output,
 					options.json ? "atlas.json" : "atlas.html",
 				);
 				const abs = resolve(outPath);
-				await Bun.write(abs, options.json ? `${JSON.stringify(graph, null, "\t")}\n` : html);
+				// The JSON file outlives this process exactly as the HTML does, and
+				// someone will compute a floor from it later. Without this it is a graph
+				// with silently fewer edges and nothing to say so — the r2 P0, one file
+				// format over.
+				const json = { ...graph, dependencyCoverage: source.coverage };
+				await Bun.write(abs, options.json ? `${JSON.stringify(json, null, "\t")}\n` : html);
 
 				const flagged = graph.counts.flagged ? `, ${graph.counts.flagged} flagged` : "";
 				const deps = graph.counts.edges ? `, ${graph.counts.edges} dependencies` : "";
