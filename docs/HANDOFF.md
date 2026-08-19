@@ -329,6 +329,94 @@ red first. Ordered as the roadmap sections that produced them.
    `--recreate-target` AND `--allow-divergent-target`.
 2. The CLI no longer forces an exit; it prints a linger notice instead (see below).
 
+## 8d. ⚠ WHERE TO PICK UP (2026-08-18) — READ THIS FIRST, IT SUPERSEDES §8c
+
+**State: branch `feat/critical-path`, 10 commits, 761 tests green, tsc clean, UNMERGED. Working
+tree clean. A Grok review is IN FLIGHT and its verdict has not been read.**
+
+### The very first thing to do
+
+```bash
+cat /tmp/claude-1000/*/385a3468-*/scratchpad/grok_report_d3.md   # round-3 verdict
+```
+That path is a session scratchpad and **may be gone**. If it is, re-run the review — the brief is
+`grok_brief_d3.md` in the same directory; recreate it from §8d if needed:
+
+```bash
+git worktree add --detach /tmp/wt-d3 HEAD          # NEVER let a worktree carry .env
+~/PycharmProjects/finance_csv_importer/scripts/external_review.sh grok /tmp/wt-d3 <brief> <report>
+```
+
+**DO NOT MERGE while anything major is open** — standing operator instruction. Rounds 1 and 2 both
+returned BLOCK on real defects; round 2 found a P0 in code that had already passed round 1.
+
+### What is on the branch
+
+| commit | what |
+|---|---|
+| `3c82bc1` | `critical-path` — dependency floor, slack, biggest lever |
+| `d28469b` | atlas layout SOLVED AT BUILD TIME (the browser used to run 325 settling ticks) |
+| `78b6376` | `trend` — board health across nightly snapshots, offline |
+| `698a764` | round-1 BLOCK fixes (8 findings, all verified real by round 2) |
+| `5959120` | atlas: synchronous settle, scoped drag relaxation |
+| `41d1950` | floor gauge, no-estimate flag + filter, `R` removed |
+| `999ce1a` | resolved-target announcement (the wrong-instance footgun) |
+| `b305313` | `diff` — structural difference between two snapshots |
+| `c6ef04c` | round-2 BLOCK fixes (P0 + four P1s) |
+| `6c772a1` | diff/trend board-identity alignment |
+
+### ⚠ THE PATTERN THAT KEPT RECURRING — fix the CAUSE, not a fourth instance
+
+Three separate reviews found the same shape: **a rule established in one place and not carried to
+its siblings.**
+
+1. Relation refs normalized in `snapshot.ts` only — five other consumers silently saw ZERO relations
+   on CE (§9.5e).
+2. The critical-path floor gained safeguards in the CLI (refuse on partial sweep, no bare
+   lower-bound, cycle = refusal) and was then embedded in the atlas HTML with none of them.
+3. "Same board" defined as workspace-slug in `diff` and as host+slug+project in `trend`, one commit
+   apart.
+
+**The common cause: the invariant was written as a COMMENT and relied on memory.** `graph_source.ts`
+still says *"callers that cannot tolerate a missing edge must say so"* — and `atlas` did not.
+
+**What actually worked, both times it was applied:** making the invariant a TYPE. The discriminated
+`CriticalPathResult` (refusal carries no `totalDays`) has not regressed since. Prose invariants
+regressed three times.
+
+**Recommended next structural work, ahead of new features:**
+- One publication path for any derived figure, returning a value that CANNOT be destructured to a
+  bare number — consumers get `{state, value, caveats}` or nothing.
+- ONE definition of board identity (`instanceTag(host, slug) + project`), imported everywhere;
+  today three call sites agree by convention.
+- Apply rule A11 (from the operator's other repo, and stated in AGENTS.md house rules): when
+  changing anything shared, ENUMERATE the consumers and say in the commit why each does or does not
+  need updating. All three instances would have been caught by that grep.
+
+### Known-open, smaller
+
+- **`doctor` declared-vs-actual relation provenance** — the finance session's best request. `doctor`
+  already detects dangling relations; what is missing is whether a relation came from a yaml field,
+  a body directive, or exists only on the board. Their 2026-08-18 incident is the argument for it.
+- **The atlas crash was never root-caused.** Six hypotheses measured and discarded (§9.5f). The
+  animated global settle was REMOVED, which deleted the reproduction. If it resurfaces, that is the
+  thread. Residual: `frame()` still ticks a scope per rAF while dragging.
+- **Interpenetration on drag**: scoped bodies cannot repel unscoped ones, so an epic dragged onto
+  another cluster can overlap it. Accepted knowingly; round 2 flagged it.
+- **9 pre-existing biome findings** on `main` since `a41559a`, in files this branch does not touch —
+  so `bunx biome check --write .` (step 1 of the documented gate) exits non-zero on a clean
+  checkout. Worth its own small commit.
+- `export` has no `announceTarget` (no `loadConfig` call in the same shape).
+
+### The finance session
+
+Their board has a **deleted work item, `DATA-2569`**, with a surviving dangling relation on
+`DATA-2570` — verified against a complete 2,588-item list. Answer relayed in
+`finance_csv_importer/external_info/planestories-relation-answer-2026-08-18.md`, including that
+`**Blocks:**`/`**Depends on:**` BODY LINES ARE PARSED INTO RELATIONS (parser.ts:144) — their
+proposed fallback of "keep prose as the record" would have kept generating the relations they were
+trying to stop.
+
 ## 8c. Where to pick up (as of 2026-08-17)
 
 Nothing is half-finished. Every branch is merged, the tree is clean, and no operation is
