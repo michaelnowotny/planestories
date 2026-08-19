@@ -4,7 +4,7 @@ import { computeCriticalPath } from "../../../src/sync/critical_path.ts";
 
 function story(
 	id: string,
-	identifier: string,
+	identifier: string | null,
 	effortDays: number | null,
 	overrides: Partial<AtlasNode> = {},
 ): AtlasNode {
@@ -177,6 +177,46 @@ describe("critical path", () => {
 		// 5, not 1004 — counting the epic would double-count its own children.
 		expect(result.totalDays).toBe(5);
 		expect(result.consideredLeaves).toBe(2);
+	});
+
+	test("a leaf reached only by EXPANDING an epic endpoint is in the no-estimate set", () => {
+		// The set drives the atlas filter the floor's tooltip names, and until now
+		// every test of it used a direct story->story edge. An edge written against
+		// the EPIC is expanded to its leaves, so a story can become connected — and
+		// so become one of the stories making the total a lower bound — without ever
+		// appearing as a literal edge endpoint. That is precisely the case where the
+		// tooltip and the filter drifted apart before.
+		const epic: AtlasNode = {
+			...story("e", "P-0", null),
+			kind: "epic",
+			children: [story("child", "P-2", null), story("child2", "P-3", 1)],
+		} as AtlasNode;
+		const result = computed(
+			graph([story("a", "P-1", 2), epic], [{ source: "a", target: "e", type: "blocks" }]),
+		);
+		// Two leaves under the epic, so one edge really became two.
+		expect(result.expandedEdges).toBe(1);
+		expect(result.isLowerBound).toBe(true);
+		// The EPIC itself is not work and must not appear; its leaf must.
+		expect(result.unestimatedIdentifiers).toEqual(["P-2"]);
+		expect(result.unestimatedUnidentified).toBe(0);
+	});
+
+	test("an unestimated story with NO identifier is counted but reported unfindable", () => {
+		// Unlinked markdown stories have no `PROJECT-N`, so the identifier-keyed
+		// filter cannot select them. They still make the floor a lower bound, so
+		// dropping them from the count would understate it — and leaving the gap
+		// unreported makes the filter look broken instead of the story unlinked.
+		const result = computed(
+			graph(
+				[story("a", "P-1", 2), story("b", null, null)],
+				[{ source: "a", target: "b", type: "blocks" }],
+			),
+		);
+		expect(result.isLowerBound).toBe(true);
+		expect(result.unestimated).toBe(1);
+		expect(result.unestimatedIdentifiers).toEqual([]);
+		expect(result.unestimatedUnidentified).toBe(1);
 	});
 
 	test("OFF-CHAIN unestimated work still makes the total a lower bound", () => {

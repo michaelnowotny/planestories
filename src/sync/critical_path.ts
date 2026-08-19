@@ -78,6 +78,13 @@ export interface CriticalPathComputed {
 	 * finding them.
 	 */
 	unestimatedIdentifiers: string[];
+	/**
+	 * How many of `unestimated` have NO identifier and so cannot be selected by the
+	 * atlas's no-estimate filter (unlinked markdown stories). Normally 0 for a
+	 * board. Reported rather than hidden: the tooltip names that filter, and a
+	 * promise the filter cannot keep reads as a broken control.
+	 */
+	unestimatedUnidentified: number;
 	isLowerBound: boolean;
 	/** Slack in days per identifier: how long it can slip without moving the end. */
 	slackByIdentifier: Record<string, number>;
@@ -340,6 +347,14 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 		.map((id) => leaves.get(id)?.node.identifier)
 		.filter((v): v is string => typeof v === "string")
 		.sort();
+	// A story read from a MARKDOWN FILE need not be linked to the board yet, so it
+	// has no identifier — it still counts toward `unestimated` (it genuinely makes
+	// the floor a lower bound) but the atlas filter, which selects by identifier,
+	// cannot reach it. The tooltip tells the operator to "use the filter to find
+	// them"; without this the promise is false for exactly those stories, and they
+	// would look like a filter that is broken rather than items that are unlinked.
+	// Board-sourced items always carry `PROJECT-N`, so this is normally 0.
+	const unestimatedUnidentified = unestimated - unestimatedIdentifiers.length;
 
 	// The lever, MEASURED: zero each chain item in turn and take the real drop in
 	// the floor. A near-critical path caps the saving, so the largest item is
@@ -371,6 +386,7 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 		...(chain.length > 0 ? { totalDays: Math.round(projectEnd * 100) / 100 } : {}),
 		unestimated,
 		unestimatedIdentifiers,
+		unestimatedUnidentified,
 		isLowerBound: unestimated > 0,
 		slackByIdentifier,
 		biggestLever,

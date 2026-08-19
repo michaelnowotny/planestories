@@ -86,6 +86,10 @@ export function renderAtlasHtml(
 								chainLength: cp.chain.length,
 								unestimated: cp.unestimated,
 								isLowerBound: cp.isLowerBound,
+								// Unlinked markdown stories have no identifier, so the filter
+								// (which selects by identifier) cannot reach them. Carried so
+								// the tooltip can stop promising otherwise.
+								unfindable: cp.unestimatedUnidentified,
 							}
 					: { state: "cycle" as const, cycles: cp.cycles.slice(0, 1) };
 	const cpJson = JSON.stringify(cpSummary).replace(/</g, "\\u003c");
@@ -1355,7 +1359,10 @@ el("gFlag").textContent=String(GRAPH.counts.flagged||0);
    k.textContent=f.isLowerBound?"FLOOR (MIN)":"FLOOR";
    cell.title="Longest dependency chain: "+f.totalDays+" dev-days across "+f.chainLength+" items."
      +" This is the PARALLEL floor \\u2014 not total remaining effort."
-     +(f.isLowerBound?(" At least: "+f.unestimated+" connected stor"+(f.unestimated===1?"y has":"ies have")+" no effort estimate, so the real floor is HIGHER. Use the 'no estimate' filter to find them."):"");
+     +(f.isLowerBound?(" At least: "+f.unestimated+" connected stor"+(f.unestimated===1?"y has":"ies have")+" no effort estimate, so the real floor is HIGHER. Use the 'no estimate' filter to find them."
+       // Unlinked stories carry no identifier, so the filter cannot select them.
+       // Naming the shortfall keeps the filter from looking broken.
+       +((f.unfindable>0)?(" "+f.unfindable+" of them "+(f.unfindable===1?"is":"are")+" not linked to the board yet and so cannot be selected by that filter."):"")):"");
  }else{
    v.textContent="\\u2014";
    k.textContent="FLOOR";
