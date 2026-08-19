@@ -8,7 +8,7 @@ Plane project.
 > **Credit.** The idea comes from [Ijonas Kisselbach](https://github.com/ijonas)'s *Project Atlas*
 > feature in [linearstories](https://github.com/ijonas/linearstories). This is a ground-up
 > reimagining for Plane: a zero-dependency offline artifact, a hand-rolled force-directed layout
-> (no D3), and the operator-designed "Cockpit" presentation
+> (no D3) settled at build time, and the operator-designed "Cockpit" presentation
 > (design record: [`DESIGN_atlas-cockpit.md`](./DESIGN_atlas-cockpit.md)).
 
 ## Usage
@@ -56,21 +56,33 @@ reaches Plane.
 
 ## The bridge
 
-- **Instrument header**: EPICS / STORIES / SUPPLY LINES / FLAGGED gauges, live **MAG** (zoom
-  relative to fit) and **BRG** (pan bearing), and a **graduated zoom ruler** whose needle you can
-  drag to zoom (double-click = fit). FIT and PNG (capped export) buttons.
+- **Instrument header**: EPICS / STORIES / SUPPLY LINES / FLAGGED / **FLOOR** / **NO EST.**
+  gauges, live **MAG** (zoom relative to fit) and **BRG** (pan bearing), and a **graduated zoom
+  ruler** whose needle you can drag to zoom (double-click = fit). FIT and PNG (capped export)
+  buttons.
+- **FLOOR** is the dependency floor — the longest chain of blocking work, in dev-days, computed at
+  build time by the same code `planestories critical-path` runs, so the picture and the number
+  cannot disagree. It reads `≥ Nd` and says **FLOOR (MIN)** when connected stories lack an
+  `**Effort:**` line, because the real floor is then higher. It shows `—` rather than a number
+  whenever one would be a fiction: no dependency chain at all, a cycle (which makes longest-path
+  undefined), a relation sweep that dropped edges, or `--no-dependencies`, where nothing was
+  fetched to measure. Hover it for which of those applies.
+- **NO EST.** counts the connected, unfinished stories with no effort estimate — the ones that
+  make FLOOR a lower bound.
 - **SCAN**: type in the scan field (`/` focuses it) to search titles and IDs — stories AND epics.
   A **contact list** drops down (status-glyphed rows, matched text highlighted); the field dims
   everything but matches and pings them cyan. `↑↓` walk the contacts, **⏎ intercepts** (locks +
   flies to the target — an epic intercept frames its whole cluster), **Esc restores the exact
   pre-scan viewport**.
 - **Click a planet** to lock a story; **click a hub ring** to lock an epic and fly to its cluster;
-  click empty space / ✕ / Esc to unlock. Drag pans; dragging a node moves it (the layout gently
-  reheats); wheel zooms (never past fit).
+  click empty space / ✕ / Esc to unlock. Drag pans; dragging a node moves it and its own cluster
+  eases around it — deliberately just that cluster, so touching one story does not rearrange the
+  board; wheel zooms (never past fit).
 - **Minimap** (top right): the whole field with the viewport rectangle; click or drag to navigate.
 - **Chips row**: status groups (✦ in their world hue), labels, one chip per assignee
-  (`@name` / `@ unassigned`), and ▲ flagged-only — all wired filters that dim
-  non-matching planets.
+  (`@name` / `@ unassigned`), ▲ flagged-only, and **? no estimate** — all wired filters that dim
+  non-matching planets. The no-estimate chip selects exactly the stories behind the FLOOR (MIN)
+  reading, so the gauge's claim and the filter's selection are the same set.
 
 ## The sidebar
 
@@ -86,7 +98,7 @@ reaches Plane.
   clickable and fly to the story.
 - **No target locked** shows a calm empty state.
 
-Keyboard: `F` fit · `R` reheat layout · `D` supply-lines only · `/` scan · `Esc` end scan / unlock.
+Keyboard: `F` fit · `D` supply-lines only · `/` scan · `Esc` end scan / unlock.
 
 ## The spec-quality overlay
 
@@ -108,7 +120,9 @@ Claude Code skill — the Atlas overlay is only a quick visual signal.
 ## How it stays self-contained
 
 The generated HTML inlines all CSS, all JavaScript, and the graph data (as embedded JSON, with any
-`</script>` in your text unicode-escaped so it can't break out). There are no `<script src>` tags,
+`</script>` in your text unicode-escaped so it can't break out). **The layout is solved when the
+file is written, not when you open it** — the page arrives already arranged and draws immediately,
+rather than animating its way out of a random starting position while you wait. There are no `<script src>` tags,
 no remote stylesheets, and no fonts fetched from a CDN — the strict-CSP-friendly kind of page you
 can email, drop in an artifact store, or open on a plane. Nothing is ever uploaded. Sidebar links
 only ever carry `http(s)` URLs. The cockpit is dark-only by design.
@@ -119,4 +133,11 @@ only ever carry `http(s)` URLs. The cockpit is dark-only by design.
 `atlas --json` emits the exact graph the cockpit renders — nodes (id, kind, identifier,
 title, status/statusGroup, labels, assignee, effortDays, priority, criteria, quality),
 dependency edges (`blocks`/`relates`), and counts — so external tooling and the HTML can
-never disagree.
+never disagree. That is enforced rather than promised: both artifacts are produced by one
+`atlasJsonPayload()`, and a test asserts the emitted file deep-equals the graph embedded in the
+page.
+
+It also carries **`dependencyCoverage`**: `{"kind":"complete"}`, `{"kind":"partial","failures":N}`
+when some relation lookups failed, or `{"kind":"skipped"}` under `--no-dependencies`. Read it
+before computing anything from `edges` — a graph missing edges is not a graph with fewer
+dependencies, and the difference is the whole reason the field exists.

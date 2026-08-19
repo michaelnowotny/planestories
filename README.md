@@ -479,6 +479,65 @@ status, criteria) for tooling. See [docs/ATLAS.md](./docs/ATLAS.md).
 > Inspired by Ijonas Kisselbach's Project Atlas in linearstories, rethought for Plane as
 > the cockpit design and shipped as a zero-dependency offline artifact.
 
+### `critical-path`
+
+The longest chain of blocking work, in dev-days — the floor under finishing the project, and the
+one number a dependency graph exists to reveal.
+
+```
+planestories critical-path stories/q1-2026.md            # offline, from a file
+planestories critical-path --project "Data Platform"     # from the live board
+planestories critical-path --from-snapshot data.snapshot.json --json
+```
+
+It prints the chain in order, each item's effort, per-item **slack** (how long something off the
+chain can slip without moving the end), and the **biggest lever** — the item whose completion
+shortens the floor most, *measured*, which is not the largest item whenever a near-critical path
+exists.
+
+Three things it refuses to fake, because a schedule number people act on is exactly where a
+confident guess does damage:
+
+- Stories with no `**Effort:**` line are counted, not assumed to be zero, and the total is printed
+  as **"at least N dev-days"** with the count of what is missing.
+- A dependency **cycle** makes longest-path undefined, so it refuses and names the cycle rather
+  than breaking it arbitrarily and returning a number. `--json` then carries no `totalDays` at all
+  — there is nothing for `jq .totalDays` to read as `0`.
+- A partial relation sweep (rate limiting) means edges are missing, which silently *shortens* a
+  floor. It refuses rather than under-report.
+
+The number is a **parallel floor** — the dependency constraint assuming unlimited people, not
+total remaining effort and not a delivery date.
+
+### `trend`
+
+Board health over time, from a directory of snapshots — offline, no API calls:
+
+```
+planestories trend --dir backups            # every *.snapshot.json in there
+planestories trend a.snapshot.json b.snapshot.json --json
+```
+
+Stories, done/open split, flagged count, dependency edges and unestimated work, one row per
+snapshot. Series are keyed on host + workspace + project, so two installations (or two projects)
+never merge into one misleading line, and a gap in the dates is marked rather than smoothed over.
+
+### `diff`
+
+What structurally changed between two snapshots — dependencies appearing and vanishing, stories
+moving between epics, status and effort changes:
+
+```
+planestories diff before.snapshot.json after.snapshot.json
+```
+
+Identity is the **human identifier**, never the internal UUID: replication mints new UUIDs for
+everything, so a UUID-keyed diff of a cloud snapshot against its CE copy would report all 800
+items deleted and re-created. Comparing two *different* boards is a legitimate thing to want and a
+different question from change-over-time, so the output says **DIVERGENCE** loudly when the two
+sides are not the same board. It reports difference and nothing else — there is no "apply", no
+direction, and no notion of one side being right.
+
 ### `replicate` / `rename-project`
 
 Migrate a whole project between Plane instances with exact `PROJECT-N` preservation:
@@ -523,16 +582,39 @@ planestories works against Plane Cloud by default (`https://api.plane.so`). To t
 
 ## Multiple workspaces (contexts)
 
-A config file may define named contexts; select one with `--context <name>`:
+A config file may define named contexts — one per Plane installation — and you select one with
+`--context <name>`:
 
 ```json
 {
+  "defaultContext": "orgA",
   "contexts": [
     { "name": "orgA", "workspaceSlug": "org-a", "defaultProject": "Q1 Release" },
     { "name": "orgB", "workspaceSlug": "org-b", "defaultProject": "Brand Refresh" }
   ]
 }
 ```
+
+**When `--context` is omitted**, the optional top-level `defaultContext` applies; failing that, a
+config defining exactly ONE context uses it (no flag needed for the single-installation case);
+otherwise the command stops and lists the names rather than guessing. A `defaultContext` naming a
+context that does not exist is a startup error, never a quiet fallback to a different installation.
+
+Every board-touching command prints its resolved target before doing any work — host, workspace,
+project, and which context, marked `(implicit)` when you did not name one:
+
+```
+→ plane.example.internal · workspace archimedes · project Data Platform · context ce (implicit)
+```
+
+**Credential isolation is the point of contexts, and it holds however the context was chosen.**
+The bare `PLANE_API_KEY` / `PLANE_WORKSPACE_SLUG` / `PLANE_BASE_URL` variables apply ONLY when no
+context is in force. A context — named on the command line, defaulted, or the only one — takes
+credentials from its config entry and its own `PLANE_CTX_<NAME>_*` variables, so a key left in
+your shell for one installation cannot silently authenticate a command aimed at another.
+
+`replicate --from` / `--to` are deliberately never defaulted: a migration between two instances
+must not silently pick a side.
 
 Set optional `dialect` to `"work-items"` (or `PLANE_CTX_<NAME>_DIALECT=work-items`) when a
 self-hosted Plane instance serves dependency relations under `/work-items/`. It defaults to

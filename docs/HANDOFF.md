@@ -587,9 +587,9 @@ journal you write is stamped with a lie:
 
 1. `package.json` `"version"`
 2. the `.version("…")` call in `src/cli/index.ts`
-3. **`TOOL_VERSION` in `src/constants.ts`** — recorded into snapshots and journals (its own comment
-   says to keep it in sync; nothing enforces it, so a test asserting all three agree would be a
-   worthwhile addition)
+3. **`TOOL_VERSION` in `src/constants.ts`** — recorded into snapshots and journals. ✅ `tests/unit/
+   version-sync.test.ts` now asserts all three agree (added 2026-08-19), so drift fails the gate
+   instead of silently stamping a migration artifact with the wrong provenance.
 
 Then: write a CHANGELOG covering v0.4/v0.5 (atlas cockpit, criteria-as-task-list, packet/epic,
 replication engine, backup, house-rules, dry-run diff); run the gate; verify the compiled binary
@@ -731,10 +731,17 @@ Recorded so the next maintainer inherits them as facts rather than surprises:
    expanding through `members` exactly as state and labels already are.
 2. **Ambient `PLANE_*` env is a latent flake source across the suite.** `loadConfig` reads
    `process.env` directly and several suites set `PLANE_*` vars for their own cases; one process
-   means those can leak between files. It surfaced as an intermittent failure of
-   `loadConfigForSnapshot > a present config file is HONOURED` in FULL runs only. That suite now
-   saves/clears/restores `PLANE_*` around each test. Any NEW test that calls `loadConfig` should
-   do the same rather than trust ordering.
+   means those can leak between files. Any NEW test that calls `loadConfig` should
+   save/clear/restore `PLANE_*` around each test rather than trust ordering.
+
+   ⚠ **The intermittent failure previously attributed to this was NOT env leakage** — diagnosed and
+   fixed 2026-08-19. `loadConfigForSnapshot > a present config file is HONOURED` failed roughly one
+   full run in ten with *"Failed to read config file"*. Its `withDir` helper was SYNCHRONOUS while
+   every caller passed an `async` body, so `run(dir)` returned a pending promise and `finally`
+   deleted the temp directory while `loadConfig` was still reading the file inside it — a
+   use-after-free of the fixture, not a leaked variable. `withDir` now awaits. Worth remembering as
+   a diagnosis error: the symptom was in the same area as a known hazard, so it was filed under it
+   without being reproduced.
 3. **Two test-isolation residuals.** `tests/unit/cli/doctor-provenance.test.ts` strips `PLANE_*`
    and uses a temp cwd but does not redirect `HOME`, so a machine with
    `~/.config/planestories/config.json` could boot through a different path. And the `baseUrl`
@@ -1065,7 +1072,15 @@ action's schema. **The caveat is what makes item B1 so dangerous:** the server r
 key loudly but drops a PLAUSIBLE one silently. Loud on nonsense, silent on near-misses, is the wrong
 way round.
 
-### 9.6 Multi-installation ergonomics: a default installation (small, user-facing)
+### 9.6 Multi-installation ergonomics: a default installation — ✅ BUILT 2026-08-19 (`d6f1e21`)
+
+**Shipped as specified.** `defaultContext` + single-context auto-default; a dangling `defaultContext`
+is a startup error; the implicit path keeps full credential isolation (bare `PLANE_*` does not apply
+to it) and `announceTarget` marks it `(implicit)`. `replicate` additionally REFUSES to infer an
+installation (`allowImplicitContext: false`) — step 4's rule, which needed enforcing rather than
+only documenting, since `--from`/`--to` are plain options and the multi-context throw was what had
+made them effectively mandatory. The original specification follows, for the reasoning.
+
 
 **Operator request, 2026-08-15.** The tool already supports multiple Plane installations well —
 what it lacks is a sane default. Current facts (verified in `src/config/loader.ts` +
@@ -1110,12 +1125,13 @@ the finance repo's workflows — but consider wording the help text as
 
 ### 9.8 Before open-sourcing
 
-`docs/images/atlas-*.png` in the README are screenshots of the **real** board and show real
-project content. Re-shoot them from a synthetic board first. The rig is
-`~/plane-replication/tools/cdp_shoot.ts` — and note **why** it exists: headless Chromium's
-`--virtual-time-budget` starves the atlas's force-directed layout (it never settles, and a
-fit-to-view on degenerate bounds produces absurd zoom), so screenshots must be driven in real
-time over the DevTools Protocol.
+✅ **DONE 2026-08-19 (`10cb4e4`).** `docs/images/atlas-*.png` were screenshots of the real board
+showing real project content; they are now shot from a synthetic one. `tools/gen_demo_board.ts`
+(committed, deterministic) generates it and `tools/README.md` documents the procedure.
+
+The old rig's reason is **obsolete**: it drove Chromium over the DevTools Protocol in real time
+because `--virtual-time-budget` starved the force-directed layout. The layout is solved at build
+time now, so the page opens already arranged and an ordinary headless screenshot is correct.
 
 Also still outstanding from an earlier cleanup: **`~/plane access.txt` exists on the dev box** and
 looks like a stray credentials/notes file. Ask the operator to delete it (do not open it).

@@ -22,7 +22,11 @@ planestories replicate --from cloud --to ce -p "Data Platform" --yes
 ```
 
 `--from`/`--to` name credential **contexts** (`PLANE_CTX_<NAME>_*` env vars or
-config-file entries); omitted = the bare `PLANE_*` environment.
+config-file entries). **Omitting them is only valid when the config defines no contexts**, in which
+case the bare `PLANE_*` environment is used. If contexts exist, `replicate` refuses rather than
+choosing one — including when a `defaultContext` is set, and including when there is only one.
+Every other command will infer in those cases; this one will not, because it writes an entire
+project into whichever instance it picked.
 
 ## What the snapshot is
 

@@ -43,11 +43,14 @@ function handleError(error: unknown): never {
 
 /**
  * Build a client for one side of the replication. `context` names a config/env
- * context (PLANE_CTX_<NAME>_* vars); omitted = the bare-env default config, so
- * single-instance setups keep working without contexts.
+ * context (PLANE_CTX_<NAME>_* vars); omitting it uses the bare-env default, so
+ * single-instance setups keep working without contexts — but ONLY when the config
+ * defines no contexts at all. If it does, this refuses rather than inferring one.
  */
 async function clientFor(context: string | undefined, configPath?: string): Promise<PlaneClient> {
-	const config = await loadConfig({ configPath, context });
+	// Never infer the instance here: this is the command that writes a whole
+	// project into one. See `allowImplicitContext`.
+	const config = await loadConfig({ configPath, context, allowImplicitContext: false });
 	return createPlaneClient({
 		apiKey: config.apiKey,
 		workspaceSlug: config.workspaceSlug,
@@ -206,7 +209,7 @@ async function runApply(
 }
 
 const CONTEXT_HELP =
-	"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars); omit for the bare PLANE_* environment";
+	"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars). REQUIRED when the config defines contexts — replicate never infers an installation; omit only to use the bare PLANE_* environment";
 
 export function registerReplicateCommand(program: Command) {
 	const replicate = program

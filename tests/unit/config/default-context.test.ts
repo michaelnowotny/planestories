@@ -149,3 +149,49 @@ describe("⚠ implicit selection keeps per-context credential isolation", () => 
 		expect(loadConfig({ configPath })).rejects.toThrow(/multiple contexts/);
 	});
 });
+
+describe("⚠ replicate never infers an installation", () => {
+	test("an implicit context is REFUSED when the caller forbids it", async () => {
+		// `replicate --from/--to` are plain options. What made them effectively
+		// mandatory was that a multi-context config threw without them; a default
+		// would have quietly removed that safety net, so `replicate apply --snapshot
+		// x.json` with no `--to` would write an entire project into whichever
+		// instance the config preferred. The error names the flag.
+		const configPath = writeConfig({ contexts: [cloud, ce], defaultContext: "ce" });
+		expect(loadConfig({ configPath, allowImplicitContext: false })).rejects.toThrow(
+			/will not infer an installation.*--from\/--to ce/s,
+		);
+	});
+
+	test("a SINGLE-context config is refused too — one option is still not a choice made", async () => {
+		const configPath = writeConfig({ contexts: [ce] });
+		expect(loadConfig({ configPath, allowImplicitContext: false })).rejects.toThrow(
+			/will not infer an installation/,
+		);
+	});
+
+	test("an EXPLICIT context is still accepted", async () => {
+		const configPath = writeConfig({ contexts: [cloud, ce], defaultContext: "cloud" });
+		const resolved = await loadConfig({ configPath, context: "ce", allowImplicitContext: false });
+		expect(resolved.apiKey).toBe("ce-key");
+	});
+
+	test("a FLAT config still works — bare env is a deliberate choice, not an inference", async () => {
+		process.env.PLANE_API_KEY = "flat-key";
+		process.env.PLANE_WORKSPACE_SLUG = "flat-ws";
+		const configPath = writeConfig({ defaultProject: "P" });
+		const resolved = await loadConfig({ configPath, allowImplicitContext: false });
+		expect(resolved.apiKey).toBe("flat-key");
+	});
+});
+
+describe("error messages name the context actually in force", () => {
+	test("a missing key on an IMPLICIT context does not advise setting bare PLANE_API_KEY", async () => {
+		// That advice cannot work: an implicitly selected context ignores bare
+		// PLANE_* by design, so the user would set the variable, re-run, and get the
+		// same error with nothing pointing at why.
+		const configPath = writeConfig({ contexts: [{ name: "ce", workspaceSlug: "archimedes" }] });
+		expect(loadConfig({ configPath })).rejects.toThrow(/PLANE_CTX_CE_API_KEY/);
+		expect(loadConfig({ configPath })).rejects.not.toThrow(/Set PLANE_API_KEY in your environment/);
+	});
+});

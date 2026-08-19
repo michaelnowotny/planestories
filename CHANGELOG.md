@@ -9,10 +9,12 @@ The format is loosely [Keep a Changelog](https://keepachangelog.com/); versions 
 > below shipped between then and `0.5.0`; there was never a released `0.4.x`, so it is recorded
 > as one release rather than split into a retroactive line that never existed.
 >
-> **The `v1.0.0`–`v1.4.0` tags in this repository are inherited from upstream
-> [linearstories](https://github.com/ijonas/linearstories) and are not on planestories' `main`.**
-> They will sort *above* a `v0.5.0` tag, so a GitHub release cut from `v0.5.0` will not be marked
-> "Latest". Decide whether to drop the inherited tags or renumber before tagging.
+> **The `v1.x` tags in this repository come from upstream
+> [linearstories](https://github.com/ijonas/linearstories), not from planestories releases.**
+> `v1.0.0` and `v1.1.0` *are* ancestors of `main` (inherited with the fork point); `v1.2.0`–`v1.4.0`
+> are not on `main` at all. Either way `v1.4.0` semver-sorts above `v0.5.0`, so a GitHub release cut
+> from a `v0.5.0` tag will not be marked "Latest". Decide whether to drop the inherited tags or
+> renumber before tagging.
 
 ---
 
@@ -82,8 +84,8 @@ exact `PROJECT-N` identifier preservation.
 - `defaultContext`, plus a single-context config no longer requiring `--context`. An implicitly
   selected context keeps full credential isolation — the bare `PLANE_*` env vars do not apply to
   it, so an ambient cloud key cannot silently authenticate a command aimed at CE.
-- Every board-touching command announces its resolved target (host · workspace · project ·
-  context) before doing any work.
+- The board-reading and import commands announce their resolved target (host · workspace ·
+  project · context) before doing any work. `projects` and the `replicate` subcommands do not yet.
 - Per-client token-bucket pacing derived from the configured API rate.
 
 ### Changed

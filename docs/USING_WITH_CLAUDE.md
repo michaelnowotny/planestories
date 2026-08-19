@@ -206,6 +206,19 @@ bun run src/cli/index.ts set PROJ-12 --status "In Progress" --project "My Projec
 #     a no-op (deduped by a content-hash marker); different text appends a new comment.
 #     Works with or without --status (evidence-only is allowed).
 
+# The dependency floor: the longest chain of blocking work, in dev-days, plus each
+# item's slack and the biggest lever. Refuses (rather than guessing) on a cycle or an
+# incomplete relation sweep, and reports "at least N" when connected work is unestimated:
+bun run src/cli/index.ts critical-path /path/to/stories.md
+bun run src/cli/index.ts critical-path --project "My Project" --json
+
+# Board health over time, from a directory of snapshots — offline, zero API calls:
+bun run src/cli/index.ts trend --dir backups
+
+# What structurally changed between two snapshots (dependencies, epics, status, effort).
+# Keyed on the HUMAN identifier, so comparing two instances is not "everything recreated":
+bun run src/cli/index.ts diff before.snapshot.json after.snapshot.json
+
 # Clean up test items — scoped + safe (dry-run, then --yes to confirm):
 bun run src/cli/index.ts delete /path/to/stories.md --dry-run
 bun run src/cli/index.ts delete /path/to/stories.md --yes               # by the file's plane_ids
@@ -213,6 +226,20 @@ bun run src/cli/index.ts delete --external-source --project "My Project" --yes  
 ```
 
 The stories markdown file can live anywhere — pass any path.
+
+## Choosing a Plane installation (contexts)
+
+A config file may define one context per Plane installation. `--context <name>` selects one. When
+it is omitted, an optional top-level `defaultContext` applies; failing that, a config with exactly
+ONE context uses it; otherwise the command stops and lists the names instead of guessing.
+
+**The bare `PLANE_API_KEY` / `PLANE_WORKSPACE_SLUG` / `PLANE_BASE_URL` variables apply only when no
+context is in force at all** — including when the context was selected implicitly. A key left in
+the shell for one installation therefore cannot authenticate a command aimed at another. Each
+command prints its resolved target first, marked `(implicit)` when you did not name one.
+
+`replicate --from` / `--to` are the exception: they never infer. If the config defines contexts,
+they must be named.
 
 ## Choosing a Plane project
 

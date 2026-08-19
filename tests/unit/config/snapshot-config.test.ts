@@ -30,10 +30,20 @@ describe("loadConfigForSnapshot", () => {
 		}
 	});
 
-	function withDir<T>(run: (dir: string) => T): T {
+	/**
+	 * Async, and it AWAITS the callback before removing the directory.
+	 *
+	 * It used to be synchronous while every caller passed an `async` body, so
+	 * `run(dir)` returned a pending promise and `finally` deleted the temp
+	 * directory immediately — while `loadConfig` was still reading the file inside
+	 * it. The test then passed or failed depending on which won the race, roughly
+	 * one run in ten. HANDOFF §9.5a recorded this as ambient-`PLANE_*` leakage
+	 * between suites; it was a use-after-free of the fixture directory.
+	 */
+	async function withDir<T>(run: (dir: string) => T | Promise<T>): Promise<T> {
 		const dir = mkdtempSync(join(tmpdir(), "planestories-cfg-"));
 		try {
-			return run(dir);
+			return await run(dir);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}

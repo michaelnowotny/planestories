@@ -23,6 +23,18 @@ export interface LoadConfigOptions {
 	 * swallowed.
 	 */
 	requireCredentials?: boolean;
+	/**
+	 * False forbids IMPLICIT context selection (`defaultContext`, or being the only
+	 * context) — the caller must name one explicitly or run on the bare-env default.
+	 *
+	 * `replicate` sets this. Its `--from`/`--to` are plain options, and what used to
+	 * make them effectively mandatory was that a multi-context config THREW without
+	 * them. Adding a default would have quietly removed that: `replicate apply
+	 * --snapshot x.json` with no `--to` would write an entire project into whichever
+	 * instance the config happened to prefer. A cross-instance migration must never
+	 * silently pick a side.
+	 */
+	allowImplicitContext?: boolean;
 }
 
 /**
@@ -126,6 +138,13 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 						`or set "defaultContext" in the config. Available contexts: ${names}`,
 				);
 			}
+			if (options?.allowImplicitContext === false) {
+				throw new ConfigError(
+					`This command will not infer an installation. Name it explicitly ` +
+						`(e.g. --from/--to ${implied}). Available contexts: ` +
+						`${multiConfig.contexts.map((c) => c.name).join(", ")}.`,
+				);
+			}
 			resolvedContext = implied;
 		}
 
@@ -222,8 +241,12 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 
 	if (!config.apiKey) {
 		throw new ConfigError(
-			options?.context
-				? `No API key for context "${options.context}". Set ${ctxEnvName(options.context, "API_KEY")} ` +
+			// Keyed on the RESOLVED context, not the flag. An implicitly selected
+			// context ignores bare `PLANE_*` by design, so telling the user to set
+			// `PLANE_API_KEY` there is advice that cannot work — they would set it,
+			// re-run, and get the same error with no hint why.
+			resolvedContext
+				? `No API key for context "${resolvedContext}". Set ${ctxEnvName(resolvedContext, "API_KEY")} ` +
 						"in your environment (.env), or apiKey in that context's config entry."
 				: "No API key found. Set PLANE_API_KEY in your environment (.env). " +
 						"Do not commit credentials to a config file.",
@@ -232,8 +255,8 @@ export async function loadConfig(options?: LoadConfigOptions): Promise<ResolvedC
 
 	if (!config.workspaceSlug) {
 		throw new ConfigError(
-			options?.context
-				? `No workspace slug for context "${options.context}". Set ${ctxEnvName(options.context, "WORKSPACE_SLUG")} ` +
+			resolvedContext
+				? `No workspace slug for context "${resolvedContext}". Set ${ctxEnvName(resolvedContext, "WORKSPACE_SLUG")} ` +
 						"in your environment (.env), or workspaceSlug in that context's config entry."
 				: "No workspace slug found. Set PLANE_WORKSPACE_SLUG in your environment (.env) " +
 						'or "workspaceSlug" in your config file (.planestoriesrc.json).',
