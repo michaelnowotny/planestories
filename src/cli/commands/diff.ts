@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import type { Command } from "commander";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
+import { instanceTag } from "../../replicate/backup.ts";
 import { diffGraphs, formatGraphDiff } from "../../sync/graph_diff.ts";
 import { resolveGraph } from "../graph_source.ts";
 import { openSnapshotSource } from "../snapshot_option.ts";
@@ -42,8 +43,16 @@ export function registerDiffCommand(program: Command): void {
 				const diff = diffGraphs(ga.graph, gb.graph, {
 					beforeLabel: `${sa.projectIdentifier} @ ${sa.takenAt.slice(0, 19)}Z`,
 					afterLabel: `${sb.projectIdentifier} @ ${sb.takenAt.slice(0, 19)}Z`,
-					beforeInstance: sa.workspaceSlug,
-					afterInstance: sb.workspaceSlug,
+					// SAME KEY AS `trend`: host + workspace, via the shared instanceTag.
+					// A bare workspace slug calls two different HOSTS the same instance —
+					// which is exactly the case the divergence banner exists for, so it
+					// would suppress the warning in the one situation that needs it. Two
+					// commits using different definitions of "same board" is the drift
+					// this branch has already been blocked for twice.
+					beforeInstance: instanceTag(sa.baseUrl, sa.workspaceSlug),
+					afterInstance: instanceTag(sb.baseUrl, sb.workspaceSlug),
+					beforeProject: sa.projectIdentifier,
+					afterProject: sb.projectIdentifier,
 				});
 
 				if (options.json) console.log(JSON.stringify(diff, null, 1));

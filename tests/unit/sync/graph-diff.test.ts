@@ -128,8 +128,36 @@ describe("graph diff", () => {
 		expect(out).toContain("reports difference only");
 	});
 
+	test("two HOSTS sharing a workspace slug are NOT the same instance", () => {
+		// A bare workspace slug calls two different hosts one board, suppressing the
+		// divergence banner in exactly the case it exists for. The CLI keys on
+		// instanceTag(host, slug), the same helper trend and backup use.
+		const d = diffGraphs(graph([]), graph([]), {
+			...META,
+			beforeInstance: "plane-so-archimedes",
+			afterInstance: "plane-porcupine-works-archimedes",
+		});
+		expect(d.sameInstance).toBe(false);
+		expect(formatGraphDiff(d)).toContain("DIVERGENCE");
+	});
+
+	test("two PROJECTS on one instance are NOT the same board", () => {
+		// Otherwise diffing DATA against SBOX reports every story added and removed
+		// with no explanation of why.
+		const d = diffGraphs(graph([]), graph([]), {
+			...META,
+			beforeProject: "DATA",
+			afterProject: "SBOX",
+		});
+		expect(d.sameInstance).toBe(false);
+	});
+
 	test("same instance carries no divergence warning", () => {
-		const d = diffGraphs(graph([]), graph([]), META);
+		const d = diffGraphs(graph([]), graph([]), {
+			...META,
+			beforeProject: "DATA",
+			afterProject: "DATA",
+		});
 		expect(d.sameInstance).toBe(true);
 		expect(formatGraphDiff(d)).not.toContain("DIVERGENCE");
 	});

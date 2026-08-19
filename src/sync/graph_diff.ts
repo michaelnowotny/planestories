@@ -104,6 +104,8 @@ export function diffGraphs(
 		afterLabel: string;
 		beforeInstance: string;
 		afterInstance: string;
+		beforeProject?: string;
+		afterProject?: string;
 	},
 ): GraphDiff {
 	const a = flatten(before);
@@ -152,7 +154,13 @@ export function diffGraphs(
 	});
 
 	return {
-		sameInstance: meta.beforeInstance === meta.afterInstance,
+		// Same BOARD means same instance AND same project. Diffing two different
+		// projects reports every story as added and removed, which is obvious
+		// garbage — but it should still say WHY rather than let the reader assume
+		// the board was rebuilt.
+		sameInstance:
+			meta.beforeInstance === meta.afterInstance &&
+			(meta.beforeProject ?? null) === (meta.afterProject ?? null),
 		before: { label: meta.beforeLabel, instance: meta.beforeInstance, ...count(before, a) },
 		after: { label: meta.afterLabel, instance: meta.afterInstance, ...count(after, b) },
 		addedStories: addedStories.sort((x, y) => x.identifier.localeCompare(y.identifier)),
