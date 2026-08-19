@@ -4,6 +4,7 @@ import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { createPlaneClient } from "../../plane/client.ts";
 import { type MigrateReport, migrateCriteria } from "../../sync/migrate.ts";
+import { announceTarget } from "../announce_target.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -122,6 +123,7 @@ export function registerMigrateCriteriaCommand(program: Command) {
 		.action(async (options) => {
 			try {
 				const config = await loadConfig({ configPath: options.config, context: options.context });
+				announceTarget(config, options.context, options.project);
 				const client = createPlaneClient({
 					apiKey: config.apiKey,
 					workspaceSlug: config.workspaceSlug,

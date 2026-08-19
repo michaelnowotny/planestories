@@ -59,6 +59,25 @@ export interface AtlasNode {
 	children: AtlasNode[];
 }
 
+/**
+ * How much of a graph's dependency structure was actually observed.
+ *
+ * THREE states, not two. A boolean (or `failures === 0`) conflates "we swept and
+ * every lookup succeeded" with "we never swept at all", and the second one then
+ * renders as a finding about the board — *nothing blocks anything else* — which
+ * is absence of observation published as observed absence.
+ *
+ * It lives beside `AtlasGraph` because it is a property OF a graph: every
+ * consumer that reads edges needs it, and putting it in the CLI layer would mean
+ * the renderer importing from `cli/`.
+ */
+export type DependencyCoverage =
+	| { kind: "complete" }
+	/** The sweep ran; this many lookups failed even after the paced retry pass. */
+	| { kind: "partial"; failures: number }
+	/** No sweep was attempted (`--no-dependencies`). The graph has NO edges. */
+	| { kind: "skipped" };
+
 export interface AtlasGraph {
 	project: string;
 	source: "file" | "board";

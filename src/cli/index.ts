@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { registerAtlasCommand } from "./commands/atlas.ts";
+import { registerCriticalPathCommand } from "./commands/critical-path.ts";
 import { registerDeleteCommand } from "./commands/delete.ts";
+import { registerDiffCommand } from "./commands/diff.ts";
 import { registerDoctorCommand } from "./commands/doctor.ts";
 import { registerEpicCommand } from "./commands/epic.ts";
 import { registerExportCommand } from "./commands/export.ts";
@@ -14,6 +16,7 @@ import { registerProjectsCommand } from "./commands/projects.ts";
 import { registerRenameProjectCommand } from "./commands/rename-project.ts";
 import { registerReplicateCommand } from "./commands/replicate.ts";
 import { registerSetCommand } from "./commands/set.ts";
+import { registerTrendCommand } from "./commands/trend.ts";
 import { armLingerNotice } from "./flush.ts";
 
 const program = new Command();
@@ -39,6 +42,9 @@ registerAtlasCommand(program);
 registerLintCommand(program);
 registerPacketCommand(program);
 registerEpicCommand(program);
+registerCriticalPathCommand(program);
+registerDiffCommand(program);
+registerTrendCommand(program);
 registerReplicateCommand(program);
 registerRenameProjectCommand(program);
 

@@ -26,6 +26,8 @@ export class SnapshotSource {
 	readonly projectName: string;
 	private readonly snapshot: ProjectSnapshot;
 	readonly workspaceSlug: string;
+	/** Source host, for callers that must not merge two instances (trend, diff). */
+	readonly baseUrl: string;
 	private readonly webBaseUrl: string;
 	private readonly stateById: Map<string, { id: string; name: string; group: string }>;
 	private readonly labelById: Map<string, { id: string; name: string }>;
@@ -38,6 +40,7 @@ export class SnapshotSource {
 		this.projectIdentifier = snapshot.project.identifier;
 		this.projectName = snapshot.project.name;
 		this.workspaceSlug = snapshot.source.workspaceSlug;
+		this.baseUrl = snapshot.source.baseUrl;
 		this.webBaseUrl = deriveWebBaseUrl(snapshot.source.baseUrl);
 		this.stateById = new Map(
 			snapshot.states.map((state) => [

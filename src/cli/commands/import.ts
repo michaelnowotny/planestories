@@ -6,6 +6,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { createPlaneClient } from "../../plane/client.ts";
 import { importStories } from "../../sync/importer.ts";
 import type { ImportSummary } from "../../types.ts";
+import { announceTarget } from "../announce_target.ts";
 import { reportPacing } from "../pacing.ts";
 
 /**
@@ -276,6 +277,8 @@ export function registerImportCommand(program: Command) {
 
 				// Load config
 				const config = await loadConfig({ configPath: options.config, context: options.context });
+				// Before ANY work: say which board this is about to touch.
+				announceTarget(config, options.context, options.project);
 
 				// Create client
 				const client = createPlaneClient({

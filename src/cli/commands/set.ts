@@ -5,6 +5,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { createPlaneClient } from "../../plane/client.ts";
 import { setWorkItems } from "../../sync/setter.ts";
 import { PLANE_PRIORITIES, type PlanePriority } from "../../types.ts";
+import { announceTarget } from "../announce_target.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -59,6 +60,8 @@ export function registerSetCommand(program: Command) {
 				}
 
 				const config = await loadConfig({ configPath: options.config, context: options.context });
+
+				announceTarget(config, options.context, options.project);
 				const client = createPlaneClient({
 					apiKey: config.apiKey,
 					workspaceSlug: config.workspaceSlug,

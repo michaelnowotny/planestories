@@ -5,6 +5,7 @@ import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { createPlaneClient } from "../../plane/client.ts";
 import { type DeleteSummary, deleteStories } from "../../sync/deleter.ts";
+import { announceTarget } from "../announce_target.ts";
 
 async function resolveGlobs(patterns: string[]): Promise<string[]> {
 	const allFiles: string[] = [];
@@ -102,6 +103,8 @@ export function registerDeleteCommand(program: Command) {
 					options.externalSource === true ? "planestories" : options.externalSource || undefined;
 
 				const config = await loadConfig({ configPath: options.config, context: options.context });
+
+				announceTarget(config, options.context, options.project);
 				const client = createPlaneClient({
 					apiKey: config.apiKey,
 					workspaceSlug: config.workspaceSlug,

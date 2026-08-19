@@ -329,6 +329,139 @@ red first. Ordered as the roadmap sections that produced them.
    `--recreate-target` AND `--allow-divergent-target`.
 2. The CLI no longer forces an exit; it prints a linger notice instead (see below).
 
+## 8d. ⚠ WHERE TO PICK UP (2026-08-18) — READ THIS FIRST, IT SUPERSEDES §8c
+
+**State: `feat/critical-path` MERGED to `main` after round 5 returned APPROVE. 770 tests green,
+tsc clean.**
+
+Five review rounds; rounds 1-4 all returned BLOCK on real defects. Round 2 found a P0 in code that
+had already passed round 1; round 3 found a P0 *introduced by the round-2 fix commit* — an atlas
+that never painted. Round 5: no P0, no P1, APPROVE.
+
+### Round 3 (2026-08-18) — every finding addressed, and one of them was severe
+
+**The P0: the atlas never painted.** `c6ef04c`, the commit that fixed the round-2 findings, deleted
+`let dragScope,dragAlpha` / `neighbourhoodOf` / `beginDragRelax` / `endDragRelax` along with the
+genuinely dead `reheat()`, and left every call site. Under the embedded script's `"use strict"`,
+`frame()` is started by `requestAnimationFrame` at load and reads `dragScope` on its FIRST line,
+before `draw()` — so the first animation frame threw `ReferenceError`, the canvas stayed blank, and
+"ARRANGING…" never cleared. **Every atlas built from `c6ef04c` or `afbf07c` was a dead page**, while
+761 tests stayed green, because nothing executes the embedded script and the test that looked like
+it covered this asserted that call-site STRINGS existed and that `new Function(script)` parses. An
+undeclared binding is valid syntax.
+
+Fixed in `3608c8d`, guarded by `tests/unit/atlas/embedded-script-integrity.test.ts` — which by
+`747d011` is TWO general sweeps (every called name declared; nothing assigned that was never
+declared), not the hardcoded `dragScope`/`dragAlpha` check it started as. Naming the two bindings
+that already bit you cannot catch the third. Its known holes are listed under "Known-open" below.
+
+Also fixed: `--no-dependencies` publishing "nothing blocks anything else" from an unfetched graph
+(`c2780e7`); `--json` handing `jq .totalDays` a `0` for an empty chain; the diff banner printing
+"DIFFERENT INSTANCES (x vs x)" when only the project differed; atlas `--json` carrying no
+completeness flag; and two smaller gaps in the no-estimate set (`dd6e018`).
+
+### What is on the branch
+
+| commit | what |
+|---|---|
+| `3c82bc1` | `critical-path` — dependency floor, slack, biggest lever |
+| `d28469b` | atlas layout SOLVED AT BUILD TIME (the browser used to run 325 settling ticks) |
+| `78b6376` | `trend` — board health across nightly snapshots, offline |
+| `698a764` | round-1 BLOCK fixes (8 findings, all verified real by round 2) |
+| `5959120` | atlas: synchronous settle, scoped drag relaxation |
+| `41d1950` | floor gauge, no-estimate flag + filter, `R` removed |
+| `999ce1a` | resolved-target announcement (the wrong-instance footgun) |
+| `b305313` | `diff` — structural difference between two snapshots |
+| `c6ef04c` | round-2 BLOCK fixes (P0 + four P1s) — **also deleted the drag helpers; see above** |
+| `6c772a1` | diff/trend board-identity alignment |
+| `afbf07c` | handoff §8d |
+| `3608c8d` | round-3 P0: restore the drag helpers + the embedded-script guard |
+| `c2780e7` | **the structural fix** — dependency coverage is a TYPE, not a comment |
+| `dd6e018` | round-3 residual gaps in the no-estimate set |
+
+### ⚠ THE PATTERN THAT KEPT RECURRING — fix the CAUSE, not a fourth instance
+
+FOUR separate reviews found the same shape: **a rule established in one place and not carried to its
+siblings.**
+
+1. Relation refs normalized in `snapshot.ts` only — five other consumers silently saw ZERO relations
+   on CE (§9.5e).
+2. The critical-path floor gained safeguards in the CLI (refuse on partial sweep, no bare
+   lower-bound, cycle = refusal) and was then embedded in the atlas HTML with none of them.
+3. "Same board" defined as workspace-slug in `diff` and as host+slug+project in `trend`, one commit
+   apart.
+4. `trend` and `diff` both destructured `{ graph }` from `resolveGraph` and discarded
+   `relationFailures` — the field whose own doc comment said callers must decide.
+
+**The common cause: the invariant was written as a COMMENT and relied on memory.** `graph_source.ts`
+said *"callers that cannot tolerate a missing edge must say so"* — and `atlas`, `trend` and `diff`
+all did not.
+
+**What actually worked, every time it was applied:** making the invariant a TYPE. The discriminated
+`CriticalPathResult` (a refusal carries no `totalDays`) has not regressed since it was introduced.
+Prose invariants regressed four times.
+
+### The structural fix — DONE in `c2780e7`, and it is the template
+
+`GraphSourceResult` has **no `graph` property**. The graph is reachable only through
+`requireCompleteGraph(purpose)` (throws `IncompleteGraphError` unless coverage is complete) or
+`acceptPartialGraph(reason)`. `const { graph } = await resolveGraph(...)` — the exact line `trend`
+and `diff` were using — no longer compiles.
+
+`DependencyCoverage` is `complete | partial | skipped`, three states rather than a boolean, because
+`relationFailures === 0` could not distinguish "we swept and everything succeeded" from "we never
+swept" (`--no-dependencies`). The second rendered as a finding about the BOARD. It lives in
+`atlas/model.ts`, not `cli/`, because the renderer needs it and a renderer must not import from the
+CLI layer.
+
+**Still to do (the other two items from the original recommendation):**
+- ONE definition of board identity (`instanceTag(host, slug) + project`), imported everywhere; today
+  `trend` and `diff` agree by convention and a comment in each says so.
+- Apply rule A11 as a habit, not a one-off: when changing anything shared, ENUMERATE the consumers
+  and say in the commit why each does or does not need updating. `c2780e7` does this (six consumers,
+  each named); it is what found instance 4 before the review did.
+
+### Known-open, smaller
+
+- **`doctor` declared-vs-actual relation provenance** — the finance session's best request. `doctor`
+  already detects dangling relations; what is missing is whether a relation came from a yaml field,
+  a body directive, or exists only on the board. Their 2026-08-18 incident is the argument for it.
+- **The embedded-script guard is STATIC, and its holes are known.** Two sweeps: every CALLED name
+  must be declared, and nothing may be ASSIGNED that was never declared. Together they would have
+  caught the round-3 P0 (which was an assignment, a call, AND a first-frame read).
+
+  **Do NOT build the tokenizer** (round-5 ruling). Generalising to all *reads* means telling a regex
+  literal from a division; the attempt corrupted the source and invented four phantom findings
+  (`RX`, `WRX2`, `RXview`). A guard needing an allowlist of its own ghosts is a test the next person
+  disables. The three concrete misses that remain, so nobody rediscovers them:
+  1. Delete `const NOEST = new Set()` — its only uses are `.add`/`.has`/`.size`, so neither sweep
+     fires and the first frame that builds chips throws.
+  2. `++geoTicks` is not an `=`, so deleting `let geoTicks = 0` is invisible to the assignment sweep.
+  3. `for (const [child, par] of parentOf)` — the depth-aware scanner records `child`, misses `par`.
+     That makes the guard NOISIER (a later `par =` false-positives), not quieter; it matters only if
+     the scanner is ever cited as evidence that a name IS declared.
+
+  A DOM+canvas stub is still the only thing that would execute the first frame. Still judged not
+  worth it — the failure class it adds (bad property access, wrong arity) has not bitten yet.
+- **The atlas crash was never root-caused.** Six hypotheses measured and discarded (§9.5f). The
+  animated global settle was REMOVED, which deleted the reproduction. If it resurfaces, that is the
+  thread. Residual: `frame()` still ticks a scope per rAF while dragging.
+- **Interpenetration on drag**: scoped bodies cannot repel unscoped ones, so an epic dragged onto
+  another cluster can overlap it. Accepted knowingly; round 2 flagged it.
+- **9 pre-existing biome findings** on `main` since `a41559a`, in files this branch does not touch —
+  so `bunx biome check --write .` (step 1 of the documented gate) exits non-zero on a clean
+  checkout. Worth its own small commit.
+- `export` has no `announceTarget` (no `loadConfig` call in the same shape).
+
+### The finance session
+
+Their board has a **deleted work item, `DATA-2569`**, with a surviving dangling relation on
+`DATA-2570` — verified against a complete 2,588-item list. Answer relayed in
+`finance_csv_importer/external_info/planestories-relation-answer-2026-08-18.md`, including that
+`**Blocks:**`/`**Depends on:**` BODY LINES ARE PARSED INTO RELATIONS (parser.ts:144) — their
+proposed fallback of "keep prose as the record" would have kept generating the relations they were
+trying to stop.
+
 ## 8c. Where to pick up (as of 2026-08-17)
 
 Nothing is half-finished. Every branch is merged, the tree is clean, and no operation is

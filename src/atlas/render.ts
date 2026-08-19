@@ -1,4 +1,6 @@
-import type { AtlasGraph } from "./model.ts";
+import { computeCriticalPath } from "../sync/critical_path.ts";
+import { PHYSICS, settleLayout } from "./layout.ts";
+import type { AtlasGraph, DependencyCoverage } from "./model.ts";
 
 /**
  * Render a self-contained Project Atlas HTML page for a graph — the "Cockpit"
@@ -28,10 +30,76 @@ import type { AtlasGraph } from "./model.ts";
  * Inspired by Project Atlas in linearstories (Ijonas Kisselbach), rethought for
  * planestories and Plane.
  */
-export function renderAtlasHtml(graph: AtlasGraph): string {
+export interface RenderOptions {
+	/**
+	 * How much of the dependency structure was observed. Not optional and not a
+	 * boolean: `relationsComplete === false` could not tell a partial sweep from
+	 * one that never ran, so `--no-dependencies` rendered as "nothing blocks
+	 * anything else" — an assertion about the board built from an unfetched graph.
+	 *
+	 * `options` has NO default, deliberately. A default of `{ kind: "complete" }`
+	 * would let `renderAtlasHtml(graph)` publish a floor as fully-observed without
+	 * anyone saying so — reintroducing, one layer up, the silent assumption this
+	 * type exists to forbid. A caller with no sweep to describe (a markdown file,
+	 * whose `blocks:` lines are complete by construction) says so explicitly.
+	 */
+	coverage: DependencyCoverage;
+}
+
+export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): string {
 	// Escape the JSON so a title containing "</script>" can't break out of the tag.
 	const data = JSON.stringify(graph).replace(/</g, "\\u003c");
 	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
+	// Settle the layout HERE so the page opens on an arranged board. The browser
+	// used to run 325 simulation ticks at ONE PER ANIMATION FRAME — 5.4s at a
+	// perfect 60fps, 10-16s at the rate those frames actually cost — and the whole
+	// board churned, unusable, for the duration. Measurements: src/atlas/layout.ts.
+	const settled = JSON.stringify(settleLayout(graph)).replace(/</g, "\\u003c");
+	// The dependency floor, computed HERE by the same reviewed implementation the
+	// critical-path command uses. Embedding the result rather than re-deriving it
+	// in the browser means the gauge and the CLI cannot disagree — a second copy
+	// of this arithmetic is how a headline number starts drifting from its source.
+	const cp = computeCriticalPath(graph);
+	// FIVE states. Each removed one way the panel could read as a measurement it
+	// is not:
+	//   incomplete — the sweep ran and dropped edges, so a floor may be too short
+	//                or may hide a cycle. The CLI refuses; the HTML outlives the
+	//                stderr warning beside it, so the artifact carries its own
+	//                caveat. A number in a file opened tomorrow cannot rely on a
+	//                warning printed today.
+	//   skipped    — no sweep ran at all (`--no-dependencies`). Distinct from
+	//                `none`, which is a FINDING about the board. Reporting "nothing
+	//                blocks anything else" from a graph nobody fetched is absence
+	//                of observation published as observed absence.
+	//   none       — swept, and genuinely nothing is connected.
+	//   cycle      — a refusal, not a zero.
+	//   ok         — a real floor. A chain of length 0 is NOT a floor of zero.
+	// A cycle wins over `incomplete`: adding the edges a partial sweep missed can
+	// never REMOVE a cycle, so one found on a subset is a real finding about the
+	// board, and hiding it behind "re-render later" buries something actionable.
+	const cpSummary = !cp.ok
+		? { state: "cycle" as const, cycles: cp.cycles.slice(0, 1) }
+		: options.coverage.kind === "partial"
+			? { state: "incomplete" as const, missing: options.coverage.failures }
+			: options.coverage.kind === "skipped"
+				? { state: "skipped" as const }
+				: cp.chain.length === 0
+					? { state: "none" as const }
+					: {
+							state: "ok" as const,
+							totalDays: cp.totalDays,
+							chainLength: cp.chain.length,
+							unestimated: cp.unestimated,
+							isLowerBound: cp.isLowerBound,
+							// Unlinked markdown stories have no identifier, so the filter
+							// (which selects by identifier) cannot reach them. Carried so
+							// the tooltip can stop promising otherwise.
+							unfindable: cp.unestimatedUnidentified,
+						};
+	const cpJson = JSON.stringify(cpSummary).replace(/</g, "\\u003c");
+	// The SAME set the floor's lower-bound claim is based on, so the filter the
+	// tooltip names selects exactly the stories that make the number a bound.
+	const noEstJson = JSON.stringify(cp.ok ? cp.unestimatedIdentifiers : []).replace(/</g, "\\u003c");
 
 	return `<!doctype html>
 <html lang="en">
@@ -59,6 +127,8 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
     <div class="cell"><div class="k">STORIES</div><div class="v" id="gStories">0</div></div>
     <div class="cell"><div class="k">SUPPLY LINES</div><div class="v" id="gEdges">0</div></div>
     <div class="cell warn"><div class="k">FLAGGED</div><div class="v" id="gFlag">0</div></div>
+    <div class="cell" id="cellFloor" title=""><div class="k" id="kFloor">FLOOR</div><div class="v" id="gFloor">&#8212;</div></div>
+    <div class="cell warn"><div class="k">NO EST.</div><div class="v" id="gNoEst">0</div></div>
     <div class="cell nav"><div class="k">MAG</div><div class="v" id="mag">1.00&#215;</div></div>
     <div class="cell nav"><div class="k">BRG</div><div class="v" id="brg">000&#176;</div></div>
   </div>
@@ -135,6 +205,9 @@ export function renderAtlasHtml(graph: AtlasGraph): string {
 </main>
 <script>
 const GRAPH = ${data};
+const POS0 = ${settled};
+const CP = ${cpJson};
+const NOEST_IDS = ${noEstJson};
 ${SCRIPT}
 </script>
 </body>
@@ -351,6 +424,19 @@ const parentOf=new Map(),childrenOf=new Map();
   if(n.children&&n.children.length)walk(n.children,n);}})(GRAPH.nodes,null);
 const HUBS=NODES.filter(n=>n.kind==="epic");
 const DEPS=(GRAPH.edges||[]).filter(e=>byId.has(e.source)&&byId.has(e.target));
+// Stories with NO effort estimate that sit on a dependency edge. Deliberately
+// NOT every unestimated story: 77% of the open board has no estimate, so
+// flagging all of them would take the flag from a signal to wallpaper. These are
+// the ones that make the schedule floor wrong, which is a claim worth acting on.
+// Supplied by computeCriticalPath at build time — the SAME connected-leaf set
+// the floor's lower-bound claim rests on. Re-deriving it here is what made the
+// tooltip and the filter disagree: the tooltip counted expanded connected
+// leaves while this counted literal edge endpoints, so once an epic edge was
+// expanded the stories that made the floor a bound were invisible to the filter
+// the tooltip told you to use.
+const NOEST=new Set();
+{const want=new Set(NOEST_IDS||[]);
+ for(const n of NODES)if(n.identifier&&want.has(n.identifier))NOEST.add(n.id);}
 const EDGES=[];
 for(const [child,par] of parentOf)EDGES.push({s:par,t:child,type:"parent"});
 for(const e of DEPS)EDGES.push({s:e.source,t:e.target,type:e.type});
@@ -389,13 +475,39 @@ const P=new Map();
   for(const n of NODES){const a=i*2.399963,r=R*Math.sqrt(i/NODES.length);
     // Epic world radius grows with its story count, so big epics read as big hubs.
     const wr=n.kind==="epic"?13+Math.min(11,Math.sqrt((childrenOf.get(n.id)||[]).length)*1.9):6;
-    P.set(n.id,{x:Math.cos(a)*r,y:Math.sin(a)*r,vx:0,vy:0,r:wr,pin:false});i++;}
+    // Prefer the PRE-SETTLED coordinate when the generator supplied one: the sim
+    // needs 325 ticks to cool and ran one tick per frame, so a cold start meant
+    // 5-16 seconds of an unusable, churning board. Falls back to the spiral seed
+    // so an older payload (or a hand-edited one) still lays itself out.
+    const s0=POS0&&POS0[n.id];
+    P.set(n.id,s0?{x:s0.x,y:s0.y,vx:0,vy:0,r:wr,pin:false}
+                 :{x:Math.cos(a)*r,y:Math.sin(a)*r,vx:0,vy:0,r:wr,pin:false});i++;}
 })();
-const REP=300,SPRING={parent:0.12,blocks:0.03,relates:0.02},REST={parent:26,blocks:110,relates:120},
-  GRAV=0.06,VDECAY=0.7,DECAY=0.012,AMIN=0.02;
-let alpha=1;
-function tick(){
-  const arr=NODES,n=arr.length;
+// Did every node arrive pre-settled? A PARTIAL match must still simulate, or the
+// nodes we do have would sit frozen while the rest fly around them.
+const PRESETTLED=!!POS0&&NODES.length>0&&NODES.every(n=>POS0[n.id]);
+// Interpolated from PHYSICS in src/atlas/layout.ts — the generator settles with
+// these exact numbers, so a change in one place cannot leave the browser
+// reheating from a world the pre-settled positions never inhabited.
+const REP=${PHYSICS.REP},SPRING={parent:${PHYSICS.SPRING.parent},blocks:${PHYSICS.SPRING.blocks},relates:${PHYSICS.SPRING.relates}},REST={parent:${PHYSICS.REST.parent},blocks:${PHYSICS.REST.blocks},relates:${PHYSICS.REST.relates}},
+  GRAV=${PHYSICS.GRAV},VDECAY=${PHYSICS.VDECAY},DECAY=${PHYSICS.DECAY},AMIN=${PHYSICS.AMIN};
+let alpha=PRESETTLED?AMIN*0.5:1; // cold when the layout arrived arranged
+/**
+ * One simulation step.
+ *
+ * The scope argument (a node ARRAY plus its id Set) restricts the step to a
+ * neighbourhood:
+ * only those bodies repel each other and only they integrate, while a spring to
+ * a node outside the scope pulls only the inside end. That is what makes an
+ * interactive drag affordable — disturbing ~70 neighbours is ~140x less pair
+ * work than re-solving all 825, and it is also the more truthful animation:
+ * dragging a story should ripple through its cluster, not reshuffle the board.
+ *
+ * ONE physics implementation, filtered — not a second copy. Duplicating it is
+ * how the relation-ref defect happened.
+ */
+function tick(scope){
+  const arr=scope?scope.arr:NODES,n=arr.length,inScope=scope?scope.ids:null;
   for(let i=0;i<n;i++){const a=P.get(arr[i].id),aEpic=arr[i].kind==="epic";
     for(let j=i+1;j<n;j++){const b=P.get(arr[j].id);
       let dx=a.x-b.x,dy=a.y-b.y,d2=dx*dx+dy*dy;
@@ -403,13 +515,26 @@ function tick(){
       // epic pairs repel harder so cluster hubs never overlap each other
       const f=(aEpic&&arr[j].kind==="epic"?REP*7:REP)/d2,fx=dx*f,fy=dy*f;
       a.vx+=fx*alpha;a.vy+=fy*alpha;b.vx-=fx*alpha;b.vy-=fy*alpha;}}
-  for(const e of EDGES){const a=P.get(e.s),b=P.get(e.t);
+  for(const e of EDGES){
+    const sIn=!inScope||inScope.has(e.s),tIn=!inScope||inScope.has(e.t);
+    if(!sIn&&!tIn)continue; // neither end is moving: the spring does nothing
+    const a=P.get(e.s),b=P.get(e.t);
     let dx=b.x-a.x,dy=b.y-a.y,d=Math.sqrt(dx*dx+dy*dy)||0.01;
     // parent rest grows with the epic's radius so a fat hub can't swallow its stories
     const rest=e.type==="parent"?a.r+16:REST[e.type];
-    const f=(d-rest)/d*SPRING[e.type]*alpha,fx=dx*f,fy=dy*f;a.vx+=fx;a.vy+=fy;b.vx-=fx;b.vy-=fy;}
+    const f=(d-rest)/d*SPRING[e.type]*alpha,fx=dx*f,fy=dy*f;
+    // An anchor OUTSIDE the scope stays put and pulls only the inside end.
+    if(sIn){a.vx+=fx;a.vy+=fy;}
+    if(tIn){b.vx-=fx;b.vy-=fy;}}
   for(const nd of arr){const p=P.get(nd.id);
-    p.vx-=p.x*GRAV*alpha;p.vy-=p.y*GRAV*alpha;
+    // GRAVITY IS GLOBAL-ONLY. It pulls every body toward the origin in
+    // proportion to its distance, and in the full simulation that is balanced by
+    // repulsion from all 825 nodes. Scoped to a neighbourhood, only ~70 bodies
+    // push back, so gravity wins and the whole cluster collapses into the centre
+    // and piles up — the force model is not decomposable. A scoped relaxation is
+    // anchored instead by its springs to the nodes OUTSIDE the scope, which do
+    // not move, plus the pinned node under the cursor.
+    if(!inScope){p.vx-=p.x*GRAV*alpha;p.vy-=p.y*GRAV*alpha;}
     if(p.pin){p.vx=0;p.vy=0;continue;}
     p.vx*=VDECAY;p.vy*=VDECAY;p.x+=p.vx;p.y+=p.vy;}
   alpha*=(1-DECAY);
@@ -485,7 +610,7 @@ ruler.addEventListener("dblclick",()=>fitAll(true));
 
 // --- Filters ------------------------------------------------------------------
 const state={statusOn:new Set(),labelOn:new Set(),assigneeOn:new Set(),
-  flaggedOnly:false,depsOnly:false};
+  flaggedOnly:false,noEstOnly:false,depsOnly:false};
 const ASSIGNEES=GRAPH.assignees||[]; // older embeds lack the field
 const UNASSIGNED=Symbol("unassigned"); // filter key; CANNOT collide with any string
 function visible(n){return !(state.depsOnly&&!inDeps.has(n.id));}
@@ -494,6 +619,7 @@ function matches(n){
   if(state.labelOn.size&&!n.labels.some(l=>state.labelOn.has(l)))return false;
   if(state.assigneeOn.size&&!state.assigneeOn.has(n.assignee||UNASSIGNED))return false;
   if(state.flaggedOnly&&!(n.quality&&!n.quality.ok))return false;
+  if(state.noEstOnly&&!NOEST.has(n.id))return false;
   return true;}
 
 // --- Selection + scan state ---------------------------------------------------
@@ -789,7 +915,12 @@ window.addEventListener("mousemove",e=>{
       if(Math.hypot(dx,dy)>8)brgV=((Math.atan2(-dy,dx)*180/Math.PI)+450)%360;}
     else{const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
       const wx=(mx-view.x)/view.scale,wy=(my-view.y)/view.scale,p=P.get(dragS.node.id);
-      p.x=wx+dragS.ox;p.y=wy+dragS.oy;p.vx=0;p.vy=0;dragS.moved=true;reheat(0.3);}
+      // The dragged node follows the cursor (pinned); its NEIGHBOURHOOD relaxes
+      // around it, animated. A global re-settle here would run the whole
+      // simulation on every mousemove — that is what must not happen.
+      p.x=wx+dragS.ox;p.y=wy+dragS.oy;p.vx=0;p.vy=0;dragS.moved=true;miniDirty=true;
+      if(!dragScope)beginDragRelax(dragS.node.id);
+      dragAlpha=Math.max(dragAlpha,0.5);}
     return;}
   const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
   if(overMini(e)||mx<0||my<0||mx>W||my>H){HOV=null;return;}
@@ -801,6 +932,12 @@ window.addEventListener("mouseup",e=>{
   const wasNode=dragS.node,moved=dragS.moved;
   if(wasNode)P.get(wasNode.id).pin=false;
   dragS=null;stage.classList.remove("grabbing");
+  // Let the neighbourhood ease out where it was dropped. A GLOBAL reheat here is
+  // what made a dropped node snap straight back to its old position: unpinning
+  // it and then re-solving the entire board returns it to equilibrium, which
+  // reads as "the graph ignored my drag".
+  if(moved&&wasNode){dragScope=neighbourhoodOf(wasNode.id);dragAlpha=0.35;}
+  else endDragRelax();
   if(moved)return;
   const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top;
   if(mx<0||my<0||mx>W||my>H)return;
@@ -908,6 +1045,38 @@ function worldSprite(kind,r){
 function drawWorld(kind,p,r,alpha2){if(alpha2<=0.02)return;
   const s=worldSprite(kind,r);
   x.globalAlpha=alpha2;x.drawImage(s.c,p.x-s.R,p.y-s.R);x.globalAlpha=1;}
+// Cached nebula sprites. The nebula used to build THREE radial gradients per hub
+// PER FRAME — ~144 gradient objects a frame at 48 hubs, ~58 000 across a single
+// reheat, every one of them composited with "lighter" (which forces an offscreen
+// pass). That is the only unbounded per-frame allocation in the draw path, and it
+// is the shape that ends in a browser needing a restart.
+//
+// The blob geometry depends only on RADIUS and the cluster's own progress, never
+// on position, so it renders once into an offscreen canvas and is stamped with
+// drawImage thereafter — the same trick worldSprite already uses. Alpha stays OUT
+// of the key and is applied via globalAlpha, so fading does not multiply variants.
+const NSPR=new Map();
+const NSPR_CAP=48;         // one per hub; 48 x (400px)^2 x 4B = ~31MB worst case
+const NSPR_MAX_R=200;      // above this a sprite costs more memory than the gradients
+function nebulaSprite(hi,R,gf,hasStarted){
+  const Rq=Math.max(9,Math.round(R/8)*8),gq=Math.round(gf*10)/10;
+  const key=hi+"|"+Rq+"|"+gq+"|"+(hasStarted?1:0);
+  let s=NSPR.get(key);
+  if(s)return s;
+  if(NSPR.size>=NSPR_CAP)NSPR.clear(); // whole-cache reset: one frame of rebuild, no unbounded growth
+  const D=Math.ceil(Rq*2),c=document.createElement("canvas");
+  c.width=D;c.height=D;const g2=c.getContext("2d");
+  g2.globalCompositeOperation="lighter";
+  const blobs=[
+    [0,0,1.0,"110,140,225",0.11],
+    [Math.cos(hi*2.4)*0.3,Math.sin(hi*2.4)*0.3,0.66,"87,167,232",0.04+0.12*gq],
+    [Math.cos(hi*5.1)*0.34,Math.sin(hi*5.1)*0.34,0.48,"224,130,80",hasStarted?0.05:0]];
+  for(const bl of blobs){const al=bl[4];if(al<=0.005)continue;
+    const rr=Rq*bl[2],cx2=Rq+bl[0]*Rq,cy2=Rq+bl[1]*Rq;
+    const gr=g2.createRadialGradient(cx2,cy2,0,cx2,cy2,rr);
+    gr.addColorStop(0,"rgba("+bl[3]+","+al+")");gr.addColorStop(1,"rgba("+bl[3]+",0)");
+    g2.fillStyle=gr;g2.beginPath();g2.arc(cx2,cy2,rr,0,6.283);g2.fill();}
+  s={c,R:Rq};NSPR.set(key,s);return s;}
 function drawNebula(h,hi,neb,t,dim){
   const c=S(h.id),g=GEO.get(h.id),R=(g?g.extent:60)*view.scale*1.15;
   if(R<9)return;
@@ -915,15 +1084,24 @@ function drawNebula(h,hi,neb,t,dim){
   const kids=storiesOf.get(h.id);
   const hasStarted=kids.some(s2=>s2.statusGroup==="started");
   x.globalCompositeOperation="lighter";
-  const blobs=[
-    [0,0,1.0,"110,140,225",0.11],
-    [Math.cos(hi*2.4)*0.3,Math.sin(hi*2.4)*0.3,0.66,"87,167,232",0.04+0.12*gf],
-    [Math.cos(hi*5.1)*0.34,Math.sin(hi*5.1)*0.34,0.48,"224,130,80",hasStarted?0.05:0]];
-  for(const bl of blobs){const al=bl[4];if(al<=0.005)continue;
-    const rr=R*bl[2],cx2=c.x+bl[0]*R,cy2=c.y+bl[1]*R;
-    const gr=x.createRadialGradient(cx2,cy2,0,cx2,cy2,rr);
-    gr.addColorStop(0,"rgba("+bl[3]+","+(al*neb*dim)+")");gr.addColorStop(1,"rgba("+bl[3]+",0)");
-    x.fillStyle=gr;x.beginPath();x.arc(cx2,cy2,rr,0,6.283);x.fill();}
+  if(R<=NSPR_MAX_R){
+    const s=nebulaSprite(hi,R,gf,hasStarted);
+    x.globalAlpha=neb*dim;
+    x.drawImage(s.c,c.x-s.R,c.y-s.R);
+    x.globalAlpha=1;
+  }else{
+    // Deep zoom: a sprite this large would cost more than the gradients. Few hubs
+    // are on screen here, so the per-frame cost stays small.
+    const blobs=[
+      [0,0,1.0,"110,140,225",0.11],
+      [Math.cos(hi*2.4)*0.3,Math.sin(hi*2.4)*0.3,0.66,"87,167,232",0.04+0.12*gf],
+      [Math.cos(hi*5.1)*0.34,Math.sin(hi*5.1)*0.34,0.48,"224,130,80",hasStarted?0.05:0]];
+    for(const bl of blobs){const al=bl[4];if(al<=0.005)continue;
+      const rr=R*bl[2],cx2=c.x+bl[0]*R,cy2=c.y+bl[1]*R;
+      const gr=x.createRadialGradient(cx2,cy2,0,cx2,cy2,rr);
+      gr.addColorStop(0,"rgba("+bl[3]+","+(al*neb*dim)+")");gr.addColorStop(1,"rgba("+bl[3]+",0)");
+      x.fillStyle=gr;x.beginPath();x.arc(cx2,cy2,rr,0,6.283);x.fill();}
+  }
   for(let k=0;k<3&&kids.length;k++){const s2=kids[(k*3)%kids.length];
     if(!visible(s2))continue; // deps-only must not sparkle at hidden stories
     const p=S(s2.id);
@@ -1113,6 +1291,9 @@ function buildChips(){
   if(GRAPH.counts.flagged)chip('<span class="st" style="color:#ffb054">\\u25b2</span>'+
     GRAPH.counts.flagged+" flagged",state.flaggedOnly,
     ()=>{state.flaggedOnly=!state.flaggedOnly;buildChips();});
+  if(NOEST.size)chip('<span class="st" style="color:#ffb054">?</span>'+
+    NOEST.size+" no estimate",state.noEstOnly,
+    ()=>{state.noEstOnly=!state.noEstOnly;buildChips();});
   miniDirty=true;}
 function tog(set,v){if(set.has(v))set.delete(v);else set.add(v);}
 function toggleDeps(){state.depsOnly=!state.depsOnly;
@@ -1133,7 +1314,6 @@ window.addEventListener("keydown",e=>{
     return;}
   if(typing)return;
   if(k==="f")fitAll(true);
-  else if(k==="r")reheat(0.9);
   else if(k==="d"&&DEPS.length)toggleDeps();
   else if(k==="/"){e.preventDefault();scanEl.focus();}
 });
@@ -1160,15 +1340,100 @@ el("projectName").textContent=GRAPH.project;
 el("projectSub").textContent=GRAPH.source==="board"?"LIVE PLANE BOARD":"MARKDOWN FILE";
 el("gEpics").textContent=String(GRAPH.counts.epics);
 el("gStories").textContent=String(GRAPH.counts.stories);
-el("gEdges").textContent=String(GRAPH.counts.edges||0);
+// Both of these are DERIVED FROM EDGES, so when no sweep ran they are not zero —
+// they are unknown, and a zero in a numeric cell reads as a measurement. The
+// floor cell is not the only one that has to hold this line.
+{const st=(typeof CP!=="undefined")?CP.state:"none";
+ const swept=st!=="skipped";
+ // Drawn edges: a count of what the map shows is defensible even on a partial
+ // sweep. Not measured at all when no sweep ran.
+ el("gEdges").textContent=swept?String(GRAPH.counts.edges||0):"\\u2014";
+ // NO EST. must agree with the FLOOR beside it, so it publishes the number the
+ // floor is based on — CP.unestimated — NOT the size of the identifier-keyed
+ // filter set. Those differ whenever an unestimated story is not linked to the
+ // board (a markdown corpus before import), and the cell then read "0 stories
+ // lack an estimate" next to a FLOOR (MIN) whose tooltip said otherwise.
+ // "no identifier" is not "no such story".
+ // When the floor REFUSED (cycle / partial sweep) there is no count to publish
+ // either: the same computeCriticalPath output the floor discarded cannot be
+ // quietly reused one cell over.
+ if(st==="ok"){el("gNoEst").textContent=String(CP.unestimated);}
+ else if(st==="none"){el("gNoEst").textContent="0";}
+ else{el("gNoEst").textContent="\\u2014";}
+ if(!swept){
+   const t="Not measured: rendered with --no-dependencies, so relations were never fetched.";
+   el("gEdges").parentElement.title=t;el("gNoEst").parentElement.title=t;
+ }else if(st==="ok"&&CP.unfindable>0){
+   el("gNoEst").parentElement.title=CP.unfindable+" of these "+(CP.unfindable===1?"is":"are")
+     +" not linked to the board yet, so the 'no estimate' filter (which selects by identifier) cannot reach "
+     +(CP.unfindable===1?"it":"them")+".";
+ }else if(st==="cycle"||st==="incomplete"){
+   el("gNoEst").parentElement.title="Not measured: the floor could not be computed, so the connected-and-unestimated set is not established either.";
+ }}
 el("gFlag").textContent=String(GRAPH.counts.flagged||0);
+// The dependency floor, computed at BUILD time by the same reviewed code the
+// critical-path command uses — never re-derived here, so the picture and the
+// number cannot disagree.
+{const f=(typeof CP!=="undefined")?CP:null;
+ const v=el("gFloor"),k=el("kFloor"),cell=el("cellFloor");
+ const st=f?f.state:"none";
+ if(st==="ok"){
+   // A lower bound is NEVER shown as a bare number.
+   v.textContent=(f.isLowerBound?"\\u2265":"")+f.totalDays+"d";
+   k.textContent=f.isLowerBound?"FLOOR (MIN)":"FLOOR";
+   cell.title="Longest dependency chain: "+f.totalDays+" dev-days across "+f.chainLength+" items."
+     +" This is the PARALLEL floor \\u2014 not total remaining effort."
+     +(f.isLowerBound?(" At least: "+f.unestimated+" connected stor"+(f.unestimated===1?"y has":"ies have")+" no effort estimate, so the real floor is HIGHER. Use the 'no estimate' filter to find them."
+       // Unlinked stories carry no identifier, so the filter cannot select them.
+       // Naming the shortfall keeps the filter from looking broken.
+       +((f.unfindable>0)?(" "+f.unfindable+" of them "+(f.unfindable===1?"is":"are")+" not linked to the board yet and so cannot be selected by that filter."):"")):"");
+ }else{
+   v.textContent="\\u2014";
+   k.textContent="FLOOR";
+   cell.title=st==="cycle"
+     ?("No floor: the dependency graph has a cycle ("+((f.cycles&&f.cycles[0])||[]).join(" \\u2192 ")+"). Break it on the board, then re-render.")
+     :st==="incomplete"
+       ?("No floor: "+f.missing+" relation lookup(s) failed while reading the board, so dependency edges are MISSING. A floor computed from a partial graph can be too short, or can hide a cycle. Re-render at a quieter hour, or from a snapshot.")
+       :st==="skipped"
+         ?("No floor: this atlas was rendered with --no-dependencies, so relations were never fetched. This is NOT a finding that the board has no dependencies \\u2014 it is the absence of the question. Re-render without that flag.")
+         :"No dependency chain on this board \\u2014 nothing blocks anything else.";
+ }}
 
 // --- Run: settle silently, then continuous gentle loop ------------------------
 window.addEventListener("resize",resize);
 if(window.ResizeObserver)new ResizeObserver(()=>resize()).observe(stage);
 let raf=null,fitted=false,geoTicks=0;
+// --- Interactive (animated) relaxation, scoped to ONE cluster -----------------
+// Dragging is the one place the animation earns its keep: you move a node and
+// watch its cluster respond. Affordable because the simulation is scoped — ~70
+// bodies instead of 825 — and more honest, since dragging one story should not
+// reshuffle the whole board.
+//
+// Scope is the dragged node's OWN cluster only. It deliberately does NOT pull in
+// dependency partners: extracting a node's blockers from their own clusters made
+// distant, unrelated groups lurch whenever you touched anything. Cross-cluster
+// springs still act on the dragged node itself via the one-ended boundary rule
+// in tick(), so the dependency structure is still felt — it is just not allowed
+// to teleport other people's nodes.
+let dragScope=null,dragAlpha=0;
+function neighbourhoodOf(id){
+  const ids=new Set([id]);
+  const self=byId.get(id);
+  const epicId=self&&self.kind==="epic"?id:epicOf.get(id);
+  if(epicId){ids.add(epicId);for(const s2 of (storiesOf.get(epicId)||[]))ids.add(s2.id);}
+  const arr=[];for(const nid of ids){const n2=byId.get(nid);if(n2)arr.push(n2);}
+  return {ids,arr};
+}
+function beginDragRelax(id){dragScope=neighbourhoodOf(id);dragAlpha=0.6;}
+function endDragRelax(){dragScope=null;dragAlpha=0;}
 function frame(t){
   raf=null;
+  // Scoped drag relaxation: bounded bodies, so these frames are cheap. It runs
+  // INSTEAD of the global settle, never alongside it.
+  if(dragScope&&dragAlpha>AMIN){
+    const keep=alpha;alpha=dragAlpha;tick(dragScope);alpha=keep;
+    dragAlpha*=(1-DECAY*2);miniDirty=true;
+  }
   const hot=alpha>AMIN;
   if(hot){tick();miniDirty=true;
     if(++geoTicks%20===0)computeGeo();}
@@ -1178,7 +1443,6 @@ function frame(t){
   draw(t);
   if(!document.hidden)raf=requestAnimationFrame(frame);
 }
-function reheat(a){alpha=Math.max(alpha,a||0.7);}
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden&&raf===null)raf=requestAnimationFrame(frame);});
 resize();buildChips();el("settling").hidden=false;select(null);
