@@ -331,25 +331,12 @@ red first. Ordered as the roadmap sections that produced them.
 
 ## 8d. ⚠ WHERE TO PICK UP (2026-08-18) — READ THIS FIRST, IT SUPERSEDES §8c
 
-**State: branch `feat/critical-path`, 14 commits, 768 tests green, tsc clean, UNMERGED. Working
-tree clean. Round 4 was IN FLIGHT when this was written; read its verdict before anything else.**
+**State: `feat/critical-path` MERGED to `main` after round 5 returned APPROVE. 770 tests green,
+tsc clean.**
 
-### The very first thing to do
-
-```bash
-cat /tmp/claude-1000/*/385a3468-*/scratchpad/grok_report_d5.md   # round-4 verdict
-```
-That path is a session scratchpad and **may be gone**. If it is, re-run the review — the brief is
-`grok_brief_d5.md` in the same directory:
-
-```bash
-git worktree add --detach /tmp/wt HEAD             # NEVER let a worktree carry .env
-~/PycharmProjects/finance_csv_importer/scripts/external_review.sh grok /tmp/wt <brief> <report>
-```
-
-**DO NOT MERGE while anything major is open** — standing operator instruction. Rounds 1, 2 and 3 ALL
-returned BLOCK on real defects. Round 2 found a P0 in code that had already passed round 1; round 3
-found a P0 *introduced by the round-2 fix commit*. This branch has never survived a first pass.
+Five review rounds; rounds 1-4 all returned BLOCK on real defects. Round 2 found a P0 in code that
+had already passed round 1; round 3 found a P0 *introduced by the round-2 fix commit* — an atlas
+that never painted. Round 5: no P0, no P1, APPROVE.
 
 ### Round 3 (2026-08-18) — every finding addressed, and one of them was severe
 
@@ -363,12 +350,10 @@ before `draw()` — so the first animation frame threw `ReferenceError`, the can
 it covered this asserted that call-site STRINGS existed and that `new Function(script)` parses. An
 undeclared binding is valid syntax.
 
-Fixed in `3608c8d` with `tests/unit/atlas/embedded-script-integrity.test.ts` (strips comments and
-literals, fails on any called name nothing declares; separate case for `dragScope`/`dragAlpha`,
-which are reads and so invisible to a call-site sweep). **Known limit:** the guard is static. Grok
-asked for a test that EXECUTES the first frame, which needs a DOM+canvas stub; the static check
-would have caught this defect but cannot catch a bad property access. Round 4 was asked to rule on
-whether that is sufficient.
+Fixed in `3608c8d`, guarded by `tests/unit/atlas/embedded-script-integrity.test.ts` — which by
+`747d011` is TWO general sweeps (every called name declared; nothing assigned that was never
+declared), not the hardcoded `dragScope`/`dragAlpha` check it started as. Naming the two bindings
+that already bit you cannot catch the third. Its known holes are listed under "Known-open" below.
 
 Also fixed: `--no-dependencies` publishing "nothing blocks anything else" from an unfetched graph
 (`c2780e7`); `--json` handing `jq .totalDays` a `0` for an empty chain; the diff banner printing
@@ -441,10 +426,23 @@ CLI layer.
 - **`doctor` declared-vs-actual relation provenance** — the finance session's best request. `doctor`
   already detects dangling relations; what is missing is whether a relation came from a yaml field,
   a body directive, or exists only on the board. Their 2026-08-18 incident is the argument for it.
-- **The embedded-script guard is STATIC, not executing.** It would have caught the round-3 P0 and is
-  not parse-only, but it cannot catch a bad property access or a wrong argument count. Grok asked
-  for a test that runs the first frame against a DOM+canvas stub. Round 4 was asked to rule on
-  whether static is sufficient; if it said no, that stub is the next piece of work.
+- **The embedded-script guard is STATIC, and its holes are known.** Two sweeps: every CALLED name
+  must be declared, and nothing may be ASSIGNED that was never declared. Together they would have
+  caught the round-3 P0 (which was an assignment, a call, AND a first-frame read).
+
+  **Do NOT build the tokenizer** (round-5 ruling). Generalising to all *reads* means telling a regex
+  literal from a division; the attempt corrupted the source and invented four phantom findings
+  (`RX`, `WRX2`, `RXview`). A guard needing an allowlist of its own ghosts is a test the next person
+  disables. The three concrete misses that remain, so nobody rediscovers them:
+  1. Delete `const NOEST = new Set()` — its only uses are `.add`/`.has`/`.size`, so neither sweep
+     fires and the first frame that builds chips throws.
+  2. `++geoTicks` is not an `=`, so deleting `let geoTicks = 0` is invisible to the assignment sweep.
+  3. `for (const [child, par] of parentOf)` — the depth-aware scanner records `child`, misses `par`.
+     That makes the guard NOISIER (a later `par =` false-positives), not quieter; it matters only if
+     the scanner is ever cited as evidence that a name IS declared.
+
+  A DOM+canvas stub is still the only thing that would execute the first frame. Still judged not
+  worth it — the failure class it adds (bad property access, wrong arity) has not bitten yet.
 - **The atlas crash was never root-caused.** Six hypotheses measured and discarded (§9.5f). The
   animated global settle was REMOVED, which deleted the reproduction. If it resurfaces, that is the
   thread. Residual: `frame()` still ticks a scope per rAF while dragging.
