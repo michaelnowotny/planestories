@@ -36,15 +36,17 @@ export interface RenderOptions {
 	 * boolean: `relationsComplete === false` could not tell a partial sweep from
 	 * one that never ran, so `--no-dependencies` rendered as "nothing blocks
 	 * anything else" — an assertion about the board built from an unfetched graph.
-	 * A caller with no sweep to describe passes `{ kind: "complete" }` explicitly.
+	 *
+	 * `options` has NO default, deliberately. A default of `{ kind: "complete" }`
+	 * would let `renderAtlasHtml(graph)` publish a floor as fully-observed without
+	 * anyone saying so — reintroducing, one layer up, the silent assumption this
+	 * type exists to forbid. A caller with no sweep to describe (a markdown file,
+	 * whose `blocks:` lines are complete by construction) says so explicitly.
 	 */
 	coverage: DependencyCoverage;
 }
 
-export function renderAtlasHtml(
-	graph: AtlasGraph,
-	options: RenderOptions = { coverage: { kind: "complete" } },
-): string {
+export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): string {
 	// Escape the JSON so a title containing "</script>" can't break out of the tag.
 	const data = JSON.stringify(graph).replace(/</g, "\\u003c");
 	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
@@ -72,26 +74,28 @@ export function renderAtlasHtml(
 	//   none       — swept, and genuinely nothing is connected.
 	//   cycle      — a refusal, not a zero.
 	//   ok         — a real floor. A chain of length 0 is NOT a floor of zero.
-	const cpSummary =
-		options.coverage.kind === "partial"
+	// A cycle wins over `incomplete`: adding the edges a partial sweep missed can
+	// never REMOVE a cycle, so one found on a subset is a real finding about the
+	// board, and hiding it behind "re-render later" buries something actionable.
+	const cpSummary = !cp.ok
+		? { state: "cycle" as const, cycles: cp.cycles.slice(0, 1) }
+		: options.coverage.kind === "partial"
 			? { state: "incomplete" as const, missing: options.coverage.failures }
 			: options.coverage.kind === "skipped"
 				? { state: "skipped" as const }
-				: cp.ok
-					? cp.chain.length === 0
-						? { state: "none" as const }
-						: {
-								state: "ok" as const,
-								totalDays: cp.totalDays,
-								chainLength: cp.chain.length,
-								unestimated: cp.unestimated,
-								isLowerBound: cp.isLowerBound,
-								// Unlinked markdown stories have no identifier, so the filter
-								// (which selects by identifier) cannot reach them. Carried so
-								// the tooltip can stop promising otherwise.
-								unfindable: cp.unestimatedUnidentified,
-							}
-					: { state: "cycle" as const, cycles: cp.cycles.slice(0, 1) };
+				: cp.chain.length === 0
+					? { state: "none" as const }
+					: {
+							state: "ok" as const,
+							totalDays: cp.totalDays,
+							chainLength: cp.chain.length,
+							unestimated: cp.unestimated,
+							isLowerBound: cp.isLowerBound,
+							// Unlinked markdown stories have no identifier, so the filter
+							// (which selects by identifier) cannot reach them. Carried so
+							// the tooltip can stop promising otherwise.
+							unfindable: cp.unestimatedUnidentified,
+						};
 	const cpJson = JSON.stringify(cpSummary).replace(/</g, "\\u003c");
 	// The SAME set the floor's lower-bound claim is based on, so the filter the
 	// tooltip names selects exactly the stories that make the number a bound.
@@ -1339,12 +1343,32 @@ el("gStories").textContent=String(GRAPH.counts.stories);
 // Both of these are DERIVED FROM EDGES, so when no sweep ran they are not zero —
 // they are unknown, and a zero in a numeric cell reads as a measurement. The
 // floor cell is not the only one that has to hold this line.
-{const swept=(typeof CP==="undefined")||CP.state!=="skipped";
+{const st=(typeof CP!=="undefined")?CP.state:"none";
+ const swept=st!=="skipped";
+ // Drawn edges: a count of what the map shows is defensible even on a partial
+ // sweep. Not measured at all when no sweep ran.
  el("gEdges").textContent=swept?String(GRAPH.counts.edges||0):"\\u2014";
- el("gNoEst").textContent=swept?String(NOEST.size):"\\u2014";
+ // NO EST. must agree with the FLOOR beside it, so it publishes the number the
+ // floor is based on — CP.unestimated — NOT the size of the identifier-keyed
+ // filter set. Those differ whenever an unestimated story is not linked to the
+ // board (a markdown corpus before import), and the cell then read "0 stories
+ // lack an estimate" next to a FLOOR (MIN) whose tooltip said otherwise.
+ // "no identifier" is not "no such story".
+ // When the floor REFUSED (cycle / partial sweep) there is no count to publish
+ // either: the same computeCriticalPath output the floor discarded cannot be
+ // quietly reused one cell over.
+ if(st==="ok"){el("gNoEst").textContent=String(CP.unestimated);}
+ else if(st==="none"){el("gNoEst").textContent="0";}
+ else{el("gNoEst").textContent="\\u2014";}
  if(!swept){
    const t="Not measured: rendered with --no-dependencies, so relations were never fetched.";
    el("gEdges").parentElement.title=t;el("gNoEst").parentElement.title=t;
+ }else if(st==="ok"&&CP.unfindable>0){
+   el("gNoEst").parentElement.title=CP.unfindable+" of these "+(CP.unfindable===1?"is":"are")
+     +" not linked to the board yet, so the 'no estimate' filter (which selects by identifier) cannot reach "
+     +(CP.unfindable===1?"it":"them")+".";
+ }else if(st==="cycle"||st==="incomplete"){
+   el("gNoEst").parentElement.title="Not measured: the floor could not be computed, so the connected-and-unestimated set is not established either.";
  }}
 el("gFlag").textContent=String(GRAPH.counts.flagged||0);
 // The dependency floor, computed at BUILD time by the same reviewed code the

@@ -21,7 +21,9 @@ Body.
 
 describe("renderAtlasHtml", () => {
 	test("produces a self-contained page with no external network references", () => {
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(html.startsWith("<!doctype html>")).toBe(true);
 		// Offline + self-contained: no CDN scripts, remote stylesheets, or fonts.
 		expect(html).not.toMatch(/https?:\/\/[^"']*(cdn|jsdelivr|unpkg|fonts|googleapis)/i);
@@ -35,7 +37,9 @@ describe("renderAtlasHtml", () => {
 	test("the empty-state overlay is defeated by a global [hidden] guard", () => {
 		// `.empty` sets `display:flex`, which overrides the UA `[hidden]{display:none}`
 		// rule — so an explicit guard is required or the overlay bleeds over the tree.
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(html).toMatch(/\[hidden\]\{display:none!important\}/);
 	});
 
@@ -43,7 +47,9 @@ describe("renderAtlasHtml", () => {
 		// Design decision (docs/DESIGN_atlas-cockpit.md 5): the cockpit is inherently
 		// dark; the old theme toggle, prefers-color-scheme block, and Color-by
 		// dropdown are deliberate losses. Guard against their resurrection.
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(html).not.toContain("prefers-color-scheme");
 		expect(html).not.toContain("data-theme");
 		expect(html).not.toContain('id="colorby"');
@@ -52,14 +58,18 @@ describe("renderAtlasHtml", () => {
 	test("the embedded SCRIPT is syntactically valid JavaScript", () => {
 		// The script is a template string tsc does NOT check. Extract the module
 		// body between the <script> tags and parse it (GRAPH line included).
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		const m = html.match(/<script>\n([\s\S]*?)<\/script>/);
 		expect(m).not.toBeNull();
 		expect(() => new Function(m?.[1] as string)).not.toThrow();
 	});
 
 	test("carries the terraforming ladder + selection amber (design anchors)", () => {
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		// One world per status group, planets never stars.
 		for (const anchor of ['"earth"', '"mars"', '"ice"', '"rock"', '"cinder"']) {
 			expect(html).toContain(anchor);
@@ -71,7 +81,9 @@ describe("renderAtlasHtml", () => {
 	});
 
 	test("pins the measured LOD + physics constants (load-bearing calibration)", () => {
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		// Areal-spacing LOD driver + the measured gas band (docs/DESIGN + probe).
 		expect(html).toContain("Math.sqrt(Math.PI*extent*extent/Math.max(1,cnt))");
 		expect(html).toContain("sstep(24,42,sp)");
@@ -103,11 +115,15 @@ describe("renderAtlasHtml", () => {
 			"### Acceptance Criteria",
 			"- [ ] a criterion",
 		].join("\n");
-		const html = renderAtlasHtml(buildAtlasFromFile(file, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(file, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(html).toContain('"effortDays":2.5');
 		expect(html).toContain('"priority":"high"');
 		// And absent values stay null in the embed — never coerced to 0.
-		const bare = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const bare = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(bare).toContain('"effortDays":null');
 		expect(bare).toContain('"priority":null');
 	});
@@ -122,13 +138,17 @@ describe("renderAtlasHtml", () => {
 			"",
 			"Body.",
 		].join("\n");
-		const html = renderAtlasHtml(buildAtlasFromFile(file, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(file, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(html).toContain("<title>A&amp;B — Project Atlas</title>");
 		expect(html).not.toContain("&amp;amp;");
 	});
 
 	test("dossier heaviest-stories controls: ALL/OPEN toggle + expandable orbit list", () => {
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(html).toContain('id="seHeavyTog"');
 		// OPEN filters out completed AND cancelled (not-yet-done, honestly).
 		expect(html).toContain('s2.statusGroup!=="completed"&&s2.statusGroup!=="cancelled"');
@@ -140,7 +160,9 @@ describe("renderAtlasHtml", () => {
 	});
 
 	test("assignee filter chips: vocabulary embedded, sentinel filter, sidebar cell", () => {
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		// The vocabulary rides the GRAPH payload (empty on this file — still present).
 		expect(html).toContain('"assignees":[]');
 		// Older embeds without the field must not break the script.
@@ -153,7 +175,9 @@ describe("renderAtlasHtml", () => {
 	});
 
 	test("sidebar hrefs are scheme-guarded (no javascript: URLs)", () => {
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		// The Open in Plane anchors must route through the http(s)-only guard.
 		expect(html).toMatch(/function safeUrl\(u\)\{return u&&\/\^https\?:/);
 		expect(html).toContain("safeUrl(n.url)");
@@ -176,7 +200,9 @@ Body.
 ### Acceptance Criteria
 - [ ] c
 `;
-		const html = renderAtlasHtml(buildAtlasFromFile(evil, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(evil, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		// The raw closing tag with the payload text must not appear...
 		expect(html).not.toContain("</script> pwn");
 		// ...it is unicode-escaped in the embedded JSON instead.
@@ -191,7 +217,9 @@ describe("per-frame allocation (the reheat crash)", () => {
 		// "lighter" (an offscreen pass). Pressing R crashed the browser hard enough
 		// to need a restart. Sprites are cached and the cache is CAPPED, so the fix
 		// cannot become the next unbounded allocation.
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(html).toContain("function nebulaSprite(");
 		expect(html).toContain("NSPR_CAP");
 		expect(html).toContain("if(NSPR.size>=NSPR_CAP)NSPR.clear()");
@@ -207,7 +235,9 @@ describe("scoped drag relaxation", () => {
 		// repulsion from every other node. Scoped to ~70 bodies only those push
 		// back, gravity wins, and the dragged cluster slides into the centre and
 		// piles up — which is exactly what shipped and had to be withdrawn.
-		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const html = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(html).toContain("if(!inScope){p.vx-=p.x*GRAV*alpha");
 		// The scoped step must exist and be driven by its own alpha, so a drag
 		// never re-solves the whole board.
@@ -230,13 +260,15 @@ describe("effort visibility (operator decisions A/B/C)", () => {
 	};
 
 	test("R is gone — it re-solved to the same arrangement and only cost a stall", () => {
-		expect(renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"))).not.toContain('k==="r"');
+		expect(
+			renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), { coverage: { kind: "complete" } }),
+		).not.toContain('k==="r"');
 	});
 
 	test("the embedded floor EQUALS what computeCriticalPath returns", () => {
 		const graph = buildAtlasFromFile(FILE, "x.md");
 		const cp = computeCriticalPath(graph);
-		const got = embedded(renderAtlasHtml(graph), "CP");
+		const got = embedded(renderAtlasHtml(graph, { coverage: { kind: "complete" } }), "CP");
 		// The fixture has no dependency edges, so the honest answer is "none" —
 		// NOT a floor of 0 dev-days, which is absence dressed as a measurement.
 		expect(cp.ok && cp.chain.length).toBe(0);
@@ -329,7 +361,68 @@ describe("effort visibility (operator decisions A/B/C)", () => {
 		if (!cp.ok) throw new Error("expected a computed result");
 		// P-3 is connected by a dependency and has no effort line.
 		expect(cp.unestimatedIdentifiers).toEqual(["P-3"]);
-		expect(embedded(renderAtlasHtml(graph), "NOEST_IDS")).toEqual(["P-3"]);
+		expect(
+			embedded(renderAtlasHtml(graph, { coverage: { kind: "complete" } }), "NOEST_IDS"),
+		).toEqual(["P-3"]);
+	});
+
+	test("NO EST. counts the stories the FLOOR counted, not the ones the filter can select", () => {
+		// The round-4 P1, with its triggering file: a markdown corpus BEFORE import,
+		// where the story that makes the floor a lower bound has no identifier yet.
+		// The cell used to print `NOEST.size` — the identifier-keyed filter set — so
+		// it read `0` beside a `FLOOR (MIN)` whose own tooltip said otherwise. "No
+		// identifier" is not "no such story".
+		const UNLINKED = [
+			"---",
+			'project: "P"',
+			"---",
+			"",
+			"## Existing work",
+			"",
+			"```yaml",
+			"plane_identifier: P-1",
+			"```",
+			"",
+			"**Effort:** 2 dev-days",
+			"",
+			"Body text that is long enough to be meaningful.",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] something concrete",
+			"",
+			"## New work that blocks it",
+			"",
+			"```yaml",
+			"blocks: [P-1]",
+			"```",
+			"",
+			"Body text that is long enough to be meaningful.",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] something concrete",
+			"",
+		].join("\n");
+		const graph = buildAtlasFromFile(UNLINKED, "unlinked.md");
+		const cp = computeCriticalPath(graph);
+		if (!cp.ok) throw new Error("expected a computed result");
+
+		// The floor is a real lower bound resting on one story...
+		expect(cp.isLowerBound).toBe(true);
+		expect(cp.unestimated).toBe(1);
+		// ...which the identifier-keyed filter cannot select, and which the result
+		// therefore reports as unfindable rather than silently dropping.
+		expect(cp.unestimatedIdentifiers).toEqual([]);
+		expect(cp.unestimatedUnidentified).toBe(1);
+
+		const html = renderAtlasHtml(graph, { coverage: { kind: "complete" } });
+		const embed = embedded(html, "CP");
+		expect(embed.state).toBe("ok");
+		expect(embed.unestimated).toBe(1);
+		expect(embed.unfindable).toBe(1);
+		// The embed carries the honest number AND the cell is written from it. The
+		// cell itself runs in a browser, so this pins the source it reads.
+		expect(html).toContain('el("gNoEst").textContent=String(CP.unestimated)');
+		expect(html).not.toContain('el("gNoEst").textContent=swept?String(NOEST.size)');
 	});
 
 	test("the no-estimate set is the SAME set the floor's lower bound rests on", () => {
@@ -339,20 +432,24 @@ describe("effort visibility (operator decisions A/B/C)", () => {
 		// filter the tooltip named.
 		const graph = buildAtlasFromFile(FILE, "x.md");
 		const cp = computeCriticalPath(graph);
-		expect(embedded(renderAtlasHtml(graph), "NOEST_IDS")).toEqual(
-			cp.ok ? cp.unestimatedIdentifiers : [],
-		);
+		expect(
+			embedded(renderAtlasHtml(graph, { coverage: { kind: "complete" } }), "NOEST_IDS"),
+		).toEqual(cp.ok ? cp.unestimatedIdentifiers : []);
 	});
 
 	test("the browser CONSUMES that set rather than re-deriving it", () => {
-		const out = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const out = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(out).toContain("const want=new Set(NOEST_IDS||[]);");
 		// The old re-derivation must not come back.
 		expect(out).not.toContain("if(onEdge.has(n.id))NOEST.add(n.id);");
 	});
 
 	test("the gauge distinguishes all four states", () => {
-		const out = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"));
+		const out = renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+			coverage: { kind: "complete" },
+		});
 		expect(out).toContain('if(st==="ok")');
 		expect(out).toContain('st==="cycle"');
 		expect(out).toContain('st==="incomplete"');

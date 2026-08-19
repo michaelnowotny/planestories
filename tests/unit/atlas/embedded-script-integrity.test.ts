@@ -29,6 +29,11 @@ status: Done
 Body.
 `;
 
+/** Coverage is required, so every render site states it. A file graph is complete. */
+function renderAtlas(): string {
+	return renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), { coverage: { kind: "complete" } });
+}
+
 /** Browser and language globals the script is entitled to use undeclared. */
 const GLOBALS = new Set([
 	"Error",
@@ -99,18 +104,54 @@ function stripNonCode(source: string): string {
 		.replace(/"(?:\\.|[^"\\])*"/g, '""');
 }
 
+/**
+ * Names bound anywhere in the script.
+ *
+ * Scope is deliberately ignored — the question is "does anything declare this at
+ * all", and a name declared in the wrong scope is a different bug from a name
+ * declared nowhere. Declarator lists are walked with a DEPTH COUNTER rather than
+ * a regex: `for(const h of HUBS){const hp=P.get(h.id);` defeats any greedy
+ * capture, which silently made four real declarations look undeclared while I
+ * was writing this.
+ */
 function declaredNames(source: string): Set<string> {
 	const declared = new Set<string>();
-	for (const m of source.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)/g)) {
-		if (m[1]) declared.add(m[1]);
+	const add = (name: string | undefined) => {
+		if (name) declared.add(name);
+	};
+	for (const m of source.matchAll(/\bfunction\s+([A-Za-z_$][\w$]*)/g)) add(m[1]);
+	for (const m of source.matchAll(/(?:function\s*[A-Za-z_$][\w$]*\s*|function\s*)\(([^)]*)\)/g)) {
+		for (const p of (m[1] ?? "").split(",")) add(p.trim().match(/^([A-Za-z_$][\w$]*)/)?.[1]);
 	}
-	// `let a=1,b=2` — every declarator in the statement, not just the first, so the
-	// match must run PAST the first `=`. A part whose text does not begin with an
-	// identifier (the tail of a split-up call argument) simply contributes nothing.
-	for (const m of source.matchAll(/\b(?:const|let|var)\s+([^;\n]*)/g)) {
-		for (const part of (m[1] ?? "").split(",")) {
-			const name = part.trim().match(/^([A-Za-z_$][\w$]*)/);
-			if (name?.[1]) declared.add(name[1]);
+	for (const m of source.matchAll(/\(([^()]*)\)\s*=>/g)) {
+		for (const p of (m[1] ?? "").split(",")) add(p.trim().match(/^([A-Za-z_$][\w$]*)/)?.[1]);
+	}
+	for (const m of source.matchAll(/([A-Za-z_$][\w$]*)\s*=>/g)) add(m[1]);
+	for (const m of source.matchAll(/\bcatch\s*\(\s*([A-Za-z_$][\w$]*)/g)) add(m[1]);
+
+	// Declarator lists: collect the identifier after the keyword and after every
+	// depth-0 comma, stopping at a depth-0 `;` or when a bracket closes past the
+	// level we started at (`for(const x of y)`, `{const a=1}`).
+	for (const m of source.matchAll(/\b(?:const|let|var)\s+/g)) {
+		let i = (m.index ?? 0) + m[0].length;
+		let depth = 0;
+		let expectName = true;
+		while (i < source.length) {
+			const ch = source[i] as string;
+			if (expectName && /[A-Za-z_$]/.test(ch)) {
+				const name = source.slice(i).match(/^[A-Za-z_$][\w$]*/)?.[0];
+				add(name);
+				i += name?.length ?? 1;
+				expectName = false;
+				continue;
+			}
+			if (ch === "(" || ch === "[" || ch === "{") depth++;
+			else if (ch === ")" || ch === "]" || ch === "}") {
+				if (depth === 0) break;
+				depth--;
+			} else if (depth === 0 && ch === ";") break;
+			else if (depth === 0 && ch === ",") expectName = true;
+			i++;
 		}
 	}
 	return declared;
@@ -118,7 +159,7 @@ function declaredNames(source: string): Set<string> {
 
 describe("embedded script integrity", () => {
 	test("every function the script calls is defined somewhere in it", () => {
-		const source = stripNonCode(embeddedScript(renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"))));
+		const source = stripNonCode(embeddedScript(renderAtlas()));
 		const declared = declaredNames(source);
 
 		const missing = new Set<string>();
@@ -132,15 +173,27 @@ describe("embedded script integrity", () => {
 		expect([...missing].sort()).toEqual([]);
 	});
 
-	test("the drag-relaxation state the frame loop reads is declared", () => {
-		// `frame()` reads `dragScope` on its first line and is started at load, so an
-		// undeclared name here is not a degraded feature — under strict mode it is a
-		// blank page. A call-site sweep cannot see this one: it is a READ, not a call.
-		const source = stripNonCode(embeddedScript(renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"))));
+	test("nothing is ASSIGNED that was never declared", () => {
+		// The general form of the defect, and the reason a call-site sweep alone is
+		// not enough: `frame()` threw on a READ of `dragScope`, which no call-site
+		// check can see. Under `"use strict"` an assignment to an undeclared name
+		// throws too, and module state that is read is essentially always assigned
+		// somewhere — so this catches the class without needing to tell a regex
+		// literal from a division, which is what defeated the fully general sweep.
+		//
+		// It replaces a test that named `dragScope`/`dragAlpha` literally. Naming
+		// the two bindings that already bit us would not catch the third.
+		const source = stripNonCode(embeddedScript(renderAtlas()));
 		const declared = declaredNames(source);
-		for (const name of ["dragScope", "dragAlpha"]) {
-			expect(declared.has(name)).toBe(true);
+		const undeclared = new Set<string>();
+		for (const m of source.matchAll(
+			/(^|[^.\w$])([A-Za-z_$][\w$]*)\s*(?:\+|-|\*|\/|\|\||&&|\?\?)?=(?![=>])/g,
+		)) {
+			const name = m[2];
+			if (!name) continue;
+			if (!declared.has(name) && !KEYWORDS.has(name) && !GLOBALS.has(name)) undeclared.add(name);
 		}
+		expect([...undeclared].sort()).toEqual([]);
 	});
 
 	test("dragging one node does not drag its dependency partners with it", () => {
@@ -148,7 +201,7 @@ describe("embedded script integrity", () => {
 		// them from their own clusters, so unrelated groups lurched on every drag.
 		// Scope is the node's own cluster; cross-cluster springs still act on the
 		// dragged node through tick()'s one-ended boundary rule.
-		const source = embeddedScript(renderAtlasHtml(buildAtlasFromFile(FILE, "x.md")));
+		const source = embeddedScript(renderAtlas());
 		const fn = source.match(/function neighbourhoodOf\(id\)\{[\s\S]*?\n\}/);
 		expect(fn).not.toBeNull();
 		expect(fn?.[0]).not.toContain("EDGES");

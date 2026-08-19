@@ -150,6 +150,15 @@ describe("graph diff", () => {
 			afterProject: "SBOX",
 		});
 		expect(d.sameBoard).toBe(false);
+		// And the banner must name the difference that EXISTS. It used to print
+		// "DIFFERENT INSTANCES (x vs x)" — the same string twice — in exactly this
+		// case, which is the one where the reader most needs telling what they are
+		// looking at. Asserting only `sameBoard` let that survive.
+		const out = formatGraphDiff(d);
+		expect(out).toContain("DIFFERENT PROJECTS");
+		expect(out).toContain("DATA");
+		expect(out).toContain("SBOX");
+		expect(out).not.toContain("DIFFERENT INSTANCES");
 	});
 
 	test("same instance carries no divergence warning", () => {

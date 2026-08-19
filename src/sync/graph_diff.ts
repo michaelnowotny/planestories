@@ -40,7 +40,12 @@ export interface FieldChange {
 }
 
 export interface GraphDiff {
-	/** True when both sides came from the same workspace — change over TIME. */
+	/**
+	 * True when both sides are the SAME BOARD — same host, same workspace, same
+	 * project — so the diff is change over TIME rather than divergence between two
+	 * replicas. All three parts matter: two hosts can share a workspace slug, and
+	 * one workspace holds many projects.
+	 */
 	sameBoard: boolean;
 	before: {
 		label: string;
