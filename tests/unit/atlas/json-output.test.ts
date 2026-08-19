@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAtlasFromFile } from "../../../src/atlas/model.ts";
-import { renderAtlasHtml } from "../../../src/atlas/render.ts";
+import { atlasJsonPayload, renderAtlasHtml } from "../../../src/atlas/render.ts";
 
 /**
  * `atlas --json` is a DOCUMENTED, machine-facing output format with, until now,
@@ -297,9 +297,16 @@ describe("atlas --json — the HTML/JSON agreement invariant", () => {
 		// is a pure function of the graph the JSON path emits. If someone ever gives
 		// renderAtlasHtml its own model call, this and the test above both break.
 		const graph = buildAtlasFromFile(STORIES, "stories.md");
-		const html = renderAtlasHtml(graph);
+		const coverage = { kind: "complete" } as const;
+		const html = renderAtlasHtml(graph, { coverage });
 		const match = html.match(/const GRAPH = ([\s\S]*?);\n/);
 		const embedded = (match?.[1] as string).replace(/\\u003c/g, "<");
-		expect(JSON.parse(embedded)).toEqual(JSON.parse(JSON.stringify(graph)));
+		// Both artifacts are now built from `atlasJsonPayload`, so the agreement is
+		// structural rather than maintained. When `dependencyCoverage` was added to
+		// the JSON writer ALONE the two silently diverged, and the sibling test
+		// above is what noticed.
+		expect(JSON.parse(embedded)).toEqual(
+			JSON.parse(JSON.stringify(atlasJsonPayload(graph, coverage))),
+		);
 	});
 });

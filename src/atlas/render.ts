@@ -46,9 +46,33 @@ export interface RenderOptions {
 	coverage: DependencyCoverage;
 }
 
+/**
+ * The one payload shape both artifacts carry: the graph, plus how much of its
+ * dependency structure was actually observed.
+ *
+ * Exported so `atlas --json` writes exactly what the HTML embeds. Two call sites
+ * assembling "the graph plus coverage" independently is the drift this repo has
+ * been bitten by four times; one function is the fix.
+ */
+export function atlasJsonPayload(
+	graph: AtlasGraph,
+	coverage: DependencyCoverage,
+): AtlasGraph & { dependencyCoverage: DependencyCoverage } {
+	return { ...graph, dependencyCoverage: coverage };
+}
+
 export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): string {
 	// Escape the JSON so a title containing "</script>" can't break out of the tag.
-	const data = JSON.stringify(graph).replace(/</g, "\\u003c");
+	//
+	// The payload is the graph PLUS its coverage, and `atlas --json` writes the
+	// SAME shape — so `docs/ATLAS.md`'s promise that the JSON is "the exact graph
+	// the cockpit renders, so external tooling and the HTML can never disagree"
+	// holds by construction rather than by vigilance. Adding `dependencyCoverage`
+	// to the JSON alone broke that invariant the day it was introduced; the
+	// `--json` contract test caught it. The browser ignores this key (it reads
+	// coverage from `CP`), but an embedded graph that documents its own
+	// completeness is the more honest artifact anyway.
+	const data = JSON.stringify(atlasJsonPayload(graph, options.coverage)).replace(/</g, "\\u003c");
 	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
 	// Settle the layout HERE so the page opens on an arranged board. The browser
 	// used to run 325 simulation ticks at ONE PER ANIMATION FRAME — 5.4s at a

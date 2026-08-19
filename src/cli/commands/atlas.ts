@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import chalk from "chalk";
 import type { Command } from "commander";
-import { renderAtlasHtml } from "../../atlas/render.ts";
+import { atlasJsonPayload, renderAtlasHtml } from "../../atlas/render.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { resolveGraph } from "../graph_source.ts";
 import { resolveOutputPath } from "../output_path.ts";
@@ -101,7 +101,10 @@ export function registerAtlasCommand(program: Command) {
 				// someone will compute a floor from it later. Without this it is a graph
 				// with silently fewer edges and nothing to say so — the r2 P0, one file
 				// format over.
-				const json = { ...graph, dependencyCoverage: source.coverage };
+				// The SAME payload the HTML embeds — one function, so the two artifacts
+				// cannot drift (docs/ATLAS.md's "the HTML and the JSON can never
+				// disagree" is then true by construction, not by review).
+				const json = atlasJsonPayload(graph, source.coverage);
 				await Bun.write(abs, options.json ? `${JSON.stringify(json, null, "\t")}\n` : html);
 
 				const flagged = graph.counts.flagged ? `, ${graph.counts.flagged} flagged` : "";
