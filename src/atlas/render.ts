@@ -1,4 +1,5 @@
 import { computeCriticalPath } from "../sync/critical_path.ts";
+import { escapeHtml } from "../utils/html.ts";
 import { PHYSICS, settleLayout } from "./layout.ts";
 import type { AtlasGraph, DependencyCoverage } from "./model.ts";
 
@@ -237,14 +238,6 @@ ${SCRIPT}
 </body>
 </html>
 `;
-}
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
 }
 
 const STYLES = `

@@ -1,3 +1,9 @@
+import { isTransientPlaneError } from "../plane/client.ts";
+
+// Re-exported so existing importers keep working; the policy itself lives beside
+// the retry loop that applies it, in `plane/client.ts`.
+export { isTransientPlaneError };
+
 import { PlaneApiError, ReplicateError } from "../errors.ts";
 
 export interface A10CreateClient {
@@ -26,13 +32,6 @@ interface RawCreatedItem {
 	name?: string;
 	external_id?: string | null;
 	external_source?: string | null;
-}
-
-export function isTransientPlaneError(error: unknown): error is PlaneApiError {
-	return (
-		error instanceof PlaneApiError &&
-		(error.status === undefined || error.status === 429 || error.status >= 500)
-	);
 }
 
 /**

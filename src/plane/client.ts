@@ -644,9 +644,33 @@ export function deriveWebBaseUrl(apiBaseUrl: string): string {
 	}
 }
 
-/** HTTP statuses worth retrying: rate limiting (429) and transient server errors (5xx). */
-function isRetryableStatus(status: number): boolean {
+/**
+ * HTTP statuses worth retrying: rate limiting (429) and transient server errors
+ * (5xx). THE definition — `isTransientPlaneError` below is its error-shaped
+ * sibling, and nothing should spell this policy out a fourth time.
+ *
+ * House rule: retry only classified-transient failures. That is only meaningful
+ * if "classified" means one classification; three copies of the rule is three
+ * chances for one path to start retrying something the others treat as
+ * permanent.
+ */
+export function isRetryableStatus(status: number): boolean {
 	return status === 429 || (status >= 500 && status < 600);
+}
+
+/**
+ * The error-shaped form of the same policy. `status === undefined` is a network
+ * failure (no response), which is transient by definition.
+ *
+ * Consolidated from three implementations: this one, `plane/issues.ts`, and
+ * `replicate/create.ts`. The two removed were semantically identical to each
+ * other and differed from `isRetryableStatus` only in leaving 5xx unbounded.
+ */
+export function isTransientPlaneError(error: unknown): error is PlaneApiError {
+	return (
+		error instanceof PlaneApiError &&
+		(error.status === undefined || isRetryableStatus(error.status))
+	);
 }
 
 /**

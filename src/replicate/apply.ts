@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { PlaneApiError, ReplicateError } from "../errors.ts";
 import type { PlaneEndpointDialect, PlaneRelationKind } from "../plane/client.ts";
+import { escapeHtml } from "../utils/html.ts";
 import {
 	type A10CreateClient,
 	createItemA10,
@@ -1278,14 +1279,6 @@ function isNotFound(error: unknown): boolean {
 function sameNullableInstant(actual: string | null | undefined, expected: string | null): boolean {
 	if (actual == null || expected == null) return actual == null && expected == null;
 	return Date.parse(actual) === Date.parse(expected);
-}
-
-function escapeHtml(value: string): string {
-	return value
-		.replaceAll("&", "&amp;")
-		.replaceAll('"', "&quot;")
-		.replaceAll("<", "&lt;")
-		.replaceAll(">", "&gt;");
 }
 
 function formatGateProgress(

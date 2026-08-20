@@ -19,6 +19,7 @@ import {
 } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { ImportResult, ImportSummary, ResolvedConfig, UserStory } from "../types.ts";
+import { escapeHtml } from "../utils/html.ts";
 import { boardItemToStory, resolveStoryRelationIdentifiers } from "./board-story.ts";
 import {
 	type RelationProject,
@@ -855,10 +856,6 @@ function criterionNameAndBody(text: string): { name: string; body?: string } {
 /** True for a criterion sub-item external id of the form `<parent>::ac<n>`. */
 function isCriterionExternalId(externalId: string | undefined): boolean {
 	return Boolean(externalId && /::ac\d+$/.test(externalId));
-}
-
-function escapeHtml(text: string): string {
-	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**

@@ -1,7 +1,7 @@
 import { PlaneApiError } from "../errors.ts";
 import { htmlToMarkdown, markdownToHtml } from "../markdown/html.ts";
 import type { PlanePriority } from "../types.ts";
-import type { PlaneClient } from "./client.ts";
+import { isTransientPlaneError, type PlaneClient } from "./client.ts";
 
 export interface CreateWorkItemInput {
 	name: string;
@@ -196,13 +196,6 @@ export interface CommentClient {
 }
 
 /** Transient = worth replaying: network-ambiguous (no status), 429, or 5xx. */
-function isTransientPlaneError(error: unknown): boolean {
-	if (!(error instanceof PlaneApiError)) {
-		return false;
-	}
-	return error.status === undefined || error.status === 429 || error.status >= 500;
-}
-
 async function hasMarkerComment(
 	client: CommentClient,
 	projectId: string,

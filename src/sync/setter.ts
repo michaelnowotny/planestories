@@ -3,6 +3,7 @@ import type { PlaneClient } from "../plane/client.ts";
 import { ensureComment } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import type { PlanePriority, ResolvedConfig } from "../types.ts";
+import { escapeHtml } from "../utils/html.ts";
 
 export interface SetOptions {
 	config: ResolvedConfig;
@@ -21,14 +22,6 @@ export interface SetResult {
 	/** Evidence-comment outcome when --evidence was given. */
 	evidence?: "posted" | "exists";
 	error?: string;
-}
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
 }
 
 /**
