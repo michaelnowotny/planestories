@@ -110,6 +110,14 @@ exact `PROJECT-N` identifier preservation.
 - The transient-failure retry path no longer converts a 404 into a hard failure, and post-
   exhaustion exceptions are no longer wrapped past the handlers that catch them.
 
+### Documentation
+
+- `docs/CHEATSHEET.md` — every command on one page, for people and for agents; linked from the
+  README, `AGENTS.md` and `USING_WITH_CLAUDE.md`.
+- README documents `critical-path`, `trend`, `diff` and `defaultContext`, which shipped without it.
+- `docs/ATLAS.md` corrected: it documented an `R` key that no longer exists and listed four header
+  gauges where six render.
+
 ### Security / privacy
 
 - README screenshots are re-shot from a synthetic board; they previously showed real project

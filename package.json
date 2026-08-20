@@ -2,6 +2,11 @@
   "name": "planestories",
   "version": "0.5.0",
   "description": "CLI tool that bridges markdown-based user stories and Plane work items, enforcing acceptance criteria discipline for AI agents",
+  "author": "Michael Nowotny",
+  "homepage": "https://github.com/michaelnowotny/planestories#readme",
+  "bugs": {
+    "url": "https://github.com/michaelnowotny/planestories/issues"
+  },
   "module": "src/cli/index.ts",
   "type": "module",
   "license": "MIT",
@@ -27,7 +32,8 @@
     "templates",
     "LICENSE",
     "NOTICE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "bin": {
     "planestories": "src/cli/index.ts"

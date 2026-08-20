@@ -315,6 +315,10 @@ By default a story's `### Acceptance Criteria` checklist is stored in the work i
 
 ## Commands
 
+> **In a hurry?** [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) is every command on one
+> page, with the flags that matter and the things that will bite you.
+
+
 ### `import`
 
 ```

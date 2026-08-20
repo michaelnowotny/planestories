@@ -87,6 +87,9 @@ default project; per-story overrides are not needed for the project in v1. Start
 
 ## Commands
 
+> Terse version for quick lookup: [`CHEATSHEET.md`](./CHEATSHEET.md).
+
+
 Run all of these from inside the planestories repo:
 
 ```bash

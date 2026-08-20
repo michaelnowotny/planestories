@@ -6,6 +6,9 @@ to [Plane](https://plane.so) work items, both directions. It's a TypeScript/Bun 
 Plane's REST API. The point: give coding agents a precise, checkable spec instead of a vague
 ticket.
 
+**Command reference:** [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) — every command, its real
+flags, and the failure modes, on one page. Start there rather than reading `src/cli/commands/`.
+
 ## Working here (must-follow)
 
 - **Bun, not Node.** `export PATH="$HOME/.bun/bin:$PATH"` in every shell, then `bun install`.
