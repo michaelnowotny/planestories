@@ -462,11 +462,15 @@ export class PlaneClient {
 	 * what that cost us.
 	 */
 	async getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations> {
-		const raw = await this.request<unknown>(
-			"GET",
-			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/relations/`),
-		);
-		return normalizeRelations(raw);
+		try {
+			const raw = await this.request<unknown>(
+				"GET",
+				this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/relations/`),
+			);
+			return normalizeRelations(raw);
+		} catch (error) {
+			throw withDialectHint(error, this.dialect);
+		}
 	}
 
 	createRelation(
@@ -479,7 +483,9 @@ export class PlaneClient {
 			"POST",
 			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/${workItemId}/relations/`),
 			{ body: { relation_type: relationType, issues } },
-		);
+		).catch((error) => {
+			throw withDialectHint(error, this.dialect);
+		});
 	}
 
 	removeRelation(
@@ -642,6 +648,32 @@ export function deriveWebBaseUrl(apiBaseUrl: string): string {
 	} catch {
 		return apiBaseUrl;
 	}
+}
+
+/**
+ * Turn a relation-endpoint 404 into an answer instead of a puzzle.
+ *
+ * Plane serves work items under TWO endpoint families — CE uses `/work-items/`,
+ * Plane Cloud uses `/issues/` — and the relation sub-resource 404s if you ask
+ * the wrong one. The bare error ("GET …/issues/<uuid>/relations/ 404") reads as
+ * "this deployment has no relation API", and two separate sessions independently
+ * reached that conclusion, one of them concluding the tool was newer than the
+ * server. Both then designed around a feature that was working the whole time.
+ *
+ * Only fires on 404 from a relation call, and only says what the dialect could
+ * be instead — it never retries or switches automatically, because silently
+ * talking to a different endpoint family than configured is its own bug.
+ */
+function withDialectHint(error: unknown, dialect: PlaneEndpointDialect): unknown {
+	if (!(error instanceof PlaneApiError) || error.status !== 404) return error;
+	const other = dialect === "work-items" ? "issues" : "work-items";
+	return new PlaneApiError(
+		`${error.message}\n  hint: the relation endpoint 404s when the endpoint DIALECT does not match ` +
+			`the deployment. This client is using "${dialect}"; try "${other}" ` +
+			`(config: "dialect": "${other}", or PLANE_CTX_<NAME>_DIALECT=${other}). ` +
+			"Self-hosted Plane (CE) generally serves work-items; Plane Cloud serves issues.",
+		error.status,
+	);
 }
 
 /**
