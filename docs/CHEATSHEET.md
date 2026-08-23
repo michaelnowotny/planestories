@@ -69,6 +69,11 @@ planestories audit --since 2026-08-23T08:00:00Z --json
 planestories packet DATA-123                       # implementable brief for an agent (an epic emits all descendants)
 planestories critical-path --project X             # dependency floor in dev-days, slack, biggest lever
 planestories critical-path stories/q1.md --json
+planestories ready --epic DATA-100 --limit 10       # all blockers closed; highest immediate leverage first
+planestories inconsistent --epic DATA-100           # Done with open blockers; ready but not started
+planestories blocked --epic DATA-100                # open work + titled unfinished blockers
+planestories orphans                                # leaf stories outside the dependency graph
+planestories abandoned                              # open leaf work under a cancelled/abandoned epic
 ```
 
 `ls` / `count` predicates are exactly `--open`, `--status`, `--label`, `--assignee`, `--epic`,
@@ -216,6 +221,8 @@ reproductions: [`PLANE_CAPABILITIES.md`](./PLANE_CAPABILITIES.md).
   says `skipped`, and the floor shows `—` rather than a number.
 - **A dependency floor is a floor, not a date.** It assumes unlimited parallelism, and it reads
   `≥ Nd` whenever connected work is unestimated.
+- **Dependency queries refuse a partial relation sweep.** Re-run with `--refresh`, or answer from a
+  complete `--from-snapshot <file>`; missing edges never become ready/clean findings.
 - **`exports/` is gitignored, and board content belongs there.** It is data, not build output — a
   `git add -A` after a smoke run once committed 49,258 lines of live board content.
 - **Never commit credentials.** Committed config holds non-secret defaults; keys live in `.env`.

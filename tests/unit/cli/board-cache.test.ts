@@ -727,6 +727,16 @@ describe("cached read commands — real CLI cache wiring", () => {
 		});
 	}
 
+	test("graph queries read the complete cache and carry its relative age in the answer", () => {
+		const result = runCli(["ready"], directory);
+
+		expect(result.code).toBe(0);
+		expect(result.out).toContain("Ready: 1 item(s)");
+		expect(result.out).toContain("Source: Data Platform board");
+		expect(result.out).toMatch(/cached 1[34]m ago/);
+		expect(result.err).toContain("cached board state");
+	});
+
 	test("ls --blocked uses the cache's complete dependency graph", () => {
 		writeCache(
 			cache({
