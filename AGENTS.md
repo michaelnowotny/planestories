@@ -6,6 +6,10 @@ to [Plane](https://plane.so) work items, both directions. It's a TypeScript/Bun 
 Plane's REST API. The point: give coding agents a precise, checkable spec instead of a vague
 ticket.
 
+**Plane API reality:** [`docs/PLANE_CAPABILITIES.md`](docs/PLANE_CAPABILITIES.md) — what CE vs
+Cloud can and cannot do (no PQL on CE; the two endpoint dialects; relations vs hierarchy). Three
+sessions have independently rediscovered these; read it before concluding an API is missing.
+
 **Command reference:** [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) — every command, its real
 flags, and the failure modes, on one page. Start there rather than reading `src/cli/commands/`.
 

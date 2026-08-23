@@ -173,6 +173,13 @@ too — they are not just prose.
 
 ---
 
+## Deployment differences
+
+**Community Edition has no server-side work-item filtering** — no PQL, no `count_work_items`. Pull
+the board once (`atlas --json`) and query locally. Relations live under `/work-items/` on CE and
+`/issues/` on Cloud; a relation 404 is a dialect mistake, not a missing API. Details and
+reproductions: [`PLANE_CAPABILITIES.md`](./PLANE_CAPABILITIES.md).
+
 ## Things that will bite you
 
 - **Every `##` heading becomes a work item.** Design docs and stories do not share a file.

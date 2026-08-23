@@ -584,6 +584,13 @@ Every Plane API call retries transient failures automatically — HTTP 429 (hono
 
 planestories works against Plane Cloud by default (`https://api.plane.so`). To target a self-hosted instance, set `PLANE_BASE_URL` (env) or `baseUrl` (config) to your instance URL — no code changes required.
 
+## Deployment differences (Cloud vs self-hosted CE)
+
+planestories works against both, but they are not the same API. Community Edition has **no
+server-side work-item filtering** (no PQL), and relations live under a different endpoint family
+than on Cloud. planestories handles the routing; the differences are documented with
+reproductions in [`docs/PLANE_CAPABILITIES.md`](docs/PLANE_CAPABILITIES.md).
+
 ## Multiple workspaces (contexts)
 
 A config file may define named contexts — one per Plane installation — and you select one with
