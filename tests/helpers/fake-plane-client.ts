@@ -1,3 +1,4 @@
+import { PlaneApiError } from "../../src/errors.ts";
 import type {
 	PlaneClient,
 	PlaneDependencyRelationType,
@@ -24,6 +25,8 @@ export interface RecordedCall {
 }
 
 export interface FakeData {
+	/** Simulate Plane CE, which 404s on the relation-removal endpoint. */
+	relationRemovalUnsupported?: boolean;
 	projects?: FakeProject[];
 	states?: Record<string, FakeNamed[]>;
 	labels?: Record<string, FakeNamed[]>;
@@ -331,6 +334,15 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			relatedIssue: string,
 		): Promise<void> {
 			record("removeRelation", [projectId, workItemId, relationType, relatedIssue]);
+			// Plane CE exposes relation create and list but NOT remove: the
+			// `/relations/remove/` endpoint 404s (verified on 1.4.1). `data.relationRemovalUnsupported`
+			// reproduces that so the reconciler's degradation can be tested.
+			if (data.relationRemovalUnsupported) {
+				throw new PlaneApiError(
+					"Plane API POST .../relations/remove/ failed (404 Not Found):",
+					404,
+				);
+			}
 			removedRelations.push({ projectId, workItemId, relationType, relatedIssue });
 			const source = relationState(workItemId);
 			const target = relationState(relatedIssue);

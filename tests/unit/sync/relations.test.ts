@@ -477,3 +477,55 @@ ${story("C", C, "ENG-3", "blocked_by: [ENG-1]")}`,
 		}
 	});
 });
+
+describe("Plane CE: relation removal is unavailable", () => {
+	// CE exposes relation create and list but NOT remove — `/relations/remove/`
+	// 404s (verified on 1.4.1). Reported by the research session after deleting five
+	// `blocked_by` edges from story files and finding the board kept them.
+	//
+	// The defect was not the 404, which is a real deployment limit, but what it did
+	// to the run: removals apply BEFORE creates, and a single throw escaped the
+	// whole reconciliation phase. So one un-removable edge also skipped every
+	// CREATE, and the importer's blanket catch withheld `plane_hash` for every
+	// story — making the next identical run fail identically, forever.
+	async function ceRun(files: string[]) {
+		const fake = makeFakeClient(fakeData({ relationRemovalUnsupported: true }));
+		// Establish A blocked_by B on the board, with both endpoints managed.
+		const seedA = write("seed-a.md", story("A", A, "ENG-1", "blocked_by: [ENG-2]"));
+		const seedB = write("seed-b.md", story("B", B, "ENG-2"));
+		await importStories(fake.client, {
+			files: [seedA, seedB],
+			config,
+			force: true,
+			noWriteBack: true,
+		});
+		fake.createdRelations.length = 0;
+		const summary = await importStories(fake.client, { files, config, force: true });
+		return { fake, summary };
+	}
+
+	test("an un-removable edge does not block the creates in the same run", async () => {
+		// A drops its edge to B (must be removed → 404) and gains one to C (create).
+		const fileA = write("a.md", story("A", A, "ENG-1", "blocked_by: [ENG-3]"));
+		const fileB = write("b.md", story("B", B, "ENG-2"));
+		const fileC = write("c.md", story("C", C, "ENG-3"));
+		const { fake, summary } = await ceRun([fileA, fileB, fileC]);
+
+		// The removal failed and is REPORTED, naming the deployment limitation...
+		expect(summary.relationErrors.join(" ")).toMatch(/does not support relation REMOVAL/);
+		// ...and the create still landed instead of being skipped by the throw.
+		expect(fake.createdRelations.length).toBeGreaterThan(0);
+	});
+
+	test("the divergent story does not get a warm hash", async () => {
+		// A drops its edge to B; the removal 404s, so file and board now disagree.
+		// If A were hashed as synced, a later run would skip it and the divergence
+		// would become permanent and invisible.
+		const fileA = write("a2.md", story("A", A, "ENG-1"));
+		const fileB = write("b2.md", story("B", B, "ENG-2"));
+		const { summary } = await ceRun([fileA, fileB]);
+
+		expect(summary.relationErrors.length).toBeGreaterThan(0);
+		expect(summary.results.find((r) => r.planeId === A)?.planeHash).toBeUndefined();
+	});
+});

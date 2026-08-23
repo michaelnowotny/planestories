@@ -236,26 +236,87 @@ export async function reconcileProjectRelations(
 	}
 
 	if (!dryRun) {
+		/**
+		 * Apply one edge operation, recording a failure instead of aborting the phase.
+		 *
+		 * Previously any single failure threw straight out of reconciliation. Because
+		 * removals run FIRST, one un-removable edge also skipped every create, and the
+		 * importer's blanket catch then withheld `plane_hash` for EVERY story — so the
+		 * whole run repeated, identically, forever. That is the shape Plane CE puts us
+		 * in permanently: it exposes relation create and list but NOT remove
+		 * (`/relations/remove/` → 404, verified on 1.4.1), so a `blocked_by` deleted
+		 * from a story file can never be deleted from the board by this tool.
+		 *
+		 * Failing per-edge keeps the blast radius honest: the stories whose edges did
+		 * not land are the ones that lose their hash, unrelated work still syncs, and
+		 * every failure is still reported and still fails the run. A partial result is
+		 * reported as partial — it is never published as success.
+		 */
+		const runEdge = async (op: () => Promise<void>, owners: string[], what: string) => {
+			try {
+				await op();
+			} catch (error) {
+				const status = (error as { status?: number }).status;
+				const detail =
+					status === 404 && what.startsWith("remove")
+						? "this Plane deployment does not support relation REMOVAL (Community Edition exposes create and list only) — delete the link in the Plane UI, or keep the edge in the story file"
+						: error instanceof Error
+							? error.message
+							: String(error);
+				errors.push(`${what}: ${detail}`);
+				// Only the endpoints of THIS edge are now file/board-divergent.
+				for (const owner of owners) if (syncedIds.has(owner)) hashWithholdIds.add(owner);
+			}
+		};
+
 		// Apply removals first so reversing a block edge never creates a transient
 		// two-node cycle on Plane.
 		for (const edge of toRemove) {
 			if (edge.kind === "block") {
-				await client.removeRelation(project.id, edge.blocked, "blocked_by", edge.blocker);
+				const label = identifierById.get(edge.blocked) ?? edge.blocked;
+				const other = identifierById.get(edge.blocker) ?? edge.blocker;
+				await runEdge(
+					() => client.removeRelation(project.id, edge.blocked, "blocked_by", edge.blocker),
+					[edge.blocked, edge.blocker],
+					`remove ${label} blocked_by ${other}`,
+				);
 			} else {
-				await client.removeRelation(project.id, edge.left, "relates_to", edge.right);
+				const label = identifierById.get(edge.left) ?? edge.left;
+				const other = identifierById.get(edge.right) ?? edge.right;
+				await runEdge(
+					() => client.removeRelation(project.id, edge.left, "relates_to", edge.right),
+					[edge.left, edge.right],
+					`remove ${label} relates_to ${other}`,
+				);
 			}
 		}
 		for (const edge of toCreate) {
 			if (edge.kind === "block") {
+				const blockedLabel = identifierById.get(edge.blocked) ?? edge.blocked;
+				const blockerLabel = identifierById.get(edge.blocker) ?? edge.blocker;
 				if (syncedIds.has(edge.blocked)) {
-					await client.createRelation(project.id, edge.blocked, "blocked_by", [edge.blocker]);
+					await runEdge(
+						() => client.createRelation(project.id, edge.blocked, "blocked_by", [edge.blocker]),
+						[edge.blocked, edge.blocker],
+						`create ${blockedLabel} blocked_by ${blockerLabel}`,
+					);
 				} else {
-					await client.createRelation(project.id, edge.blocker, "blocking", [edge.blocked]);
+					await runEdge(
+						() => client.createRelation(project.id, edge.blocker, "blocking", [edge.blocked]),
+						[edge.blocked, edge.blocker],
+						`create ${blockerLabel} blocking ${blockedLabel}`,
+					);
 				}
 			} else {
 				const source = syncedIds.has(edge.left) ? edge.left : edge.right;
 				const related = source === edge.left ? edge.right : edge.left;
-				await client.createRelation(project.id, source, "relates_to", [related]);
+				const sourceLabel = identifierById.get(source) ?? source;
+				const relatedLabel = identifierById.get(related) ?? related;
+				await runEdge(
+					() => client.createRelation(project.id, source, "relates_to", [related]),
+					[source, related],
+					`create ${sourceLabel} relates_to ${relatedLabel}`,
+				);
 			}
 		}
 	}

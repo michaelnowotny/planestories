@@ -80,6 +80,47 @@ blocker's status/owner. Distinguishes three cases that look identical in a raw l
 open work, blocked by an item that is itself blocked (chain depth), and blocked by a **dangling**
 reference (`doctor` already detects these).
 
+**Each blocker prints its one-line TITLE, not just its identifier.** Research session, 2026-08-23,
+from a real mis-dispatch: *"`blocked` as specced would have told me CFAP-111 is blocked by CFAP-116.
+True, and useless."* CFAP-116 was a bucket of unrelated adjudications; exactly one item inside it
+actually blocked the work, and finding that out required reading the body. A bucket is visible as a
+bucket the moment you can see its title — and the graph already carries titles, so this costs
+nothing and converts a true-but-useless answer into an actionable one.
+
+### B2. "Done, but its prerequisites are not" — the check most likely to catch a real error
+
+```
+planestories inconsistent [--epic X]
+```
+
+Requested by the research session and **not** in my original list; on their evidence it outranks
+`risks` entirely. Two predicates over the edge set:
+
+- **Done items with a non-Done blocker.** Their programme had an arc declared CLOSED on one of two
+  pre-declared observation equations; the closure propagated into downstream planning and stood for
+  months. Four other headline verdicts were published and cited while the evidence behind them was
+  never established. Both are the same graph pattern.
+- **Items whose blockers are all Done but which nobody has started** — silently ready. (This is the
+  flip side of `ready`, and falls out of the same traversal.)
+
+They would run the first at every session start: *"the query most likely to catch a real error
+rather than merely organise work."* That is a better justification than anything on the original
+list, because it is the only verb here that finds a WRONG board rather than a slow one.
+
+### B3. "Is anything actually neglected?" — a graph property, not a timestamp one
+
+```
+planestories orphans
+```
+
+Items that **block nothing and are blocked by nothing** — disconnected from the dependency graph
+entirely. This replaces the age-based "stale" idea I proposed, on the research session's direct
+refutation: *"age-without-movement is a BAD neglect signal — a ticket open for months is usually
+correctly parked behind a real dependency, and ranking by age would surface exactly the wrong items
+while burying a two-day-old item that nothing will ever consume."*
+
+They are right, and it is the better idea: it needs no schema change and it is answerable today.
+
 ### C. "Where is the risk?"
 
 ```
@@ -112,6 +153,17 @@ One item, human-shaped: fields, parent, direct children with status split, relat
 counterpart's status, criteria. `packet` already covers the agent-shaped version; `show` is the
 five-line answer. Both read the cache when present.
 
+### F. "Do the files and the board agree?"
+
+```
+planestories drift stories/*.md
+```
+
+Reports where the markdown corpus and the board disagree — status, effort, parent, and especially
+**dependency edges**. This is no longer optional: CE cannot delete relations, so any `blocked_by`
+removed from a file is a permanent, silent divergence until someone fixes it in the Plane UI. The
+tool that creates the divergence should be the one that reports it.
+
 ## 4. Hiding the deployment differences — the second half of the ask
 
 A session using planestories should never need to know what a "dialect" is.
@@ -120,9 +172,13 @@ A session using planestories should never need to know what a "dialect" is.
 planestories capabilities [--context ce]
 ```
 
-Reports, per deployment: edition, version, dialect in use, and a measured yes/no for relations,
-PQL, and the count endpoint — the exact table three sessions built by hand. Cheap (a handful of
-probes) and cacheable per context.
+Reports, per deployment: edition, version, dialect in use, and a measured yes/no for relation
+create / list / **remove**, PQL, and the count endpoint — the exact table three sessions built by
+hand. Cheap (a handful of probes) and cacheable per context.
+
+**It must state the NEGATIVES explicitly**, not just list what works — "relation removal:
+unavailable on this deployment" is the line that would have saved the research session fifteen
+minutes of curl'ing endpoint shapes by hand.
 
 Then the routing becomes automatic:
 
@@ -157,6 +213,11 @@ carries neither, deliberately — it would multiply the payload for questions `p
 better).
 
 ## 6. Sequencing
+
+*Re-ordered 2026-08-23 after the research session's scoring. They rated `ls`/`count` LEAST useful
+("I do not think in counts, and a count is the kind of number that gets quoted without its
+denominator") and `risks` weakest, while adding `inconsistent` as a top-tier want. Their ranking
+beats my guesses, so the plan follows it — pending the finance session's, which may differ.*
 
 1. **`capabilities` + auto-detected dialect.** Smallest, and it retires an entire class of
    confusion that has now cost three sessions.

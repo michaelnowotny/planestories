@@ -32,6 +32,26 @@ dialect in use and the one to try.
 
 **A 404 here is a routing mistake, not a missing feature.**
 
+### 1b. …but on CE, relation REMOVAL genuinely is missing
+
+Verified on CE 1.4.1, with the dialect set correctly:
+
+| call | CE |
+|---|---|
+| `POST …/work-items/{id}/relations/` | **201** — create works |
+| `GET  …/work-items/{id}/relations/` | **200** — list works |
+| `POST …/work-items/{id}/relations/remove/` | **404** |
+| `DELETE …/work-items/{id}/relations/{target}/` | **404** |
+| `DELETE …/{issues,work-items}/{id}/issue-relation/{target}/` | **404** |
+
+So **`blocked_by` / `blocks` edits are one-way on CE**: planestories can add an edge from a story
+file but cannot delete one. Removing a `blocked_by:` line leaves the board unchanged, and the file
+and board diverge with no API-level way to reconcile them.
+
+**Remove the link in the Plane UI**, or leave the edge in the file. `import` reports each edge it
+could not remove, names this limitation, and withholds `plane_hash` for the affected stories so the
+divergence stays visible instead of being hashed away as synced.
+
 ### 2. `blocked_by` / `blocks` are RELATIONS. Parent/child is HIERARCHY.
 
 Different mechanisms, different endpoints. A child count comes from each item's `parent` field in
