@@ -4,7 +4,7 @@ import { isTransientPlaneError } from "../plane/client.ts";
 // the retry loop that applies it, in `plane/client.ts`.
 export { isTransientPlaneError };
 
-import { PlaneApiError, ReplicateError } from "../errors.ts";
+import { ReplicateError } from "../errors.ts";
 
 export interface A10CreateClient {
 	readonly maxRetries: number;

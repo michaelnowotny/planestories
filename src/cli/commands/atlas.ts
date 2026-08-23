@@ -57,7 +57,7 @@ export function registerAtlasCommand(program: Command) {
 		)
 		.option(
 			"--json",
-			"Emit the graph as JSON (nodes with effort/priority/assignee, dependency edges, counts) instead of HTML",
+			"Emit the graph as JSON (nodes with effort/priority/assignee/timestamps, dependency edges, counts) instead of HTML",
 			false,
 		)
 		.option("--open", "Open the generated file in your browser", false)

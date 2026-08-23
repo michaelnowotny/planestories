@@ -7,6 +7,8 @@ function item(overrides: Partial<FetchedWorkItem>): FetchedWorkItem {
 		id: "wi-1",
 		sequenceId: 1,
 		name: "Item",
+		createdAt: null,
+		updatedAt: null,
 		description: undefined,
 		priority: undefined,
 		estimate: undefined,

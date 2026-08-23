@@ -20,6 +20,8 @@ function story(id: string, over: Partial<AtlasNode> = {}): AtlasNode {
 		assignee: null,
 		effortDays: null,
 		priority: null,
+		createdAt: null,
+		updatedAt: null,
 		criteria: [],
 		quality: null,
 		children: [],

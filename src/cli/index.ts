@@ -17,6 +17,7 @@ import { registerProjectsCommand } from "./commands/projects.ts";
 import { registerRenameProjectCommand } from "./commands/rename-project.ts";
 import { registerReplicateCommand } from "./commands/replicate.ts";
 import { registerSetCommand } from "./commands/set.ts";
+import { registerShowCommand } from "./commands/show.ts";
 import { registerTrendCommand } from "./commands/trend.ts";
 import { armLingerNotice } from "./flush.ts";
 
@@ -41,6 +42,7 @@ registerGroomCommand(program);
 registerMigrateCriteriaCommand(program);
 registerDoctorCommand(program);
 registerAtlasCommand(program);
+registerShowCommand(program);
 registerLintCommand(program);
 registerPacketCommand(program);
 registerEpicCommand(program);
