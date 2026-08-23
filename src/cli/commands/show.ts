@@ -2,7 +2,8 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { buildShowItem, renderShowText } from "../../sync/show.ts";
-import { formatGraphSourceProvenance, resolveGraph } from "../graph_source.ts";
+import { formatGraphSourceProvenance } from "../graph_provenance.ts";
+import { resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 

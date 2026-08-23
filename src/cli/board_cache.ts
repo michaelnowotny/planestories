@@ -118,7 +118,12 @@ export function isBoardCacheStale(
 
 /** Compact human duration for the mandatory provenance line and stale refusal. */
 export function formatBoardCacheAge(cache: BoardCache, now: Date = new Date()): string {
-	const milliseconds = boardCacheAgeMs(cache, now);
+	return formatElapsedAge(cache.fetchedAt, now);
+}
+
+/** Compact age for any validated recorded-source instant. */
+export function formatElapsedAge(instant: string, now: Date = new Date()): string {
+	const milliseconds = Math.max(0, now.getTime() - Date.parse(instant));
 	const minutes = Math.floor(milliseconds / 60_000);
 	if (minutes < 1) return "<1m";
 	if (minutes < 60) return `${minutes}m`;

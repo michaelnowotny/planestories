@@ -91,19 +91,8 @@ export type GraphSourceProvenance =
 			itemCount: number;
 	  };
 
-/** One human provenance line shared by every graph-backed read command. */
-export function formatGraphSourceProvenance(provenance: GraphSourceProvenance): string {
-	if (provenance.kind === "snapshot") {
-		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · snapshot taken ${provenance.takenAt}`;
-	}
-	if (provenance.kind === "cache") {
-		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · cached at ${provenance.fetchedAt}`;
-	}
-	if (provenance.kind === "live") {
-		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · live`;
-	}
-	return `${provenance.project} · file ${provenance.path}`;
-}
+// Backwards-compatible re-export; new read commands import the dedicated shared helper.
+export { formatGraphSourceProvenance } from "./graph_provenance.ts";
 
 /** Thrown by `requireCompleteGraph`. Carries the coverage so callers can explain it. */
 export class IncompleteGraphError extends Error {

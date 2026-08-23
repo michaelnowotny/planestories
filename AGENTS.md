@@ -144,7 +144,7 @@ Don't blur these.
 - `src/markdown/` — `parser.ts`/`serializer.ts` (YAML keys incl. `plane_hash`), `writer.ts`
   (`writeBackIds`/`clearWriteBack`), `criteria.ts` (`splitBody`/checklist), `html.ts`
   (`markdownToHtml`/`htmlToMarkdown`).
-- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`capabilities`/`groom`/`doctor`/`atlas`/`lint`/`packet`/`epic`.
+- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`capabilities`/`groom`/`doctor`/`audit`/`atlas`/`show`/`ls`/`count`/`ready`/`inconsistent`/`blocked`/`orphans`/`abandoned`/`lint`/`packet`/`epic`.
   `src/types.ts` is the type home.
 - `src/cli/board_cache.ts` — versioned `.planestories/board.json` schema, deep validation,
   host/workspace/project identity guard, 1h freshness contract, provenance line, and atomic
@@ -154,6 +154,10 @@ Don't blur these.
   `collectDescendants`/`isEpic` to summarize an epic: leaf-story status breakdown, completion %
   (cancelled excluded from the denominator), Σ leaf effort + unestimated count, and blocked/blocking
   leaves. Read-only.
+- `src/sync/graph_queries.ts` — the five complete-graph local queries (`ready`, `inconsistent`,
+  `blocked`, `orphans`, `abandoned`). Epic scoping narrows candidate leaves, while dependency
+  counterparts still resolve across the full board. It consumes `critical_path.ts`'s shared leaf
+  projection, so readiness, filters, and schedule traversal cannot drift on epic endpoint edges.
 - `src/sync/packet.ts` — the **agent spec-packet** builder. `generatePacket` (board wrapper: resolve →
   `fetchProjectIndex` → resolve target by identifier → fetch relations for root+children, bounded) +
   pure `buildPacketStory`/`renderPacketMarkdown`. Emits a self-contained implementable brief (machine-

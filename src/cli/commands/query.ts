@@ -10,11 +10,8 @@ import {
 	renderListText,
 	validateQueryPredicates,
 } from "../../sync/query.ts";
-import {
-	formatGraphSourceProvenance,
-	IncompleteGraphError,
-	resolveGraph,
-} from "../graph_source.ts";
+import { formatGraphSourceProvenance } from "../graph_provenance.ts";
+import { IncompleteGraphError, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
