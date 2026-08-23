@@ -199,6 +199,36 @@ planestories inconsistent [--epic X]               # Done items with a non-Done 
 
 ---
 
+## Units 1–5: BUILT and merged (2026-08-23)
+
+Built by Codex across three dispatches, gate-verified and smoke-tested against the live CE board by
+the orchestrator, then reviewed by Grok in one round with the bar declared up front
+(P0/P1 block; P2 records). **Verdict: APPROVE — no P0, no P1.**
+
+> *"The load-bearing safety property holds: a cache from board A does not answer about board B on
+> any path an operator actually uses. Freshness is labelled or refused. Partials do not publish.
+> Failed capability probes do not become confident negatives."*
+
+Measured effect: `show DATA-2469` went from **2m34s / 885 requests** to **0.103s** — the operation
+finance runs several times per session.
+
+### P2s recorded, not blocking — fix when next in the file
+
+1. **Relation create/remove capability is a dialect heuristic after a list GET**, not an independent
+   measurement. Cloud + an explicitly configured `work-items` dialect would wrongly print
+   "relation removal: NOT SUPPORTED". Not a path in use here, but the command's whole purpose is
+   not making confident claims from indirect evidence — so this is the first P2 to close.
+2. **Cache identity keys on the project SELECTOR, not a UUID.** A rename plus reuse of the old name
+   within the staleness window is the one hole; a cross-host cutover does not hit it.
+3. **`atlas` artifacts carry no `fetchedAt`.** The command prints the age on stderr, but the HTML/JSON
+   file does not, so someone opening `exports/atlas.html` tomorrow cannot see how old it is. Given
+   the whole point is that an artifact outlives its stderr, this one matters more than its rank.
+4. **`packet` / `epic` / `doctor` / `critical-path` do not read the cache** — they stay live, which is
+   honest but means Unit 5's benefit is wired only for `show` and `atlas`.
+5. Cache-hit `show` on a missing identifier names the board but not host/workspace.
+6. Age text truncates (`90m` → `1h`). Refusal still correct; wording coarse.
+7. No `fsync` on cache publish.
+
 ## Deferred, with the reason
 
 - **`audit` ("where did my writes land?")** — finance's, and genuinely novel. Deferred only because
