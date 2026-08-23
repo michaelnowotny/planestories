@@ -64,6 +64,8 @@ planestories ls --label ingestion --open           # fixed predicates compose wi
 planestories ls --epic DATA-100 --blocked --json   # missing epic id exits non-zero
 planestories count --epic DATA-100 --open          # always prints numerator + denominator
 planestories count --open --group-by status        # status|assignee|label|epic
+planestories audit --since 24h --context ce        # my recent writes, each stamped with instance
+planestories audit --since 2026-08-23T08:00:00Z --json
 planestories packet DATA-123                       # implementable brief for an agent (an epic emits all descendants)
 planestories critical-path --project X             # dependency floor in dev-days, slack, biggest lever
 planestories critical-path stories/q1.md --json
@@ -72,6 +74,10 @@ planestories critical-path stories/q1.md --json
 `ls` / `count` predicates are exactly `--open`, `--status`, `--label`, `--assignee`, `--epic`,
 `--flagged`, `--no-estimate`, and `--blocked`; there is no query grammar. Use `atlas --json` + `jq`
 for anything outside that surface. Both prefer a matching fresh cache and print its age.
+`audit` requires a fresh matching board cache for its bounded item list; run `board fetch` first.
+It fetches live activity only for cached items whose `updatedAt` is inside the window. The actor is
+the API key's owner (not a distinguishable tool), and comment/relation-only writes may not bump
+`updatedAt`; the report states those limits, its exact bound, board identity, and cache age.
 
 ## Health & hygiene
 

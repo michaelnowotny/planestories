@@ -47,11 +47,20 @@ describe("endpoint dialect", () => {
 		await client.getWorkItem("p1", "i1");
 		await client.getRelations("p1", "i1");
 		await client.listWorkItemComments("p1", "i1");
+		await client.listWorkItemActivities("p1", "i1");
 		await client.deleteWorkItem("p1", "i1");
 		for (const url of captured.urls) {
 			expect(url).toContain("/projects/p1/work-items/");
 			expect(url).not.toContain("/issues/");
 		}
+	});
+
+	test("current-user lookup is instance-level and independent of item dialect", async () => {
+		const client = makeClient("work-items");
+		const captured = captureFetch({ id: "user-1" });
+
+		expect(await client.getCurrentUser<{ id: string }>()).toEqual({ id: "user-1" });
+		expect(captured.urls).toEqual(["https://api.plane.so/api/v1/users/me/"]);
 	});
 
 	test("dialect does not leak into non-item paths (states, labels, projects)", async () => {

@@ -357,6 +357,11 @@ export class PlaneClient {
 		return this.request<T>("GET", "/api/instances/");
 	}
 
+	/** The user who owns the API key used by this client. */
+	getCurrentUser<T>(): Promise<T> {
+		return this.request<T>("GET", "/api/v1/users/me/");
+	}
+
 	listStates<T>(projectId: string): Promise<T[]> {
 		return this.listAll<T>(`/projects/${projectId}/states/`);
 	}

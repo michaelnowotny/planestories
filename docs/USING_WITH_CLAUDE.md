@@ -188,6 +188,14 @@ bun run src/cli/index.ts atlas --project "My Project" --no-dependencies    # fas
 bun run src/cli/index.ts show DATA-123
 bun run src/cli/index.ts show DATA-123 --json
 
+# Audit: recent activity attributed to this API key's OWNER, newest first, with the
+# Plane instance stamped on every row. Requires a fresh board cache so candidate
+# work items can be narrowed by updatedAt; it never silently walks the whole board.
+bun run src/cli/index.ts board fetch --project "My Project"
+bun run src/cli/index.ts audit --since 24h --context ce
+# This cannot distinguish planestories from MCP/UI writes sharing the key, and Plane
+# comment/relation-only edits need not bump updatedAt; the report states both limits.
+
 # Packet: emit a self-contained implementable brief for a coding agent from a board
 # ticket — description, acceptance criteria (board state), dependencies WITH their
 # current status, effort, parent epic, planning refs, + a machine-readable YAML header.

@@ -15,7 +15,9 @@ import { isCriterionChild } from "../sync/board-story.ts";
 import { announceTarget } from "./announce_target.ts";
 import {
 	BOARD_CACHE_MAX_AGE_MS,
+	BOARD_CACHE_SCHEMA_VERSION,
 	type BoardCache,
+	type BoardCacheWorkItem,
 	boardCacheMatchesTarget,
 	defaultBoardCachePath,
 	formatBoardCacheAge,
@@ -39,6 +41,8 @@ export interface BoardCacheSourceOptions {
 	staleOk?: boolean;
 	/** A partial refresh is a command failure, never a published cache or success. */
 	writeRequired?: boolean;
+	/** Refuse instead of falling back to a live whole-board enumeration. */
+	readRequired?: boolean;
 }
 
 export interface GraphSourceOptions {
@@ -80,6 +84,7 @@ export type GraphSourceProvenance =
 	| {
 			kind: "cache";
 			project: string;
+			projectId: string;
 			baseUrl: string;
 			workspaceSlug: string;
 			fetchedAt: string;
@@ -125,6 +130,17 @@ export class StaleBoardCacheError extends Error {
 	}
 }
 
+/** A bounded local read cannot silently turn into the whole-board live sweep. */
+export class RequiredBoardCacheError extends Error {
+	constructor(project: string, reason: string, refreshCommand: string) {
+		super(
+			`A fresh, readable board cache for "${project}" is required (${reason}); refusing to fetch the whole board implicitly. ` +
+				`Run: ${refreshCommand}`,
+		);
+		this.name = "RequiredBoardCacheError";
+	}
+}
+
 /**
  * The graph, reachable ONLY through a method that names what the caller is doing
  * with it.
@@ -155,6 +171,11 @@ export interface GraphSourceResult {
 	 * review, rather than being the silent default it used to be.
 	 */
 	acceptPartialGraph(reason: string): AtlasGraph;
+	/**
+	 * The cache's complete raw item inventory, including criterion children that
+	 * are deliberately folded out of AtlasGraph. Available only on a cache hit.
+	 */
+	requireCachedWorkItems(purpose: string): readonly BoardCacheWorkItem[];
 }
 
 /**
@@ -183,6 +204,9 @@ export async function resolveGraph(
 
 	if (options.boardCache?.refresh && options.boardCache.staleOk) {
 		throw new ConfigError("--refresh and --stale-ok are mutually exclusive.");
+	}
+	if (options.boardCache?.refresh && options.boardCache.readRequired) {
+		throw new ConfigError("A required cache read cannot also request a live refresh.");
 	}
 	if (options.boardCache?.refresh && options.dependencies === false) {
 		throw new ConfigError(
@@ -214,6 +238,7 @@ export async function resolveGraph(
 	if (!snapshotSource && options.boardCache && !options.boardCache.refresh) {
 		const cached = await readBoardCache(runtime.cachePath ?? defaultBoardCachePath(), {
 			warn: cacheWarn(runtime),
+			onInvalid: options.boardCache.readRequired ? "refuse" : "fetch-live",
 		});
 		if (
 			cached &&
@@ -227,7 +252,16 @@ export async function resolveGraph(
 			cacheLog(runtime)(formatCachedBoardState(cached, now));
 			const age = formatBoardCacheAge(cached, now);
 			if (isBoardCacheStale(cached, now, runtime.maxCacheAgeMs ?? BOARD_CACHE_MAX_AGE_MS)) {
-				if (!options.boardCache.staleOk) throw new StaleBoardCacheError(age);
+				if (!options.boardCache.staleOk) {
+					if (options.boardCache.readRequired) {
+						throw new RequiredBoardCacheError(
+							projectName,
+							`the matching cache is ${age} old`,
+							boardFetchCommand(options, projectName),
+						);
+					}
+					throw new StaleBoardCacheError(age);
+				}
 				cacheWarn(runtime)(
 					`⚠ Cached state is ${age} old — proceeding because --stale-ok was explicitly passed.`,
 				);
@@ -240,6 +274,15 @@ export async function resolveGraph(
 				coverage,
 				0,
 				cacheProvenance(cached),
+				undefined,
+				cached.items,
+			);
+		}
+		if (options.boardCache.readRequired) {
+			throw new RequiredBoardCacheError(
+				projectName,
+				"no matching cache was found",
+				boardFetchCommand(options, projectName),
 			);
 		}
 	}
@@ -314,7 +357,7 @@ export async function resolveGraph(
 		} else {
 			const now = (runtime.now ?? (() => new Date()))();
 			const cache: BoardCache = {
-				schemaVersion: 1,
+				schemaVersion: BOARD_CACHE_SCHEMA_VERSION,
 				fetchedAt: now.toISOString(),
 				instance: { baseUrl: config.baseUrl, workspaceSlug: config.workspaceSlug },
 				project: {
@@ -324,6 +367,12 @@ export async function resolveGraph(
 					selectedAs: projectName,
 				},
 				itemCount: index.items.length,
+				items: index.items.map((item) => ({
+					id: item.id,
+					identifier: `${project.identifier}-${item.sequenceId}`,
+					title: item.name,
+					updatedAt: item.updatedAt,
+				})),
 				dependencyCoverage: { kind: "complete" },
 				graph,
 			};
@@ -356,6 +405,7 @@ function cacheProvenance(cache: BoardCache): GraphSourceProvenance {
 	return {
 		kind: "cache",
 		project: cache.project.name,
+		projectId: cache.project.id,
 		baseUrl: cache.instance.baseUrl,
 		workspaceSlug: cache.instance.workspaceSlug,
 		fetchedAt: cache.fetchedAt,
@@ -386,6 +436,7 @@ function graphSourceResult(
 	relationRecovered: number,
 	provenance: GraphSourceProvenance,
 	client?: PlaneClient,
+	cachedWorkItems?: readonly BoardCacheWorkItem[],
 ): GraphSourceResult {
 	return {
 		client,
@@ -399,5 +450,21 @@ function graphSourceResult(
 		acceptPartialGraph(_reason: string): AtlasGraph {
 			return graph;
 		},
+		requireCachedWorkItems(purpose: string): readonly BoardCacheWorkItem[] {
+			if (!cachedWorkItems) {
+				throw new ConfigError(
+					`Cannot use ${purpose}: this graph did not come from the local board cache.`,
+				);
+			}
+			return cachedWorkItems;
+		},
 	};
+}
+
+function boardFetchCommand(options: GraphSourceOptions, projectName: string): string {
+	const args = ["planestories", "board", "fetch"];
+	if (options.config) args.push("--config", JSON.stringify(options.config));
+	if (options.context) args.push("--context", JSON.stringify(options.context));
+	args.push("--project", JSON.stringify(projectName));
+	return args.join(" ");
 }

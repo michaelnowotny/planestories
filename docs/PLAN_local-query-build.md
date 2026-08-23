@@ -233,6 +233,12 @@ finance runs several times per session.
 
 ### `audit` — DECIDED 2026-08-23: the activity endpoint, narrowed by `updatedAt`
 
+**Built in Unit 8.** The implementation requires a fresh schema-v2 board cache, retains a minimal
+all-work-item inventory (including criterion children folded out of the atlas graph), and refuses
+rather than falling through to a live whole-board enumeration. Its output also states the measured
+`updatedAt` caveat: comment/relation-only writes need not bump the parent item, so the bounded result
+is evidence rather than a complete activity export.
+
 Measured on CE first, because the answer turned on facts:
 
 | scope | CE |
