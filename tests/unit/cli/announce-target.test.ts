@@ -21,6 +21,7 @@ const config = {
 	workspaceSlug: "archimedes",
 	baseUrl: "https://plane.porcupine.works",
 	dialect: "work-items",
+	dialectSource: "detected",
 	defaultProject: null,
 	defaultLabels: [],
 	sourceLabel: null,
@@ -33,6 +34,7 @@ describe("resolved-target announcement", () => {
 		expect(out).toContain("plane.porcupine.works");
 		expect(out).toContain("archimedes");
 		expect(out).toContain("Data Platform");
+		expect(out).toContain("dialect work-items (detected)");
 		expect(out).toContain("--context ce");
 	});
 
@@ -73,5 +75,24 @@ describe("resolved-target announcement", () => {
 		);
 		expect(out).toContain("context ce (implicit)");
 		expect(out).not.toContain("bare PLANE_* env");
+	});
+
+	test("configured and fallback dialect provenance are explicit", () => {
+		const configured = capture(() =>
+			announceTarget({ ...config, dialectSource: "configured" } as unknown as ResolvedConfig, "ce"),
+		);
+		expect(configured).toContain("dialect work-items (configured)");
+
+		const fallback = capture(() =>
+			announceTarget(
+				{
+					...config,
+					dialect: "issues",
+					dialectSource: "fallback",
+				} as unknown as ResolvedConfig,
+				"ce",
+			),
+		);
+		expect(fallback).toContain("dialect issues (fallback)");
 	});
 });

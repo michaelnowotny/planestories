@@ -2,7 +2,8 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient } from "../../plane/client.ts";
+import { announceTarget } from "../announce_target.ts";
+import { connectTarget } from "../target_client.ts";
 
 interface ProjectRow {
 	name: string;
@@ -36,17 +37,9 @@ export function registerProjectsCommand(program: Command) {
 		)
 		.action(async (options) => {
 			try {
-				const config = await loadConfig({ configPath: options.config, context: options.context });
-				const client = createPlaneClient({
-					apiKey: config.apiKey,
-					workspaceSlug: config.workspaceSlug,
-					baseUrl: config.baseUrl,
-					maxRetries: config.maxRetries,
-					dialect: config.dialect,
-					requestsPerMinute: config.apiRateLimit,
-					rateHeadroom: config.rateHeadroom,
-					maxConcurrency: config.maxConcurrency,
-				});
+				const loaded = await loadConfig({ configPath: options.config, context: options.context });
+				const { config, client } = await connectTarget(loaded);
+				announceTarget(config, options.context);
 
 				const projects = await client.listProjects<ProjectRow>();
 				if (projects.length === 0) {

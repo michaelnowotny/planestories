@@ -86,11 +86,16 @@ describe("loadConfig", () => {
 			apiKey: "plane_api_test1234567890abcdef",
 			workspaceSlug: "engineering-ws",
 			baseUrl: "https://api.plane.so",
-			dialect: "issues",
+			dialect: undefined,
+			dialectSource: undefined,
 			defaultProject: "Q1 2026 Release",
 			defaultLabels: ["User Story"],
 			sourceLabel: null,
 			maxRetries: 5,
+			contextName: undefined,
+			apiRateLimit: undefined,
+			maxConcurrency: undefined,
+			rateHeadroom: undefined,
 		} satisfies ResolvedConfig);
 	});
 

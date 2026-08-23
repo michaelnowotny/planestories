@@ -66,6 +66,8 @@ planestories critical-path stories/q1.md --json
 ```bash
 planestories lint stories/*.md                     # offline, 10 mechanical rules; strict by default
 planestories lint stories/*.md --warn-only         # downgrade to warnings, exit 0
+planestories capabilities --context ce             # read-only deployment feature/dialect probe
+planestories capabilities --context ce --json      # the same measured result for scripts
 planestories doctor --project X                    # board rot; non-zero on findings (CI gate)
 planestories doctor --project X --house-rules      # + missing Effort, prose deps with no relation
 planestories groom --project X                     # close orphaned criterion sub-items (dry-run default)
@@ -109,8 +111,8 @@ planestories critical-path --from-snapshot data.snapshot.json
 {
   "defaultContext": "ce",
   "contexts": [
-    { "name": "ce",    "workspaceSlug": "archimedes", "baseUrl": "https://plane.example/api/v1",
-      "dialect": "work-items", "apiRateLimit": "60/minute", "defaultProject": "Data Platform" },
+    { "name": "ce",    "workspaceSlug": "archimedes", "baseUrl": "https://plane.example",
+      "apiRateLimit": "60/minute", "defaultProject": "Data Platform" },
     { "name": "cloud", "workspaceSlug": "myworkspace" }
   ]
 }
@@ -128,14 +130,18 @@ non-alphanumerics → `_`.
 
 ```bash
 PLANE_CTX_CE_API_KEY=...        PLANE_CTX_CE_WORKSPACE_SLUG=...
-PLANE_CTX_CE_BASE_URL=...       PLANE_CTX_CE_DIALECT=work-items
+PLANE_CTX_CE_BASE_URL=...
 PLANE_CTX_CE_API_RATE_LIMIT="60/minute"
 ```
 
-Every board-touching command prints where it is going before doing anything:
+When `dialect` is absent, planestories uses a bounded read-only relation probe once per context.
+Set `dialect: "issues" | "work-items"` (or `PLANE_CTX_<NAME>_DIALECT`) only to override detection;
+an explicit value always wins. An inconclusive probe falls back to `issues` with a warning.
+
+Every board-touching command prints the resolved target and dialect before its main operation:
 
 ```
-→ plane.example · workspace archimedes · project Data Platform · context ce (implicit)
+→ plane.example · workspace archimedes · project Data Platform · dialect work-items (detected) · context ce (implicit)
 ```
 
 ---
@@ -179,7 +185,8 @@ too — they are not just prose.
 
 **Community Edition has no server-side work-item filtering** — no PQL, no `count_work_items`. Pull
 the board once (`atlas --json`) and query locally. Relations live under `/work-items/` on CE and
-`/issues/` on Cloud; a relation 404 is a dialect mistake, not a missing API. Details and
+`/issues/` on Cloud; planestories detects that relation dialect read-only. Run
+`planestories capabilities` for measured support/absence on the configured deployment. Details and
 reproductions: [`PLANE_CAPABILITIES.md`](./PLANE_CAPABILITIES.md).
 
 ## Things that will bite you

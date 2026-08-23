@@ -2,8 +2,8 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, PlaneApiError, ReplicateError } from "../../errors.ts";
-import { createPlaneClient } from "../../plane/client.ts";
 import { announceTarget } from "../announce_target.ts";
+import { connectTarget } from "../target_client.ts";
 
 interface ProjectRow {
 	id: string;
@@ -141,18 +141,9 @@ export function registerRenameProjectCommand(program: Command): void {
 				if (options.name === undefined && options.identifier === undefined) {
 					throw new ConfigError("rename-project requires at least one of --name or --identifier");
 				}
-				const config = await loadConfig({ configPath: options.config, context: options.context });
+				const loaded = await loadConfig({ configPath: options.config, context: options.context });
+				const { config, client } = await connectTarget(loaded, { project: options.project });
 				announceTarget(config, options.context, options.project);
-				const client = createPlaneClient({
-					apiKey: config.apiKey,
-					workspaceSlug: config.workspaceSlug,
-					baseUrl: config.baseUrl,
-					maxRetries: config.maxRetries,
-					dialect: config.dialect,
-					requestsPerMinute: config.apiRateLimit,
-					rateHeadroom: config.rateHeadroom,
-					maxConcurrency: config.maxConcurrency,
-				});
 				const result = await renameProject(client, {
 					project: options.project,
 					name: options.name,

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { registerAtlasCommand } from "./commands/atlas.ts";
+import { registerCapabilitiesCommand } from "./commands/capabilities.ts";
 import { registerCriticalPathCommand } from "./commands/critical-path.ts";
 import { registerDeleteCommand } from "./commands/delete.ts";
 import { registerDiffCommand } from "./commands/diff.ts";
@@ -32,6 +33,7 @@ program
 	.enablePositionalOptions();
 
 registerImportCommand(program);
+registerCapabilitiesCommand(program);
 registerExportCommand(program);
 registerDeleteCommand(program);
 registerSetCommand(program);

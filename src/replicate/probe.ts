@@ -4,6 +4,11 @@ import type {
 	PlaneIssueRelations,
 	PlaneRelationKind,
 } from "../plane/client.ts";
+import {
+	DialectDetectionError,
+	detectReadDialect,
+	type ReadDialectClient,
+} from "../plane/dialect.ts";
 import { isTransientPlaneError } from "./create.ts";
 
 export interface ProbeClient {
@@ -166,17 +171,6 @@ export async function detectDialect(
 	return verdict;
 }
 
-/** The read surface a SOURCE-side dialect check needs (zero writes). */
-export interface ReadDialectClient {
-	readonly dialect: PlaneEndpointDialect;
-	listWorkItems<T>(
-		projectId: string,
-		query?: Record<string, string | number | boolean | undefined>,
-	): Promise<T[]>;
-	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
-	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
-}
-
 /**
  * Read-only dialect detection for the SNAPSHOT side: a snapshot must not write
  * to the source, so the discriminator is the source project's own items — live
@@ -190,38 +184,17 @@ export async function detectSourceDialect(
 	factory: (dialect: PlaneEndpointDialect) => ReadDialectClient,
 	projectId: string,
 ): Promise<PlaneEndpointDialect> {
-	let emptyFallback: PlaneEndpointDialect | null = null;
-	for (const dialect of ["issues", "work-items"] as const) {
-		const client = factory(dialect);
-		let live: Array<{ id: string }>;
-		try {
-			live = await client.listWorkItems<{ id: string }>(projectId);
-		} catch (error) {
-			if (isNotFoundError(error)) continue;
-			throw error;
+	try {
+		return (await detectReadDialect(factory, projectId, { includeArchived: true })).dialect;
+	} catch (error) {
+		if (error instanceof DialectDetectionError) {
+			throw new ReplicateError(
+				"Neither the /issues/ nor the /work-items/ path family serves the full read surface " +
+					"(items + relations) for this project — cannot snapshot it.",
+			);
 		}
-		let probeItem = live[0] ?? null;
-		if (!probeItem) {
-			const archived = await client.listArchivedWorkItems<{ id: string }>(projectId);
-			probeItem = archived?.[0] ?? null;
-		}
-		if (!probeItem) {
-			emptyFallback ??= dialect;
-			continue;
-		}
-		try {
-			await client.getRelations(projectId, probeItem.id);
-			return dialect;
-		} catch (error) {
-			if (isNotFoundError(error)) continue;
-			throw error;
-		}
+		throw error;
 	}
-	if (emptyFallback) return emptyFallback;
-	throw new ReplicateError(
-		"Neither the /issues/ nor the /work-items/ path family serves the full read surface " +
-			"(items + relations) for this project — cannot snapshot it.",
-	);
 }
 
 /** Full surface = item create AND the relations endpoint respond under this dialect. */

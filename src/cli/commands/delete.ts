@@ -3,9 +3,9 @@ import type { Command } from "commander";
 import { glob } from "glob";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient } from "../../plane/client.ts";
 import { type DeleteSummary, deleteStories } from "../../sync/deleter.ts";
 import { announceTarget } from "../announce_target.ts";
+import { connectTarget } from "../target_client.ts";
 
 async function resolveGlobs(patterns: string[]): Promise<string[]> {
 	const allFiles: string[] = [];
@@ -102,19 +102,10 @@ export function registerDeleteCommand(program: Command) {
 				const externalSource =
 					options.externalSource === true ? "planestories" : options.externalSource || undefined;
 
-				const config = await loadConfig({ configPath: options.config, context: options.context });
+				const loaded = await loadConfig({ configPath: options.config, context: options.context });
+				const { config, client } = await connectTarget(loaded, { project: options.project });
 
 				announceTarget(config, options.context, options.project);
-				const client = createPlaneClient({
-					apiKey: config.apiKey,
-					workspaceSlug: config.workspaceSlug,
-					baseUrl: config.baseUrl,
-					maxRetries: config.maxRetries,
-					dialect: config.dialect,
-					requestsPerMinute: config.apiRateLimit,
-					rateHeadroom: config.rateHeadroom,
-					maxConcurrency: config.maxConcurrency,
-				});
 
 				const summary = await deleteStories(client, {
 					config,

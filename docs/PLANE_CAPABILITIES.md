@@ -8,7 +8,7 @@ with the reproduction, not read off documentation.
 prints its target first:
 
 ```
-→ plane.porcupine.works · workspace archimedes · project Data Platform · --context ce
+→ plane.porcupine.works · workspace archimedes · project Data Platform · dialect work-items (detected) · --context ce
 ```
 
 ---
@@ -26,9 +26,12 @@ dialect=work-items   getRelations: OK
 dialect=issues       getRelations: 404
 ```
 
-Same instance, same key. Set `dialect` on the context (`"dialect": "work-items"` or
-`PLANE_CTX_<NAME>_DIALECT=work-items`). Since 0.5.0 a relation 404 carries a hint naming the
-dialect in use and the one to try.
+Same instance, same key. When `dialect` is absent, planestories samples one existing work item and
+uses a relation `GET` to select the endpoint family once per context. An explicit context value
+(`"dialect": "work-items"` or `PLANE_CTX_<NAME>_DIALECT=work-items`) overrides detection. An
+inconclusive probe falls back to `issues` and warns instead of silently treating a failed call as
+evidence. Run `planestories capabilities [--context X]` to see the selected dialect and the
+deployment's measured capability matrix.
 
 **A 404 here is a routing mistake, not a missing feature.**
 

@@ -29,6 +29,8 @@ export interface PlaneClientOptions {
 	sleep?: (ms: number) => Promise<void>;
 	/** Work-item REST path family. Default "issues" (see PlaneEndpointDialect). */
 	dialect?: PlaneEndpointDialect;
+	/** INTERNAL: whether dialect came from explicit user configuration. */
+	dialectConfigured?: boolean;
 	/**
 	 * Invoked before EVERY HTTP attempt of a non-GET request — including each
 	 * internal retry after backoff, which a caller-side wrapper cannot see. A
@@ -128,6 +130,7 @@ export class PlaneClient {
 	readonly retryBaseDelayMs: number;
 	readonly maxRetryDelayMs: number;
 	readonly dialect: PlaneEndpointDialect;
+	readonly dialectConfigured: boolean;
 	private readonly sleep: (ms: number) => Promise<void>;
 	private readonly beforeWriteAttempt?: () => void;
 	private readonly options: PlaneClientOptions;
@@ -146,6 +149,7 @@ export class PlaneClient {
 		this.retryBaseDelayMs = options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
 		this.maxRetryDelayMs = options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
 		this.dialect = options.dialect ?? "issues";
+		this.dialectConfigured = options.dialectConfigured ?? options.dialect !== undefined;
 		this.sleep = options.sleep ?? defaultSleep;
 		this.beforeWriteAttempt = options.beforeWriteAttempt;
 		this.now = options.now ?? Date.now;
@@ -192,7 +196,12 @@ export class PlaneClient {
 
 	/** A sibling client for another endpoint dialect, retaining this instance's rate profile. */
 	withDialect(dialect: PlaneEndpointDialect): PlaneClient {
-		return new PlaneClient({ ...this.options, dialect, pacer: this.pacer });
+		return new PlaneClient({
+			...this.options,
+			dialect,
+			dialectConfigured: this.dialectConfigured,
+			pacer: this.pacer,
+		});
 	}
 
 	/** The work-item API path segment for this instance's endpoint dialect. */
@@ -343,6 +352,11 @@ export class PlaneClient {
 		return this.listAll<T>("/projects/");
 	}
 
+	/** Instance identity/version, outside the workspace-scoped API. */
+	getInstance<T>(): Promise<T> {
+		return this.request<T>("GET", "/api/instances/");
+	}
+
 	listStates<T>(projectId: string): Promise<T[]> {
 		return this.listAll<T>(`/projects/${projectId}/states/`);
 	}
@@ -417,6 +431,34 @@ export class PlaneClient {
 
 	listWorkItems<T>(projectId: string, query: RequestOptions["query"] = {}): Promise<T[]> {
 		return this.listAll<T>(`/projects/${projectId}/${this.itemsSegment}/`, query);
+	}
+
+	/** One bounded page used to obtain a relation-probe item without a board sweep. */
+	async sampleWorkItem<T>(projectId: string): Promise<T | null> {
+		const page = await this.request<PlanePage<T> | T[]>(
+			"GET",
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/`),
+			{ query: { per_page: 1 } },
+		);
+		if (Array.isArray(page)) return page[0] ?? null;
+		if (!page || !Array.isArray(page.results)) {
+			throw new PlaneApiError("Plane work-item sample returned an invalid response envelope");
+		}
+		return page.results[0] ?? null;
+	}
+
+	/** Read-only PQL availability probe using the measured, valid expression. */
+	async probePql(projectId: string): Promise<void> {
+		await this.request<unknown>(
+			"GET",
+			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/`),
+			{ query: { per_page: 1, pql: "stateGroup IN openStates()" } },
+		);
+	}
+
+	/** Read-only workspace count-endpoint availability probe. */
+	async probeWorkspaceCount(): Promise<void> {
+		await this.request<unknown>("GET", this.workspacePath("/work-items/count/"));
 	}
 
 	/**

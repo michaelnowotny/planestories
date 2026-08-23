@@ -169,6 +169,10 @@ bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
 # (a blocked_by/blocks/relates_to whose target work item was deleted / left the project).
 bun run src/cli/index.ts doctor --project "My Project" --house-rules
 
+# Read-only deployment facts: edition/version, selected dialect, relations, PQL, count endpoint.
+# Negatives and failed/inconclusive probes are distinct; add --json for machine-readable output.
+bun run src/cli/index.ts capabilities --context ce
+
 # Replicate: take a dated, self-checked backup and retain the newest 14 files.
 bun run src/cli/index.ts replicate backup --from cloud -p "My Project" --dir backups --retain 14
 
@@ -201,8 +205,9 @@ bun run src/cli/index.ts epic DATA-1
 # _WORKSPACE_SLUG / _BASE_URL / _DIALECT (e.g. PLANE_CTX_CE_* for a self-hosted CE). Bare
 # PLANE_API_KEY/... apply ONLY when no --context is given — a named context never
 # falls back to the bare vars, so dual-instance work cannot cross credentials.
-# Set PLANE_CTX_CE_DIALECT=work-items when CE serves relations under /work-items/;
-# the default dialect is issues, and invalid present values fail configuration loading.
+# Leave dialect absent to auto-detect it once per context with a bounded read-only probe.
+# PLANE_CTX_CE_DIALECT=work-items is an explicit override and always wins; an inconclusive
+# probe warns and falls back to issues. Invalid present values fail configuration loading.
 
 # Discover the workspace's projects (identifier + name) — use either with --project:
 bun run src/cli/index.ts projects

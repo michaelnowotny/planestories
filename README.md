@@ -139,8 +139,8 @@ planestories replicate freshness --from cloud --snapshot data.snapshot.json --de
 Multi-instance work is first-class: named credential **contexts**
 (`--context ce`, configured via `PLANE_CTX_<NAME>_*` env vars) keep cloud and
 self-hosted credentials strictly separated, and the client speaks both Plane REST
-dialects (`/issues/` and `/work-items/`) — configurable per context, with probe-driven
-auto-selection during replicate runs. See
+dialects (`/issues/` and `/work-items/`) — read-only auto-detected once per context unless an
+explicit context override is present. See
 [`docs/REPLICATE.md`](docs/REPLICATE.md).
 
 ## Quick start
@@ -367,6 +367,16 @@ choosing the right `--project` value.
 
 ```
 planestories projects
+```
+
+### `capabilities`
+
+Read-only probes the configured deployment and reports host, workspace, edition, version, selected
+dialect, relation create/list/remove, PQL, and the workspace count endpoint. Negative and
+indeterminate results are explicit; `--json` emits the same facts machine-readably.
+
+```
+planestories capabilities [--context <name>] [--json]
 ```
 
 ### `set`
@@ -628,11 +638,12 @@ config defining exactly ONE context uses it (no flag needed for the single-insta
 otherwise the command stops and lists the names rather than guessing. A `defaultContext` naming a
 context that does not exist is a startup error, never a quiet fallback to a different installation.
 
-Every board-touching command prints its resolved target before doing any work — host, workspace,
-project, and which context, marked `(implicit)` when you did not name one:
+Every board-touching command prints its resolved target and endpoint dialect before its main
+operation — host, workspace, project, and which context, marked `(implicit)` when you did not name
+one:
 
 ```
-→ plane.example.internal · workspace archimedes · project Data Platform · context ce (implicit)
+→ plane.example.internal · workspace archimedes · project Data Platform · dialect work-items (detected) · context ce (implicit)
 ```
 
 **Credential isolation is the point of contexts, and it holds however the context was chosen.**
@@ -644,9 +655,11 @@ your shell for one installation cannot silently authenticate a command aimed at 
 `replicate --from` / `--to` are deliberately never defaulted: a migration between two instances
 must not silently pick a side.
 
-Set optional `dialect` to `"work-items"` (or `PLANE_CTX_<NAME>_DIALECT=work-items`) when a
-self-hosted Plane instance serves dependency relations under `/work-items/`. It defaults to
-`"issues"`; a present value other than those two choices is rejected.
+Leave optional `dialect` absent for normal use: planestories performs a bounded, read-only relation
+probe once per context and uses the detected endpoint family for the rest of the run. Set it to
+`"work-items"` or `"issues"` (or use `PLANE_CTX_<NAME>_DIALECT`) only as an explicit override;
+configured values always win. If detection is inconclusive, planestories warns and falls back to
+the historical `"issues"` default. A present value other than those two choices is rejected.
 
 For a self-hosted instance, set `apiRateLimit` to Plane's own `API_KEY_RATE_LIMIT` value, for
 example `"60/minute"` (a numeric requests-per-minute value is also accepted). planestories paces

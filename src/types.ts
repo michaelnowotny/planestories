@@ -1,5 +1,7 @@
 import type { PlaneEndpointDialect } from "./plane/client.ts";
 
+export type PlaneDialectSource = "configured" | "detected" | "fallback";
+
 /** Plane work item priority values. */
 export type PlanePriority = "urgent" | "high" | "medium" | "low" | "none";
 
@@ -123,8 +125,10 @@ export interface ResolvedConfig {
 	apiKey: string;
 	workspaceSlug: string;
 	baseUrl: string;
-	/** Always resolved by loadConfig; optional here for legacy constructed test configs. */
+	/** Undefined means runtime auto-detection is required. */
 	dialect?: PlaneEndpointDialect;
+	/** How the effective dialect was selected; populated by the live-target connector. */
+	dialectSource?: PlaneDialectSource;
 	defaultProject: string | null;
 	defaultLabels: string[];
 	/** Source label to tag created items with, or null when disabled. */
