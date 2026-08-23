@@ -249,6 +249,52 @@ describe("effortDays + priority (Cockpit model additions)", () => {
 	});
 });
 
+describe("board timestamps", () => {
+	test("file source: createdAt and updatedAt are null because markdown has no board timestamps", () => {
+		const graph = buildAtlasFromFile(FILE, "x.md");
+		const epic = graph.nodes[0]!;
+		const story = epic.children[0]!;
+
+		expect(epic.createdAt).toBeNull();
+		expect(epic.updatedAt).toBeNull();
+		expect(story.createdAt).toBeNull();
+		expect(story.updatedAt).toBeNull();
+	});
+
+	test("board source: carries UTC timestamps and keeps missing values null", async () => {
+		const P = "p1";
+		const c = makeFakeClient({
+			projects: [{ id: P, name: "Proj", identifier: "ENG" }],
+			workItems: {
+				[P]: [
+					{
+						id: "dated",
+						sequence_id: 1,
+						name: "Dated story",
+						created_at: "2026-08-22T20:15:30-07:00",
+						updated_at: "2026-08-23T04:05:06Z",
+						state: { name: "Backlog", group: "backlog" },
+					},
+					{
+						id: "undated",
+						sequence_id: 2,
+						name: "Undated story",
+						state: { name: "Backlog", group: "backlog" },
+					},
+				],
+			},
+		}).client;
+		const index = await fetchProjectIndex(c, P, "ENG");
+		const graph = buildAtlasFromBoard(c, P, "ENG", "Proj", index);
+		const byIdentifier = new Map(graph.nodes.map((node) => [node.identifier, node]));
+
+		expect(byIdentifier.get("ENG-1")?.createdAt).toBe("2026-08-23T03:15:30.000Z");
+		expect(byIdentifier.get("ENG-1")?.updatedAt).toBe("2026-08-23T04:05:06.000Z");
+		expect(byIdentifier.get("ENG-2")?.createdAt).toBeNull();
+		expect(byIdentifier.get("ENG-2")?.updatedAt).toBeNull();
+	});
+});
+
 describe("assignee vocabulary (filter chips)", () => {
 	test("collects distinct assignees, sorted, nulls excluded", async () => {
 		const P = "p1";

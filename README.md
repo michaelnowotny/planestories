@@ -432,7 +432,7 @@ planestories doctor --from-snapshot backups/data.ce-archimedes.20260817-052043Z.
 `--house-rules` flags open non-epic stories without a valid `**Effort:** N dev-days` line,
 and open work whose board-authored `Depends on:` / `Blocks:` prose lacks the matching relation.
 
-`--from-snapshot` (also on `atlas`, `export`, `packet`, `epic`) analyses a snapshot file instead of the live board — **and needs no credentials at all**, so it genuinely works on a laptop with no `.env`: **zero API calls, works
+`--from-snapshot` (also on `atlas`, `export`, `show`, `packet`, `epic`) analyses a snapshot file instead of the live board — **and needs no credentials at all**, so it genuinely works on a laptop with no `.env`: **zero API calls, works
 offline, and possible when the instance is rate-limiting you**. On a 2,558-item board a live
 `doctor` needs ~800 requests and can take many minutes (or fail outright against a throttled
 instance); from a snapshot the same analysis takes under a second. The report always states the
@@ -478,10 +478,27 @@ a keyboard contact list; lock a planet for its story card (criteria included) or
 for its dossier (progress ring, status breakdown, effort totals, boundary supply lines,
 heaviest stories, Open-in-Plane). Chips filter by status group, label, **assignee**, or
 flagged-only. `--json` emits the identical graph (nodes, dependency edges, effort,
-status, criteria) for tooling. See [docs/ATLAS.md](./docs/ATLAS.md).
+status, criteria, and board `createdAt`/`updatedAt` timestamps) for tooling. See
+[docs/ATLAS.md](./docs/ATLAS.md).
 
 > Inspired by Ijonas Kisselbach's Project Atlas in linearstories, rethought for Plane as
 > the cockpit design and shipped as a zero-dependency offline artifact.
+
+### `show`
+
+A compact, read-only answer about one work item — fields, titled parent, direct-child status
+split, titled/statused relation counterparts, and criteria progress. It deliberately omits the
+description body; use `packet` when you need the full implementable brief.
+
+```
+planestories show DATA-123
+planestories show DATA-123 --json
+planestories show DATA-123 --from-snapshot data.snapshot.json
+```
+
+An unknown identifier exits non-zero and names the board searched, so `show` is safe to use as
+an existence guard in a script. Every answer states its board provenance; snapshot JSON also
+embeds the snapshot timestamp.
 
 ### `critical-path`
 

@@ -45,6 +45,10 @@ export interface FetchedWorkItem {
 	id: string;
 	sequenceId: number;
 	name: string;
+	/** Plane creation instant normalized to ISO-8601 UTC, or null when unavailable. */
+	createdAt: string | null;
+	/** Plane update instant normalized to ISO-8601 UTC, or null when unavailable. */
+	updatedAt: string | null;
 	/** Description as markdown (converted from Plane's description_html). */
 	description: string | undefined;
 	priority: PlanePriority | undefined;
@@ -360,11 +364,18 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 
 	const estimateRaw = item.point;
 	const estimate = typeof estimateRaw === "number" ? estimateRaw : undefined;
+	const normalizeInstant = (value: unknown): string | null => {
+		if (typeof value !== "string" || value.trim().length === 0) return null;
+		const milliseconds = Date.parse(value);
+		return Number.isNaN(milliseconds) ? null : new Date(milliseconds).toISOString();
+	};
 
 	return {
 		id: item.id as string,
 		sequenceId: item.sequence_id as number,
 		name: item.name as string,
+		createdAt: normalizeInstant(item.created_at),
+		updatedAt: normalizeInstant(item.updated_at),
 		description: htmlToMarkdown(item.description_html as string | undefined) || undefined,
 		priority,
 		estimate,

@@ -179,6 +179,11 @@ bun run src/cli/index.ts atlas /path/to/stories.md  --open   # from a file (no c
 bun run src/cli/index.ts atlas --project "My Project"         # from the live board
 bun run src/cli/index.ts atlas --project "My Project" --no-dependencies    # fast: skip supply lanes
 
+# Show: compact one-item board answer (no description body). Includes titled parent,
+# child status split, titled/statused relations, criteria progress, and provenance.
+bun run src/cli/index.ts show DATA-123
+bun run src/cli/index.ts show DATA-123 --json
+
 # Packet: emit a self-contained implementable brief for a coding agent from a board
 # ticket — description, acceptance criteria (board state), dependencies WITH their
 # current status, effort, parent epic, planning refs, + a machine-readable YAML header.

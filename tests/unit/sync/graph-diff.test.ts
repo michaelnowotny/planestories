@@ -15,6 +15,8 @@ function story(id: string, identifier: string | null, over: Partial<AtlasNode> =
 		assignee: null,
 		effortDays: null,
 		priority: null,
+		createdAt: null,
+		updatedAt: null,
 		criteria: [],
 		quality: null,
 		children: [],

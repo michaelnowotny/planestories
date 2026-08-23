@@ -29,6 +29,8 @@ const board: FetchedWorkItem = {
 	id: "one",
 	sequenceId: 1,
 	name: "Old",
+	createdAt: null,
+	updatedAt: null,
 	description: "Goodbye",
 	priority: "low",
 	estimate: 1,

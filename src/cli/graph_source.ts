@@ -33,6 +33,18 @@ export interface GraphSourceOptions {
 	json?: boolean;
 }
 
+/** Durable provenance for a graph-backed answer, including snapshot age where applicable. */
+export type GraphSourceProvenance =
+	| { kind: "file"; project: string; path: string }
+	| { kind: "live"; project: string; baseUrl: string; workspaceSlug: string }
+	| {
+			kind: "snapshot";
+			project: string;
+			baseUrl: string;
+			workspaceSlug: string;
+			takenAt: string;
+	  };
+
 /** Thrown by `requireCompleteGraph`. Carries the coverage so callers can explain it. */
 export class IncompleteGraphError extends Error {
 	constructor(
@@ -62,6 +74,7 @@ export class IncompleteGraphError extends Error {
 export interface GraphSourceResult {
 	/** The client used, when one was — for `reportPacing`. Absent offline. */
 	client?: PlaneClient;
+	provenance: GraphSourceProvenance;
 	coverage: DependencyCoverage;
 	/** Lookups recovered by the sequential second pass (informational). */
 	relationRecovered: number;
@@ -94,7 +107,12 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 		// A stories file carries its own `blocks:` lines, so the dependency
 		// structure is fully present by construction — nothing was fetched, and
 		// nothing was skipped either.
-		return graphSourceResult(buildAtlasFromFile(content, options.file), { kind: "complete" }, 0);
+		const graph = buildAtlasFromFile(content, options.file);
+		return graphSourceResult(graph, { kind: "complete" }, 0, {
+			kind: "file",
+			project: graph.project,
+			path: options.file,
+		});
 	}
 
 	const config = options.fromSnapshot
@@ -169,10 +187,26 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 				? { kind: "partial", failures: relationFailures }
 				: { kind: "complete" };
 
+	const provenance: GraphSourceProvenance = snapshotSource
+		? {
+				kind: "snapshot",
+				project: projectName,
+				baseUrl: snapshotSource.baseUrl,
+				workspaceSlug: snapshotSource.workspaceSlug,
+				takenAt: snapshotSource.takenAt,
+			}
+		: {
+				kind: "live",
+				project: projectName,
+				baseUrl: config.baseUrl,
+				workspaceSlug: config.workspaceSlug,
+			};
+
 	return graphSourceResult(
 		buildAtlasFromBoard(client, project.id, project.identifier, projectName, index, relationsById),
 		coverage,
 		relationRecovered,
+		provenance,
 		client,
 	);
 }
@@ -181,10 +215,12 @@ function graphSourceResult(
 	graph: AtlasGraph,
 	coverage: DependencyCoverage,
 	relationRecovered: number,
+	provenance: GraphSourceProvenance,
 	client?: PlaneClient,
 ): GraphSourceResult {
 	return {
 		client,
+		provenance,
 		coverage,
 		relationRecovered,
 		requireCompleteGraph(purpose: string): AtlasGraph {

@@ -52,6 +52,10 @@ export interface AtlasNode {
 	effortDays: number | null;
 	/** Plane priority ("urgent" | "high" | "medium" | "low"), null when unset. */
 	priority: string | null;
+	/** Board creation instant in ISO-8601 UTC; null for file sources or missing board data. */
+	createdAt: string | null;
+	/** Board update instant in ISO-8601 UTC; null for file sources or missing board data. */
+	updatedAt: string | null;
 	/** Acceptance criteria (stories only). */
 	criteria: AtlasCriterion[];
 	/** Light spec-quality assessment (stories only). */
@@ -267,6 +271,8 @@ export function buildAtlasFromFile(fileContent: string, filePath: string): Atlas
 				assignee: story.assignee,
 				effortDays: story.effortDays,
 				priority: story.priority,
+				createdAt: null,
+				updatedAt: null,
 				criteria: isEpic ? [] : criteria,
 				quality: isEpic ? null : assessQuality({ criteria, description: narrative }),
 				children: [],
@@ -391,6 +397,8 @@ export function buildAtlasFromBoard(
 				assignee: item.assigneeEmail ?? item.assigneeDisplayName ?? null,
 				effortDays: parseEffortDays(item.description ?? ""),
 				priority: item.priority ?? null,
+				createdAt: item.createdAt,
+				updatedAt: item.updatedAt,
 				criteria: isEpic ? [] : criteria,
 				quality: isEpic ? null : assessQuality({ criteria, description: item.description ?? "" }),
 				children: [],

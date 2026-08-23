@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAtlasFromFile } from "../../../src/atlas/model.ts";
 import { atlasJsonPayload, renderAtlasHtml } from "../../../src/atlas/render.ts";
+import { serializeSnapshot } from "../../../src/replicate/snapshot.ts";
+import { sampleSnapshot } from "../replicate/fixtures.ts";
 
 /**
  * `atlas --json` is a DOCUMENTED, machine-facing output format with, until now,
@@ -192,7 +194,7 @@ describe("atlas --json — the CLI contract", () => {
 		});
 	});
 
-	test("absent effort/priority/assignee stay NULL, never 0 or empty string", () => {
+	test("absent effort/priority/assignee/timestamps stay NULL, never fabricated values", () => {
 		withFixture((dir, stories) => {
 			const out = join(dir, "graph.json");
 			runCli(["atlas", stories, "--json", "-o", out], dir);
@@ -205,6 +207,33 @@ describe("atlas --json — the CLI contract", () => {
 			expect(storage.effortDays).toBeNull();
 			expect(storage.priority).toBeNull();
 			expect(storage.assignee).toBeNull();
+			expect(storage.createdAt).toBeNull();
+			expect(storage.updatedAt).toBeNull();
+		});
+	});
+
+	test("board-sourced JSON carries timestamps and still equals the HTML embed", () => {
+		withFixture((dir) => {
+			const snapshotPath = join(dir, "board.snapshot.json");
+			writeFileSync(snapshotPath, serializeSnapshot(sampleSnapshot()));
+			const jsonPath = join(dir, "board.json");
+			const htmlPath = join(dir, "board.html");
+			expect(
+				runCli(["atlas", "--from-snapshot", snapshotPath, "--json", "-o", jsonPath], dir).code,
+			).toBe(0);
+			expect(runCli(["atlas", "--from-snapshot", snapshotPath, "-o", htmlPath], dir).code).toBe(0);
+
+			const emitted = JSON.parse(readFileSync(jsonPath, "utf8"));
+			const dated = emitted.nodes.find(
+				(node: { identifier: string }) => node.identifier === "SRC-1",
+			);
+			expect(dated.createdAt).toBe("2024-01-01T00:00:00.000Z");
+			expect(dated.updatedAt).toBe("2024-02-01T00:00:00.000Z");
+
+			const html = readFileSync(htmlPath, "utf8");
+			const match = html.match(/const GRAPH = ([\s\S]*?);\n/);
+			const embedded = JSON.parse((match?.[1] as string).replace(/\\u003c/g, "<"));
+			expect(embedded).toEqual(emitted);
 		});
 	});
 
