@@ -6,6 +6,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { resolveGraph } from "../graph_source.ts";
 import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
+import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
@@ -72,7 +73,7 @@ export function registerAtlasCommand(program: Command) {
 			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
 			false,
 		)
-		.action(async (file: string | undefined, options) => {
+		.action(async (file: string | undefined, options, command: Command) => {
 			try {
 				// ONE graph-construction path, shared with `critical-path` and `trend`.
 				// This used to be a 70-line twin of resolveGraph; two sites assembling
@@ -80,6 +81,7 @@ export function registerAtlasCommand(program: Command) {
 				// where five call sites did one job and one did it differently.
 				const source = await resolveGraph({
 					file,
+					selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
 					config: options.config,
 					context: options.context,
 					project: options.project,

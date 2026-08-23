@@ -13,6 +13,7 @@ import {
 import { formatGraphSourceProvenance } from "../graph_provenance.ts";
 import { IncompleteGraphError, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
+import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
 interface QueryCommandOptions {
@@ -29,9 +30,17 @@ interface QueryCommandOptions {
 	assignee?: string;
 	epic?: string;
 	flagged?: boolean;
-	noEstimate?: boolean;
+	/**
+	 * Commander stores `--no-estimate` under the UN-prefixed name: absent → true,
+	 * passed → false. Reading a `noEstimate` key here made the documented flag a
+	 * silent no-op, so `count --no-estimate` printed the unfiltered count.
+	 * `import.ts` already spells this mapping out for `--no-write-back`.
+	 */
+	estimate?: boolean;
 	blocked?: boolean;
 	groupBy?: "status" | "assignee" | "label" | "epic";
+	/** Refusal text composed from this command's own registered routes. */
+	selectProjectHelp?: string;
 }
 
 function predicates(options: QueryCommandOptions): QueryPredicates {
@@ -42,35 +51,47 @@ function predicates(options: QueryCommandOptions): QueryPredicates {
 		assignee: options.assignee,
 		epic: options.epic,
 		flagged: options.flagged === true,
-		noEstimate: options.noEstimate === true,
+		noEstimate: options.estimate === false,
 		blocked: options.blocked === true,
 	};
 }
 
 function addQueryOptions(command: Command): Command {
-	return command
-		.option("-c, --config <path>", "Config file path")
-		.option(
-			"--context <name>",
-			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
-		)
-		.option("-p, --project <name>", "Project to query (defaults to defaultProject)")
-		.option("--open", "Only stories not completed or cancelled", false)
-		.option("--status <state>", "Only stories with this exact status name (case-insensitive)")
-		.option("--label <name>", "Only stories carrying this label (case-insensitive)")
-		.option("--assignee <name>", "Only stories assigned to this email/display name")
-		.option("--epic <identifier>", "Only leaf stories beneath this epic, including nested epics")
-		.option("--flagged", "Only stories with a measured spec-quality finding", false)
-		.option("--no-estimate", "Only stories without an **Effort:** estimate", false)
-		.option("--blocked", "Only open stories with at least one unfinished blocker", false)
-		.option("--json", "Emit the same answer as machine-readable JSON", false)
-		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
-		.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)
-		.option(
-			"--stale-ok",
-			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
-			false,
-		);
+	return (
+		command
+			.option("-c, --config <path>", "Config file path")
+			.option(
+				"--context <name>",
+				"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
+			)
+			.option("-p, --project <name>", "Project to query (defaults to defaultProject)")
+			.option("--open", "Only stories not completed or cancelled", false)
+			.option("--status <state>", "Only stories with this exact status name (case-insensitive)")
+			.option("--label <name>", "Only stories carrying this label (case-insensitive)")
+			.option("--assignee <name>", "Only stories assigned to this email/display name")
+			.option("--epic <identifier>", "Only leaf stories beneath this epic, including nested epics")
+			.option("--flagged", "Only stories with a measured spec-quality finding", false)
+			// No default: a `false` default here would make `estimate === false` true on
+			// every run, silently turning EVERY ls/count into an unestimated-only query.
+			.option("--no-estimate", "Only stories without an **Effort:** estimate")
+			.option("--blocked", "Only open stories with at least one unfinished blocker", false)
+			.option("--json", "Emit the same answer as machine-readable JSON", false)
+			.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
+			.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)
+			.option(
+				"--stale-ok",
+				"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
+				false,
+			)
+	);
+}
+
+/** Attach the refusal composed from THIS command's registered routes. */
+function withSelectProjectHelp(
+	options: QueryCommandOptions,
+	command: Command,
+): QueryCommandOptions {
+	return { ...options, selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)) };
 }
 
 async function resolveQuery(options: QueryCommandOptions) {
@@ -93,6 +114,7 @@ async function resolveQuery(options: QueryCommandOptions) {
 				},
 		dependencies,
 		json: options.json === true,
+		selectProjectHelp: options.selectProjectHelp,
 	});
 	const graph = options.blocked
 		? source.requireCompleteGraph("the --blocked predicate")
@@ -174,9 +196,9 @@ export function registerLsCommand(program: Command): void {
 			.description(
 				"List leaf stories using fixed, AND-composed local board predicates. Read-only.",
 			),
-	).action(async (options: QueryCommandOptions) => {
+	).action(async (options: QueryCommandOptions, command: Command) => {
 		try {
-			const { source, result } = await resolveQuery(options);
+			const { source, result } = await resolveQuery(withSelectProjectHelp(options, command));
 			if (options.json) {
 				process.stdout.write(
 					`${JSON.stringify({ ...result, provenance: source.provenance }, null, "\t")}\n`,
@@ -207,9 +229,9 @@ export function registerCountCommand(program: Command): void {
 				"epic",
 			]),
 		)
-		.action(async (options: QueryCommandOptions) => {
+		.action(async (options: QueryCommandOptions, command: Command) => {
 			try {
-				const { source, result } = await resolveQuery(options);
+				const { source, result } = await resolveQuery(withSelectProjectHelp(options, command));
 				const groups = options.groupBy ? groupQueryItems(result.items, options.groupBy) : [];
 				if (options.json) {
 					process.stdout.write(

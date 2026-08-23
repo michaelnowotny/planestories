@@ -4,11 +4,14 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { defaultBoardCachePath } from "../board_cache.ts";
 import { type GraphSourceResult, type GraphSourceRuntime, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
+import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 
 export interface BoardFetchOptions {
 	config?: string;
 	context?: string;
 	project?: string;
+	/** Refusal text composed from this command's own registered routes. */
+	selectProjectHelp?: string;
 }
 
 /** Shared action seam so the real `board fetch` orchestration is no-network testable. */
@@ -22,6 +25,7 @@ export async function fetchBoardToCache(
 			context: options.context,
 			project: options.project,
 			boardCache: { refresh: true, writeRequired: true },
+			selectProjectHelp: options.selectProjectHelp,
 		},
 		runtime,
 	);
@@ -57,12 +61,13 @@ export function registerBoardCommand(program: Command): void {
 			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
 		)
 		.option("-p, --project <name>", "Project to cache (defaults to defaultProject)")
-		.action(async (options) => {
+		.action(async (options, command: Command) => {
 			try {
 				const source = await fetchBoardToCache({
 					config: options.config,
 					context: options.context,
 					project: options.project,
+					selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
 				});
 				// Publication already required complete coverage; keep the type-level
 				// invariant explicit at the command boundary too.

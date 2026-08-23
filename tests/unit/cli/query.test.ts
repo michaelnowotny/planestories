@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { serializeSnapshot } from "../../../src/replicate/snapshot.ts";
+import { computeSnapshotDigest, serializeSnapshot } from "../../../src/replicate/snapshot.ts";
 import { sampleSnapshot } from "../replicate/fixtures.ts";
 
 function runCli(args: string[], cwd: string): { code: number; out: string; err: string } {
@@ -115,6 +115,85 @@ test("count group-by emits denominators in text and JSON", () => {
 			denominator: output.count,
 		});
 	});
+});
+
+/**
+ * `--no-estimate` shipped as a NO-OP: Commander maps a `--no-x` boolean onto
+ * `options.x`, so `options.noEstimate` was never set and the predicate read
+ * `undefined === true` on every run. `count --no-estimate --open` printed the
+ * unfiltered open count and an operator would quote it as the unestimated pile.
+ *
+ * 921 tests did not catch it because the pure function was tested directly with
+ * `{ noEstimate: true }`, and the CLI test only asserted `--help` CONTAINS the
+ * string. Neither invokes the flag — so these go through the real CLI.
+ *
+ * The second test is the other half: dropping the `false` default is what makes
+ * the mapping usable, and keeping it would have inverted the predicate into
+ * "unestimated only, always".
+ */
+function mixedEffortSnapshot(): string {
+	const snapshot = sampleSnapshot();
+	const estimated = snapshot.items.find((candidate) => candidate.sequenceId === 6);
+	if (!estimated) throw new Error("fixture changed: expected an item with sequenceId 6");
+	estimated.descriptionHtml = "<p>Description 6</p><p><strong>Effort:</strong> 3 dev-days</p>";
+	snapshot.digest = computeSnapshotDigest(snapshot);
+	return serializeSnapshot(snapshot);
+}
+
+test("--no-estimate actually filters, and names itself truthfully in --json", () => {
+	const directory = mkdtempSync(join(tmpdir(), "planestories-noestimate-"));
+	try {
+		const snapshotPath = join(directory, "board.snapshot.json");
+		writeFileSync(snapshotPath, mixedEffortSnapshot());
+
+		const all = runCli(["ls", "--from-snapshot", snapshotPath, "--json"], directory);
+		const unestimated = runCli(
+			["ls", "--no-estimate", "--from-snapshot", snapshotPath, "--json"],
+			directory,
+		);
+
+		expect(all.code).toBe(0);
+		expect(unestimated.code).toBe(0);
+		const everything = JSON.parse(all.out);
+		const filtered = JSON.parse(unestimated.out);
+
+		// The predicate must report itself; `predicates` is what a script reads back.
+		expect(everything.predicates.noEstimate).toBe(false);
+		expect(filtered.predicates.noEstimate).toBe(true);
+
+		// SRC-6 carries **Effort:** 3 dev-days and must drop out; the rest stay.
+		const identifiers = (result: { items: Array<{ identifier: string | null }> }) =>
+			result.items.map((row) => row.identifier);
+		expect(identifiers(everything)).toContain("SRC-6");
+		expect(identifiers(filtered)).not.toContain("SRC-6");
+		expect(identifiers(filtered)).toContain("SRC-7");
+		expect(filtered.count).toBe(everything.count - 1);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
+});
+
+test("count without --no-estimate counts everything, estimated rows included", () => {
+	// Guards the fix's own failure mode: reading `options.estimate === false`
+	// while a `false` DEFAULT remains would silently make every count an
+	// unestimated-only count.
+	const directory = mkdtempSync(join(tmpdir(), "planestories-noestimate-default-"));
+	try {
+		const snapshotPath = join(directory, "board.snapshot.json");
+		writeFileSync(snapshotPath, mixedEffortSnapshot());
+
+		const plain = runCli(["count", "--from-snapshot", snapshotPath, "--json"], directory);
+		const filtered = runCli(
+			["count", "--no-estimate", "--from-snapshot", snapshotPath, "--json"],
+			directory,
+		);
+
+		expect(plain.code).toBe(0);
+		expect(filtered.code).toBe(0);
+		expect(JSON.parse(plain.out).count).toBeGreaterThan(JSON.parse(filtered.out).count);
+	} finally {
+		rmSync(directory, { recursive: true, force: true });
+	}
 });
 
 test("ls and count help expose only the fixed predicate surface", () => {

@@ -168,7 +168,17 @@ interface RawNode {
 	node: AtlasNode;
 }
 
-/** Attach nodes to their parents by key; anything without a resolvable parent is a root. */
+/**
+ * Attach nodes to their parents by key; anything without a resolvable parent is
+ * a root.
+ *
+ * Every member of a parent CYCLE has a resolvable parent, so none of them
+ * becomes a root and the whole cycle — plus everything beneath it — drops out of
+ * the tree. Measured: a two-story file whose stories name each other produced
+ * zero roots and zero counts, so `count` answered `0 of 0 stories` for a file
+ * with two stories in it. Silently losing work is the failure mode this
+ * codebase refuses everywhere else, so it refuses here too.
+ */
 function assembleTree(raws: RawNode[]): AtlasNode[] {
 	const byKey = new Map<string, RawNode>();
 	for (const r of raws) {
@@ -182,6 +192,28 @@ function assembleTree(raws: RawNode[]): AtlasNode[] {
 		} else {
 			roots.push(r.node);
 		}
+	}
+
+	// Reachability, not recursion: the walk itself carries a visited set so a
+	// cycle is reported rather than overflowing the stack on the way to the
+	// report.
+	const reachable = new Set<AtlasNode>();
+	const pending = [...roots];
+	while (pending.length > 0) {
+		const node = pending.pop() as AtlasNode;
+		if (reachable.has(node)) continue;
+		reachable.add(node);
+		pending.push(...node.children);
+	}
+	const trapped = raws.filter((r) => !reachable.has(r.node));
+	if (trapped.length > 0) {
+		const named = trapped
+			.map((r) => r.node.identifier ?? r.node.title)
+			.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+		throw new Error(
+			`Parent cycle: ${named.join(", ")} — each of these has a parent inside the group, so none of them can be reached from the top of the board. ` +
+				"Break the loop by clearing one item's parent. (Refusing rather than dropping them: they would otherwise be missing from every count and query with no warning.)",
+		);
 	}
 	return roots;
 }

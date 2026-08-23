@@ -5,6 +5,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { type CriticalPathResult, computeCriticalPath } from "../../sync/critical_path.ts";
 import { IncompleteGraphError, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
+import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
@@ -109,10 +110,11 @@ export function registerCriticalPathCommand(program: Command): void {
 		.option("-p, --project <name>", "Analyse a live Plane project instead of a file")
 		.option("--json", "Emit the full result (chain, slack, counts) as JSON", false)
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
-		.action(async (file: string | undefined, options) => {
+		.action(async (file: string | undefined, options, command: Command) => {
 			try {
 				const source = await resolveGraph({
 					file,
+					selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
 					config: options.config,
 					context: options.context,
 					project: options.project,
