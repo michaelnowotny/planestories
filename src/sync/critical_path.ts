@@ -108,28 +108,96 @@ export interface CriticalPathComputed {
 
 export type CriticalPathResult = CriticalPathRefused | CriticalPathComputed;
 
-interface Leaf {
+export interface ProjectedLeaf {
 	node: AtlasNode;
 	duration: number;
 	done: boolean;
+	/** Structural epic ancestors, outermost first. */
+	ancestors: AtlasNode[];
 }
 
-/** Flatten to leaves — epics are containers, so only leaves carry duration. */
-function collectLeaves(nodes: AtlasNode[], into: Map<string, Leaf>): void {
-	for (const node of nodes) {
-		if (node.kind === "epic" || (node.children?.length ?? 0) > 0) {
-			collectLeaves(node.children ?? [], into);
-			continue;
+/**
+ * Shared leaf-level view of the Atlas hierarchy and blocking edges.
+ *
+ * `critical-path`, `count`, and `ls` all need the same two non-trivial rules:
+ * epics are containers rather than work, and an edge touching an epic applies
+ * to its descendant leaves. Keeping that projection here means a filter cannot
+ * quietly disagree with the schedule graph about either rule.
+ */
+export interface LeafDependencyProjection {
+	leaves: Map<string, ProjectedLeaf>;
+	nodesByIdentifier: Map<string, AtlasNode>;
+	successors: Map<string, string[]>;
+	predecessors: Map<string, string[]>;
+	connected: Set<string>;
+	expandedEdges: number;
+}
+
+export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjection {
+	const leaves = new Map<string, ProjectedLeaf>();
+	const leavesUnder = new Map<string, string[]>();
+	const nodesByIdentifier = new Map<string, AtlasNode>();
+
+	const collect = (node: AtlasNode, ancestors: AtlasNode[]): string[] => {
+		if (node.identifier) {
+			nodesByIdentifier.set(node.identifier.trim().toUpperCase(), node);
 		}
-		const done = node.statusGroup === "completed" || node.statusGroup === "cancelled";
-		into.set(node.id, {
-			node,
-			// Finished work is free; unestimated work contributes 0 to the arithmetic
-			// and is COUNTED so the caller can label the total a lower bound.
-			duration: done ? 0 : (node.effortDays ?? 0),
-			done,
-		});
+
+		if (node.kind !== "epic" && (node.children?.length ?? 0) === 0) {
+			const done = node.statusGroup === "completed" || node.statusGroup === "cancelled";
+			leaves.set(node.id, {
+				node,
+				// Finished work is free; unestimated work contributes 0 to the arithmetic
+				// and is COUNTED so the caller can label the total a lower bound.
+				duration: done ? 0 : (node.effortDays ?? 0),
+				done,
+				ancestors,
+			});
+			return [node.id];
+		}
+
+		const childAncestors = node.kind === "epic" ? [...ancestors, node] : ancestors;
+		const out: string[] = [];
+		for (const child of node.children ?? []) out.push(...collect(child, childAncestors));
+		leavesUnder.set(node.id, out);
+		return out;
+	};
+	for (const node of graph.nodes) collect(node, []);
+
+	const endpoints = (id: string): string[] => (leaves.has(id) ? [id] : (leavesUnder.get(id) ?? []));
+	const successors = new Map<string, string[]>();
+	const predecessors = new Map<string, string[]>();
+	const connected = new Set<string>();
+	let expandedEdges = 0;
+	for (const edge of graph.edges) {
+		// "blocks" only: `relates` carries no ordering, so using it would invent a
+		// constraint that nobody declared.
+		if (edge.type !== "blocks") continue;
+		const sources = endpoints(edge.source);
+		const targets = endpoints(edge.target);
+		if (sources.length === 0 || targets.length === 0) continue;
+		if (sources.length > 1 || targets.length > 1) {
+			expandedEdges += sources.length * targets.length - 1;
+		}
+		for (const source of sources) {
+			for (const target of targets) {
+				if (source === target) continue;
+				successors.set(source, [...(successors.get(source) ?? []), target]);
+				predecessors.set(target, [...(predecessors.get(target) ?? []), source]);
+				connected.add(source);
+				connected.add(target);
+			}
+		}
 	}
+
+	return {
+		leaves,
+		nodesByIdentifier,
+		successors,
+		predecessors,
+		connected,
+		expandedEdges,
+	};
 }
 
 /** Depth-first cycle detection over `blocks` edges. Returns identifier cycles. */
@@ -182,50 +250,10 @@ function findCycles(
  * without a second data path.
  */
 export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
-	const leaves = new Map<string, Leaf>();
-	collectLeaves(graph.nodes, leaves);
-
-	// Descendant leaves per container, so a `blocks` edge touching an EPIC is
-	// expanded rather than dropped. People really do write "this spike blocks the
-	// epic", and silently discarding that edge removes a constraint from a
-	// schedule calculation — the floor comes out too short.
-	const leavesUnder = new Map<string, string[]>();
-	const collect = (node: AtlasNode): string[] => {
-		if (leaves.has(node.id)) return [node.id];
-		const out: string[] = [];
-		for (const child of node.children ?? []) out.push(...collect(child));
-		leavesUnder.set(node.id, out);
-		return out;
-	};
-	for (const node of graph.nodes) collect(node);
-
-	const endpoints = (id: string): string[] => (leaves.has(id) ? [id] : (leavesUnder.get(id) ?? []));
+	const { leaves, successors, predecessors, connected, expandedEdges } =
+		projectLeafDependencies(graph);
 
 	const doneLeaves = [...leaves.values()].filter((l) => l.done).length;
-
-	const successors = new Map<string, string[]>();
-	const predecessors = new Map<string, string[]>();
-	const connected = new Set<string>();
-	let expandedEdges = 0;
-	for (const edge of graph.edges) {
-		// "blocks" only: `relates` carries no ordering, so using it would invent a
-		// constraint that nobody declared.
-		if (edge.type !== "blocks") continue;
-		const sources = endpoints(edge.source);
-		const targets = endpoints(edge.target);
-		if (sources.length === 0 || targets.length === 0) continue;
-		if (sources.length > 1 || targets.length > 1)
-			expandedEdges += sources.length * targets.length - 1;
-		for (const s of sources) {
-			for (const t of targets) {
-				if (s === t) continue;
-				successors.set(s, [...(successors.get(s) ?? []), t]);
-				predecessors.set(t, [...(predecessors.get(t) ?? []), s]);
-				connected.add(s);
-				connected.add(t);
-			}
-		}
-	}
 
 	const ids = [...leaves.keys()];
 	const label = (id: string) => leaves.get(id)?.node.identifier ?? leaves.get(id)?.node.title ?? id;
@@ -322,7 +350,7 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 	for (let id = tail; id !== null; id = base.from.get(id) ?? null) chainIds.unshift(id);
 
 	const chain: CriticalPathNode[] = chainIds.map((id) => {
-		const leaf = leaves.get(id) as Leaf;
+		const leaf = leaves.get(id) as ProjectedLeaf;
 		return {
 			identifier: leaf.node.identifier,
 			title: leaf.node.title,

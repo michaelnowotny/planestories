@@ -2,7 +2,7 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { buildShowItem, renderShowText } from "../../sync/show.ts";
-import { type GraphSourceProvenance, resolveGraph } from "../graph_source.ts";
+import { formatGraphSourceProvenance, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
@@ -20,19 +20,6 @@ function handleError(error: unknown): never {
 		console.error(chalk.red(`Error: ${String(error)}`));
 	}
 	process.exit(1);
-}
-
-function formatProvenance(provenance: GraphSourceProvenance): string {
-	if (provenance.kind === "snapshot") {
-		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · snapshot taken ${provenance.takenAt}`;
-	}
-	if (provenance.kind === "cache") {
-		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · cached at ${provenance.fetchedAt}`;
-	}
-	if (provenance.kind === "live") {
-		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · live`;
-	}
-	return `${provenance.project} · file ${provenance.path}`;
 }
 
 export function registerShowCommand(program: Command) {
@@ -87,7 +74,7 @@ export function registerShowCommand(program: Command) {
 						`${JSON.stringify({ ...item, provenance: source.provenance }, null, "\t")}\n`,
 					);
 				} else {
-					console.log(renderShowText(item, formatProvenance(source.provenance)));
+					console.log(renderShowText(item, formatGraphSourceProvenance(source.provenance)));
 				}
 				if (source.client) reportPacing(source.client);
 			} catch (error) {

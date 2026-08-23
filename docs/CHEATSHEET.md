@@ -60,10 +60,18 @@ planestories epic DATA-100                         # rollup: status split, compl
 planestories show DATA-123                         # compact one-item answer; no description body
 planestories show DATA-123 --json                  # the same answer for scripts
 planestories show DATA-123 --refresh               # live re-fetch + cache replacement
+planestories ls --label ingestion --open           # fixed predicates compose with AND
+planestories ls --epic DATA-100 --blocked --json   # missing epic id exits non-zero
+planestories count --epic DATA-100 --open          # always prints numerator + denominator
+planestories count --open --group-by status        # status|assignee|label|epic
 planestories packet DATA-123                       # implementable brief for an agent (an epic emits all descendants)
 planestories critical-path --project X             # dependency floor in dev-days, slack, biggest lever
 planestories critical-path stories/q1.md --json
 ```
+
+`ls` / `count` predicates are exactly `--open`, `--status`, `--label`, `--assignee`, `--epic`,
+`--flagged`, `--no-estimate`, and `--blocked`; there is no query grammar. Use `atlas --json` + `jq`
+for anything outside that surface. Both prefer a matching fresh cache and print its age.
 
 ## Health & hygiene
 
