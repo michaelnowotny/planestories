@@ -199,7 +199,7 @@ planestories inconsistent [--epic X]               # Done items with a non-Done 
 
 ---
 
-## Units 1–5: BUILT and merged (2026-08-23)
+## Units 1–8: ALL BUILT and merged (2026-08-23) — the plan is complete
 
 Built by Codex across three dispatches, gate-verified and smoke-tested against the live CE board by
 the orchestrator, then reviewed by Grok in one round with the bar declared up front

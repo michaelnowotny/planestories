@@ -30,7 +30,7 @@ const program = new Command();
 program
 	.name("planestories")
 	.description("Bridge markdown user stories and Plane work items")
-	.version("0.5.0")
+	.version("0.6.0")
 	// Options bind to the command they FOLLOW. Required so `replicate` can carry
 	// its own one-shot options while its snapshot/apply subcommands own theirs
 	// (a parent would otherwise consume `-p`/`-o` before the subcommand parses).

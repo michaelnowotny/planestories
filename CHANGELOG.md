@@ -18,6 +18,60 @@ The format is loosely [Keep a Changelog](https://keepachangelog.com/); versions 
 
 ---
 
+## [0.6.0] — 2026-08-23
+
+**Neither 0.5.0 nor 0.6.0 has been published to npm** (publishing is interactive — WebAuthn). If you
+publish now, publish 0.6.0; 0.5.0's section below still describes what it contained.
+
+The release that answers board questions without PQL. Community Edition has no server-side
+work-item filtering at all — see `docs/PLANE_CAPABILITIES.md` — so planestories fetches the board
+once and answers locally, at depths a row filter could not reach.
+
+### Added
+
+- **`capabilities`** — edition, version, dialect, and a measured yes/no for relation
+  create/list/**remove**, PQL and the count endpoint. States the NEGATIVES explicitly, because the
+  failure mode this exists to prevent is a confident wrong claim about *why* something did not work.
+- **Auto-detected dialect** — Plane serves work items under `/work-items/` (CE) or `/issues/`
+  (Cloud); an unset dialect used to 404 every relation call and read as a missing API. Detected once
+  per context now; an explicit setting always wins, and a failed probe degrades loudly.
+- **`show <identifier>`** — one item, human-shaped, with parent and relation TITLES. Exits non-zero
+  on a missing identifier, so it works as an existence guard in a script.
+- **Board cache** — `board fetch` writes `.planestories/board.json` atomically. Reads print its age
+  and REFUSE past a staleness threshold rather than serving stale data silently. The cache is bound
+  to instance + workspace + project, so it can never answer about a different board.
+  `show` went from **2m34s / 885 requests to 0.103s**.
+- **`ls` / `count`** — fixed predicates, AND-composed, no query grammar. A count always prints its
+  denominator (`57 open of 69`), because a bare number gets quoted without one.
+- **`ready`** — open items whose blockers are all done, ranked by what each unblocks.
+- **`inconsistent`** — Done items with a non-Done blocker, plus the flip side. The verb that finds a
+  *wrong* board rather than a slow one; it found a real one on its first live run.
+- **`blocked` / `orphans` / `abandoned`** — stuck work with its blocker chain; items that block
+  nothing and are blocked by nothing (neglect as a graph property, not an age one); open items under
+  an abandoned parent.
+- **`audit`** — writes by the current actor, newest first, stamped with the instance they landed on.
+- **`createdAt` / `updatedAt`** on the graph and in `atlas --json`, nullable and never fabricated.
+
+### Fixed
+
+- A relation 404 now names the endpoint dialect in use and the one to try, instead of reading like a
+  dead API. Two sessions independently concluded the relation API did not exist.
+- One un-removable relation edge no longer poisons an entire import. Plane CE exposes relation
+  create and list but **not remove**, and a single failure used to abort the whole reconciliation —
+  skipping every create and withholding every story's hash, so the run repeated forever.
+- `Exported 0 stories` no longer prints in green with exit 0. An empty export now says whether the
+  project index was empty (usually the wrong board) or the filters excluded everything, and names
+  requested identifiers that do not exist — exiting non-zero, so it guards a script.
+
+### Known limits
+
+- **Relation REMOVAL is impossible on CE.** `blocked_by` edits are one-way; remove the link in the
+  Plane UI. Reported per-edge by `import`.
+- **`audit` narrows by `updatedAt`**, and comment- or relation-only writes need not bump it, so the
+  window can miss them. Stated in the output.
+
+---
+
 ## [0.5.0] — 2026-08-19
 
 The release that made the tool survive a real cutover: the `DATA` board moved from Plane Cloud to

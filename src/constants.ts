@@ -10,4 +10,4 @@ export const EXTERNAL_SOURCE = "planestories";
 
 /** Tool version recorded in snapshots/journals. Keep in sync with package.json
  *  and the program.version() call in cli/index.ts. */
-export const TOOL_VERSION = "0.5.0";
+export const TOOL_VERSION = "0.6.0";

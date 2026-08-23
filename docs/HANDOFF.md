@@ -329,6 +329,109 @@ red first. Ordered as the roadmap sections that produced them.
    `--recreate-target` AND `--allow-divergent-target`.
 2. The CLI no longer forces an exit; it prints a linger notice instead (see below).
 
+## 8e. ⚠ WHERE TO PICK UP (2026-08-23) — READ THIS FIRST, IT SUPERSEDES §8d
+
+**State: `main` @ `43f3d5f` + a version bump. 921 tests, zero biome findings, clean tree, pushed.
+Version 0.6.0 in all three places. `docs/PLAN_local-query-build.md` is COMPLETE — all eight units
+built, merged and live-smoke-tested.**
+
+### The single most important thing to do first
+
+**One Grok review round over units 6–8** (`ls`/`count`, the five graph verbs, `audit`). They are
+gate-green and I smoke-tested them against the live CE board, but they carry **less scrutiny than
+units 1–5**, which got a review that returned APPROVE. That difference is real: on the previous
+branch, review round 3 found a P0 in code that had already passed round 1.
+
+```bash
+git worktree add --detach /tmp/wt HEAD        # NEVER let a worktree carry .env
+~/PycharmProjects/finance_csv_importer/scripts/external_review.sh grok /tmp/wt <brief> <report>
+```
+
+Follow the protocol in `AGENTS.md` § "Review protocol": **declare the bar in the brief** (P0/P1
+block, P2 records), **one round**, and go again only for a P0/P1 that a previous FIX introduced. Do
+NOT ask the brief for "another instance of a pattern" — that primes a finding you then mistake for
+evidence.
+
+### Then, in order
+
+1. **The seven P2s from the units 1–5 review**, listed in `PLAN_local-query-build.md`. Two are worth
+   more than their rank: `capabilities` infers relation create/remove from a dialect heuristic
+   rather than measuring it (in the one command whose purpose is not making confident claims from
+   indirect evidence), and `atlas` artifacts carry no `fetchedAt` (the whole argument for the age
+   stamp is that an artifact outlives the stderr beside it).
+2. **Publish.** `npm publish` is interactive (WebAuthn) — the operator must be at the keyboard.
+   Before tagging, resolve the tag trap: `v1.0.0`/`v1.1.0` are inherited from upstream linearstories
+   and ARE ancestors of `main`; `v1.2.0`–`v1.4.0` are not on `main` at all. Either way `v1.4.0`
+   semver-sorts above `v0.6.0`, so a GitHub release cut from `v0.6.0` will not be marked "Latest".
+   Drop the inherited tags or renumber — operator's call.
+3. **Relay a live finding to the finance session** (see below).
+
+### What exists now that did not before
+
+Twelve new commands. `capabilities` · `show` · `board fetch` · `ls` · `count` · `ready` ·
+`inconsistent` · `blocked` · `orphans` · `abandoned` · `audit`, plus auto-detected dialect and
+`createdAt`/`updatedAt` on the graph. Rationale in `docs/DESIGN_local-query.md`; per-unit acceptance
+criteria in `docs/PLAN_local-query-build.md`; deployment facts in `docs/PLANE_CAPABILITIES.md`;
+every command on one page in `docs/CHEATSHEET.md`.
+
+**`inconsistent` found a real defect on the live board its first run**, and it belongs to the
+finance session, not to us:
+
+```
+DATA-2512 [Done] — unfinished blocker: DATA-2448 [Backlog]
+```
+
+That is exactly the shape the research session described (an arc declared closed on half its
+evidence). **Relay it; do not write to their board from here.**
+
+### The three facts that have cost four sessions hours each
+
+All in `docs/PLANE_CAPABILITIES.md` with reproductions. Read it before concluding any Plane API is
+missing:
+
+1. Relations live under `/work-items/` on CE and `/issues/` on Cloud. A relation 404 is a ROUTING
+   mistake. (0.6.0 now attaches a hint to that 404.)
+2. `blocked_by`/`blocks` are RELATIONS; parent/child is HIERARCHY. Different endpoints. A child
+   count never touches the relation API.
+3. Cloud and self-hosted CE are different instances with different boards, and a tool pointed at the
+   wrong one returns plausible STALE data rather than an error. `claude mcp list` reports
+   "✔ Connected" for a config it health-checks in a FRESH process — not for the connection your
+   session holds.
+
+**CE has no server-side work-item filtering at all** — no PQL, no `count_work_items`, permanently
+(the rejection is unconditional; there is no gate to open). That is *why* the local-query surface
+exists. **Relation REMOVAL is also absent on CE**, so `blocked_by` edits are one-way.
+
+### Orchestration lessons from this session, in priority order
+
+- **Parallel Codex dispatch has a cost I under-weighted.** Two builds from the same base
+  independently extracted the SAME shared projection out of `critical_path.ts` in different shapes —
+  four conflicts in a core file. I aborted rather than hand-resolve, merged the others, and
+  re-dispatched with "use the existing projection, do not extract a second one" as the binding
+  constraint. It then reported doing exactly that. **Serialise anything that touches a shared
+  module; parallelise only genuinely disjoint work.**
+- **Verify, do not read the report.** Codex reports were accurate every time, but a green gate
+  proves its own tests pass, not that they test the right thing. Re-run the gate in the worktree,
+  again after merge, then smoke-test against the live board — which Codex structurally CANNOT do,
+  since worktrees carry no `.env`. That last step is the orchestrator's whole value.
+- **Codex surfaced a limitation the design missed**: `audit` narrows by `updatedAt`, and comment- or
+  relation-only writes need not bump it. Read the "anything you could NOT do" section of a build
+  report carefully; that is where the real information is.
+- **A warning is not nothing.** A biome warning survived a commit that claimed the gate was green,
+  because warnings do not change the exit code. Zero findings is the bar.
+
+### Known-open, smaller
+
+- The embedded-script guard is STATIC (call sites + assignments), not executing. Its three known
+  holes are listed under §8d's "Known-open". Do NOT build the regex tokenizer — that was tried and
+  invented four phantom findings.
+- `packet`/`epic`/`doctor`/`critical-path` do not read the board cache; they stay live.
+- Interpenetration on atlas drag: scoped bodies cannot repel unscoped ones. Accepted knowingly.
+- planestories work is **not tracked in Plane** — these docs are the record. Do not go looking for
+  tickets.
+
+---
+
 ## 8d. ⚠ WHERE TO PICK UP (2026-08-18) — READ THIS FIRST, IT SUPERSEDES §8c
 
 **State: `feat/critical-path` MERGED to `main` after round 5 returned APPROVE. 770 tests green,
