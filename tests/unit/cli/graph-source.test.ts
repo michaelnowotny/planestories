@@ -152,5 +152,6 @@ describe("resolveGraph — coverage contract", () => {
 		expect(Object.hasOwn(source, "graph")).toBe(false);
 		expect(typeof source.requireCompleteGraph).toBe("function");
 		expect(typeof source.acceptPartialGraph).toBe("function");
+		expect(typeof source.requireCachedWorkItems).toBe("function");
 	});
 });

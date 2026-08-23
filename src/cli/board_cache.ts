@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import type { AtlasGraph, AtlasNode, DependencyCoverage } from "../atlas/model.ts";
 import { findRepoRoot } from "./output_path.ts";
 
-export const BOARD_CACHE_SCHEMA_VERSION = 1 as const;
+export const BOARD_CACHE_SCHEMA_VERSION = 2 as const;
 export const BOARD_CACHE_MAX_AGE_MS = 60 * 60 * 1_000;
 
 export interface BoardCacheInstance {
@@ -20,6 +20,20 @@ export interface BoardCacheProject {
 }
 
 /**
+ * The minimal all-work-item inventory used to bound live per-item reads.
+ *
+ * This is deliberately separate from `AtlasGraph.nodes`: the graph folds legacy
+ * criterion children into their parent, while an activity audit must retain the
+ * UUID and timestamp of every Plane work item it might need to inspect.
+ */
+export interface BoardCacheWorkItem {
+	id: string;
+	identifier: string;
+	title: string;
+	updatedAt: string | null;
+}
+
+/**
  * A complete, derived board graph plus the identity and clock needed to decide
  * whether it is safe to answer from it. Credentials are deliberately absent.
  */
@@ -30,6 +44,8 @@ export interface BoardCache {
 	project: BoardCacheProject;
 	/** Raw Plane work-item count, before criterion children are folded into stories. */
 	itemCount: number;
+	/** Every raw work item, including legacy criterion children folded out of the graph. */
+	items: BoardCacheWorkItem[];
 	/** Cache publication is permitted only after a complete relation sweep. */
 	dependencyCoverage: Extract<DependencyCoverage, { kind: "complete" }>;
 	graph: AtlasGraph;
@@ -44,6 +60,8 @@ export interface BoardCacheTarget {
 
 export interface ReadBoardCacheOptions {
 	warn?: (message: string) => void;
+	/** A cache-required caller refuses instead of promising the usual live fallback. */
+	onInvalid?: "fetch-live" | "refuse";
 }
 
 export interface BoardCacheWriteRuntime {
@@ -130,7 +148,7 @@ export function serializeBoardCache(cache: BoardCache): string {
 	return `${JSON.stringify(validated, null, "\t")}\n`;
 }
 
-/** Missing is quiet. Anything present-but-unusable warns and falls back to a live read. */
+/** Missing is quiet. Anything present-but-unusable warns; the caller chooses fallback or refusal. */
 export async function readBoardCache(
 	path: string,
 	options: ReadBoardCacheOptions = {},
@@ -139,14 +157,14 @@ export async function readBoardCache(
 		await lstat(path);
 	} catch (error) {
 		if (isNodeError(error, "ENOENT")) return null;
-		warnUnreadable(path, error, options.warn);
+		warnUnreadable(path, error, options.warn, options.onInvalid);
 		return null;
 	}
 
 	try {
 		return parseBoardCache(await Bun.file(path).text());
 	} catch (error) {
-		warnUnreadable(path, error, options.warn);
+		warnUnreadable(path, error, options.warn, options.onInvalid);
 		return null;
 	}
 }
@@ -176,10 +194,15 @@ function warnUnreadable(
 	path: string,
 	error: unknown,
 	warn: ((message: string) => void) | undefined,
+	onInvalid: ReadBoardCacheOptions["onInvalid"] = "fetch-live",
 ): void {
+	const next =
+		onInvalid === "refuse"
+			? "This command requires a refreshed matching cache."
+			: "Fetching fresh board state.";
 	const message =
 		`⚠ Ignoring corrupt or unreadable board cache at ${path}: ` +
-		`${error instanceof Error ? error.message : String(error)}. Fetching fresh board state.`;
+		`${error instanceof Error ? error.message : String(error)}. ${next}`;
 	(warn ?? ((text) => console.warn(text)))(message);
 }
 
@@ -207,6 +230,30 @@ function validateBoardCache(value: unknown): BoardCache {
 		selectedAs: nonEmptyString(project.selectedAs, "project.selectedAs"),
 	};
 	const itemCount = nonNegativeInteger(cache.itemCount, "itemCount");
+	if (!Array.isArray(cache.items)) throw new Error("items must be an array");
+	const itemIds = new Set<string>();
+	const itemIdentifiers = new Set<string>();
+	const items = cache.items.map((value, index): BoardCacheWorkItem => {
+		const path = `items[${index}]`;
+		const item = record(value, path);
+		const id = nonEmptyString(item.id, `${path}.id`);
+		const identifier = nonEmptyString(item.identifier, `${path}.identifier`);
+		if (itemIds.has(id)) throw new Error(`${path}.id duplicates work item ${id}`);
+		if (itemIdentifiers.has(identifier)) {
+			throw new Error(`${path}.identifier duplicates work item ${identifier}`);
+		}
+		itemIds.add(id);
+		itemIdentifiers.add(identifier);
+		return {
+			id,
+			identifier,
+			title: nonEmptyString(item.title, `${path}.title`),
+			updatedAt: nullableInstant(item.updatedAt, `${path}.updatedAt`),
+		};
+	});
+	if (items.length !== itemCount) {
+		throw new Error(`items length ${items.length} disagrees with itemCount ${itemCount}`);
+	}
 	const coverage = record(cache.dependencyCoverage, "dependencyCoverage");
 	if (coverage.kind !== "complete") {
 		throw new Error('dependencyCoverage must be { kind: "complete" }; partial caches are unsafe');
@@ -219,6 +266,7 @@ function validateBoardCache(value: unknown): BoardCache {
 		instance: { baseUrl, workspaceSlug },
 		project: projectValue,
 		itemCount,
+		items,
 		dependencyCoverage: { kind: "complete" },
 		graph,
 	};

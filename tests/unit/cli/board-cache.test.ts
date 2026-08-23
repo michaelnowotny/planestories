@@ -13,6 +13,7 @@ import { join } from "node:path";
 import type { AtlasGraph } from "../../../src/atlas/model.ts";
 import {
 	BOARD_CACHE_MAX_AGE_MS,
+	BOARD_CACHE_SCHEMA_VERSION,
 	type BoardCache,
 	defaultBoardCachePath,
 	parseBoardCache,
@@ -22,6 +23,7 @@ import {
 import { fetchBoardToCache } from "../../../src/cli/commands/board.ts";
 import {
 	type GraphSourceRuntime,
+	RequiredBoardCacheError,
 	resolveGraph,
 	StaleBoardCacheError,
 } from "../../../src/cli/graph_source.ts";
@@ -122,14 +124,26 @@ function graphWithEdge(): AtlasGraph {
 }
 
 function cache(overrides: Partial<BoardCache> = {}): BoardCache {
+	const cachedGraph = overrides.graph ?? graph();
+	const flatten = (nodes: AtlasGraph["nodes"]): AtlasGraph["nodes"] =>
+		nodes.flatMap((node) => [node, ...flatten(node.children)]);
+	const items =
+		overrides.items ??
+		flatten(cachedGraph.nodes).map((node) => ({
+			id: node.url?.split("/").filter(Boolean).at(-1) ?? `item-${node.id}`,
+			identifier: node.identifier as string,
+			title: node.title,
+			updatedAt: node.updatedAt,
+		}));
 	return {
-		schemaVersion: 1,
+		schemaVersion: BOARD_CACHE_SCHEMA_VERSION,
 		fetchedAt: new Date(Date.parse(NOW) - 14 * 60_000).toISOString(),
 		instance: { baseUrl: BASE_URL, workspaceSlug: WORKSPACE },
 		project: { ...PROJECT, selectedAs: PROJECT.name },
-		itemCount: 1,
+		itemCount: overrides.itemCount ?? items.length,
+		items,
 		dependencyCoverage: { kind: "complete" },
-		graph: graph(),
+		graph: cachedGraph,
 		...overrides,
 	};
 }
@@ -200,6 +214,7 @@ describe("resolveGraph — board cache source", () => {
 		const resolved = source.acceptPartialGraph("cache fixture is complete");
 
 		expect(resolved.nodes[0]?.title).toBe("Cached title");
+		expect(source.requireCachedWorkItems("a bounded test read")).toEqual(cache().items);
 		expect(source.provenance).toMatchObject({
 			kind: "cache",
 			project: PROJECT.name,
@@ -211,6 +226,45 @@ describe("resolveGraph — board cache source", () => {
 			"→ cached board state · Data Platform · 1 item · fetched 14m ago",
 		);
 		expect(messages.warn).toEqual([]);
+	});
+
+	test("a required-cache read never falls through to a live whole-board fetch", async () => {
+		const fake = fakeLive();
+		const messages = { log: [] as string[], warn: [] as string[] };
+
+		await expect(
+			resolveGraph(
+				{
+					config: configPath,
+					project: PROJECT.name,
+					boardCache: { readRequired: true },
+					dependencies: false,
+				},
+				runtime(fake, messages),
+			),
+		).rejects.toBeInstanceOf(RequiredBoardCacheError);
+		expect(fake.calls).toEqual([]);
+
+		mkdirSync(join(directory, ".planestories"), { recursive: true });
+		writeFileSync(cachePath, "{ truncated");
+		try {
+			await resolveGraph(
+				{
+					config: configPath,
+					project: PROJECT.name,
+					boardCache: { readRequired: true },
+					dependencies: false,
+				},
+				runtime(fake, messages),
+			);
+			throw new Error("expected required-cache refusal");
+		} catch (error) {
+			expect(error).toBeInstanceOf(RequiredBoardCacheError);
+			expect((error as Error).message).toContain("planestories board fetch");
+		}
+		expect(fake.calls).toEqual([]);
+		expect(messages.warn.join("\n")).toContain("requires a refreshed matching cache");
+		expect(messages.warn.join("\n")).not.toContain("Fetching fresh board state");
 	});
 
 	test("a matching stale cache refuses before any client call and names both ways forward", async () => {
@@ -232,6 +286,34 @@ describe("resolveGraph — board cache source", () => {
 		}
 		expect(fake.calls).toEqual([]);
 		expect(messages.log.join("\n")).toContain("cached board state");
+	});
+
+	test("a required matching cache that is stale names board fetch and never goes live", async () => {
+		writeCache(
+			cache({
+				fetchedAt: new Date(Date.parse(NOW) - BOARD_CACHE_MAX_AGE_MS - 60_000).toISOString(),
+			}),
+		);
+		const fake = fakeLive();
+		const messages = { log: [] as string[], warn: [] as string[] };
+
+		try {
+			await resolveGraph(
+				{
+					config: configPath,
+					project: PROJECT.name,
+					boardCache: { readRequired: true },
+					dependencies: false,
+				},
+				runtime(fake, messages),
+			);
+			throw new Error("expected required-cache refusal");
+		} catch (error) {
+			expect(error).toBeInstanceOf(RequiredBoardCacheError);
+			expect((error as Error).message).toContain("planestories board fetch");
+			expect((error as Error).message).not.toContain("--stale-ok");
+		}
+		expect(fake.calls).toEqual([]);
 	});
 
 	test("--stale-ok proceeds only with an explicit acknowledgement", async () => {
@@ -484,6 +566,47 @@ describe("board cache persistence", () => {
 		expect(written.graph.nodes[0]?.title).toBe("Fetched by board command");
 		expect(written.dependencyCoverage).toEqual({ kind: "complete" });
 		expect(fake.calls.some((call) => call.method === "listWorkItems")).toBe(true);
+	});
+
+	test("the cache inventory retains a legacy criterion child folded out of the graph", async () => {
+		const fake = makeFakeClient({
+			projects: [PROJECT],
+			workItems: {
+				[PROJECT.id]: [
+					{
+						id: "parent",
+						sequence_id: 1,
+						name: "Parent story",
+						state: { name: "Todo", group: "unstarted" },
+						updated_at: "2026-08-23T10:00:00Z",
+					},
+					{
+						id: "criterion",
+						sequence_id: 2,
+						name: "Legacy criterion",
+						parent: "parent",
+						external_id: "parent::ac1",
+						external_source: "planestories",
+						state: { name: "Todo", group: "unstarted" },
+						updated_at: "2026-08-23T10:30:00Z",
+					},
+				],
+			},
+			relations: { parent: {} },
+		});
+		const messages = { log: [] as string[], warn: [] as string[] };
+
+		await fetchBoardToCache({ config: configPath, project: PROJECT.name }, runtime(fake, messages));
+		const written = parseBoardCache(readFileSync(cachePath, "utf8"));
+
+		expect(written.itemCount).toBe(2);
+		expect(written.items.map((item) => item.id)).toEqual(["parent", "criterion"]);
+		expect(written.items[1]).toMatchObject({
+			identifier: "DATA-2",
+			title: "Legacy criterion",
+			updatedAt: "2026-08-23T10:30:00.000Z",
+		});
+		expect(written.graph.nodes).toHaveLength(1);
 	});
 
 	test("the default path is repository-root .planestories/board.json from a subdirectory", () => {

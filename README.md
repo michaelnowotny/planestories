@@ -510,6 +510,26 @@ An unknown identifier exits non-zero and names the board searched, so `show` is 
 an existence guard in a script. Every answer states its board provenance; snapshot JSON also
 embeds the snapshot timestamp.
 
+### `audit`
+
+Answer “where did my writes land?” from a bounded cache-plus-live read. The cache supplies the
+all-item UUID/timestamp inventory; `audit` calls Plane's live per-item activity endpoint only for
+items whose cached `updatedAt` falls inside `--since`, keeps records attributed to the current API
+key's owner, sorts newest first, and stamps every row with the instance URL.
+
+```
+planestories board fetch --project "Data Platform"     # required fresh candidate inventory
+planestories audit --since 24h --context ce
+planestories audit --since 2026-08-23T08:00:00Z --json
+```
+
+The bounded default is `24h`. Every report prints the board, cache age, exact window, and number of
+candidate activity trails walked. It also states the limits: the API-key owner is indistinguishable
+across planestories, MCP, and UI writes; only the requested window is covered; and Plane
+comment/relation-only writes need not bump the parent `updatedAt`, so this is bounded evidence rather
+than a complete activity export. A missing/stale/mismatched cache refuses and names the exact
+`board fetch` command; it never degrades into a whole-board live sweep.
+
 ### `critical-path`
 
 The longest chain of blocking work, in dev-days — the floor under finishing the project, and the

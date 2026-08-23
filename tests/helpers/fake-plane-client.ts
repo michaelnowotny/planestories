@@ -28,6 +28,8 @@ export interface FakeData {
 	/** Simulate Plane CE, which 404s on the relation-removal endpoint. */
 	relationRemovalUnsupported?: boolean;
 	instance?: { edition?: string; current_version?: string };
+	/** Authenticated API-key owner returned by getCurrentUser; null simulates no resolvable user. */
+	currentUser?: Record<string, unknown> | null;
 	pqlUnsupported?: boolean;
 	countEndpointUnsupported?: boolean;
 	projects?: FakeProject[];
@@ -144,6 +146,13 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 			return {
 				instance: data.instance ?? { edition: "PLANE_CLOUD", current_version: "test" },
 			} as T;
+		},
+
+		async getCurrentUser<T>(): Promise<T> {
+			record("getCurrentUser", []);
+			const currentUser =
+				data.currentUser === undefined ? { id: "fake-current-user" } : data.currentUser;
+			return currentUser as T;
 		},
 
 		async listStates<T>(projectId: string): Promise<T[]> {
