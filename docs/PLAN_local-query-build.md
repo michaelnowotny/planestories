@@ -231,10 +231,42 @@ finance runs several times per session.
 
 ## Deferred, with the reason
 
-- **`audit` ("where did my writes land?")** — finance's, and genuinely novel. Deferred only because
-  it needs a design decision first: a local write journal (cheap, works everywhere, honest that it
-  only covers writes made *through planestories*) versus walking Plane's per-item activity endpoint
-  (complete, expensive, needs `updatedAt`). Do not build until that is chosen.
+### `audit` — DECIDED 2026-08-23: the activity endpoint, narrowed by `updatedAt`
+
+Measured on CE first, because the answer turned on facts:
+
+| scope | CE |
+|---|---|
+| `/work-items/{id}/activities/` | **200** |
+| `/projects/{id}/activities/` | **404** |
+| `/workspaces/{slug}/activities/` | **404** |
+
+Per-item only, but the records carry what is needed: `verb`, `field`, `actor`, `created_at`,
+`old_value`, `new_value`, `comment`. Notably this is the ONE surface CE does not degrade.
+
+**Rejected: a local write journal.** `src/replicate/journal.ts` already exists and is battle-tested,
+it is free and instant, and it could stamp instance identity at write time. But it records only
+writes made *through planestories* — and the incident that motivated this verb was a session of
+comments and status transitions posted **through the MCP**. The journal would have been empty for
+exactly the session it was needed for, while looking authoritative. A confident, incomplete answer
+is the failure class this whole surface exists to prevent.
+
+**Chosen: the endpoint.** It records every write regardless of which tool made it. The cost
+objection largely dissolves now that Unit 3 landed `updatedAt`: read the cache, filter to items
+updated since `--since`, walk activities only for those. Twenty items touched among forty changed
+means forty calls, not 2662.
+
+Two limits to state in the output rather than discover later:
+1. **`actor` is the API key's owner.** planestories and the MCP wrapper read the SAME
+   `PLANE_CTX_CE_API_KEY`, so they are one actor — and indistinguishable from the key owner's own UI
+   clicks. `audit` answers *"which writes by me landed on this instance"*, NOT *"which tool made
+   them."* For the motivating incident (which instance?) that is sufficient; say so plainly.
+2. **`--since` is required in spirit.** Without a bound it degrades to the full sweep. Default to
+   something bounded and print the bound.
+
+**No hybrid.** Journal-for-speed plus endpoint-for-truth is two sources of truth about one question,
+which is how you get a fast answer and a correct answer that disagree — a shape this repo has
+already paid for four times.
 - **`abandoned`** (open items under a cancelled/abandoned parent) — real and urgent for finance's
   retirement register; small once Unit 5 exists.
 - **`drift`**, **`orphans`**, **`blocked`** — real, lower frequency.
