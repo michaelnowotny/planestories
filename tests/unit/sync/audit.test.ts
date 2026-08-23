@@ -190,6 +190,38 @@ describe("auditWrites", () => {
 		).rejects.toBeInstanceOf(AuditReadError);
 	});
 
+	test("an activity whose actor is not a string refuses instead of reading as 'not me'", async () => {
+		// The relation-dialect class of bug, relocated. Plane documents `actor` as a
+		// UUID string and CE returns one — but were any deployment to nest it as an
+		// object, `raw.actor !== actor.id` would hold for EVERY row, the
+		// non-empty-trail guard would still pass, and audit would print a confident
+		// "No matching writes..." for a session that wrote plenty. An unrecognised
+		// shape is not evidence of absence.
+		const fake = makeFakeClient({
+			currentUser: { id: "actor-me" },
+			activities: {
+				inside: [
+					{
+						id: "mine",
+						actor: { id: "actor-me", display_name: "Current Operator" },
+						verb: "updated",
+						field: "state",
+						created_at: "2026-08-23T11:45:00Z",
+					},
+				],
+			},
+		});
+
+		await expect(
+			auditWrites(
+				fake.client,
+				PROJECT,
+				[item("inside", 1, "2026-08-23T11:00:00Z")],
+				parseAuditWindow("2h", NOW),
+			),
+		).rejects.toBeInstanceOf(AuditReadError);
+	});
+
 	test("a nonempty candidate set with zero activity refuses as a suspicious response", async () => {
 		const fake = makeFakeClient({ currentUser: { id: "actor-me" } });
 

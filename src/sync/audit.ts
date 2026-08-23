@@ -198,6 +198,16 @@ export async function auditWrites(
 					`Activity lookup for ${item.identifier} returned a malformed entry. No partial audit was emitted.`,
 				);
 			}
+			// Fail closed on an unrecognised actor shape. A silent `!==` against a
+			// nested object would exclude every row and publish a confident empty
+			// audit — the failure this verb exists to prevent.
+			if (typeof raw.actor !== "string") {
+				throw new AuditReadError(
+					`An activity on ${item.identifier} has a non-string actor, so authorship cannot be established. ` +
+						"Refusing to publish an audit that would silently read as “none of these were mine”. " +
+						"No partial audit was emitted.",
+				);
+			}
 			if (raw.actor !== actor.id) continue;
 			const createdAt = activityInstant(raw.created_at, item.identifier);
 			const createdMs = Date.parse(createdAt);

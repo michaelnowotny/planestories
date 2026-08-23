@@ -14,13 +14,17 @@ import { announceTarget } from "../announce_target.ts";
 import { normalizeBoardBaseUrl } from "../board_cache.ts";
 import { type GraphSourceRuntime, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
+import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { connectTarget } from "../target_client.ts";
 
 export interface AuditCommandOptions {
 	config?: string;
 	context?: string;
+	project?: string;
 	since?: string;
 	json?: boolean;
+	/** Refusal text composed from this command's own registered routes. */
+	selectProjectHelp?: string;
 }
 
 export interface AuditCommandRuntime {
@@ -48,9 +52,11 @@ export async function runAudit(
 		{
 			config: options.config,
 			context: options.context,
+			project: options.project,
 			boardCache: { readRequired: true },
 			dependencies: false,
 			json: options.json === true,
+			selectProjectHelp: options.selectProjectHelp,
 		},
 		{ ...runtime.graphSource, now: () => now },
 	);
@@ -129,18 +135,21 @@ export function registerAuditCommand(program: Command): void {
 			"--context <name>",
 			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
 		)
+		.option("-p, --project <name>", "Project whose cached board bounds the audit")
 		.option(
 			"--since <duration|iso>",
 			"Bound the audit window (e.g. 90m, 24h, 7d, or an ISO-8601 instant; default 24h)",
 		)
 		.option("--json", "Emit the same bounded audit report as machine-readable JSON", false)
-		.action(async (options) => {
+		.action(async (options, command: Command) => {
 			try {
 				const result = await runAudit({
 					config: options.config,
 					context: options.context,
+					project: options.project,
 					since: options.since,
 					json: options.json === true,
+					selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
 				});
 				process.stdout.write(
 					options.json

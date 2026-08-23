@@ -26,6 +26,7 @@ import {
 	readBoardCache,
 	writeBoardCacheAtomic,
 } from "./board_cache.ts";
+import { selectProjectRefusal } from "./project_selection.ts";
 import {
 	announceSnapshotSource,
 	asClient,
@@ -58,6 +59,14 @@ export interface GraphSourceOptions {
 	dependencies?: boolean;
 	/** True keeps stdout machine-clean; provenance goes to stderr. */
 	json?: boolean;
+	/**
+	 * The "no board selected" refusal, composed from the routes the CALLING
+	 * command registers — `selectProjectRefusal(describeProjectSelection(cmd))`.
+	 * This module cannot see that surface, and one shared sentence naming
+	 * `<file>` and `--project` unconditionally told `audit` operators to pass two
+	 * things it rejects. Omitting it degrades to routes that are always true.
+	 */
+	selectProjectHelp?: string;
 }
 
 /** Injectable boundaries used by no-network source-selection tests. */
@@ -217,7 +226,8 @@ export async function resolveGraph(
 	const projectName = options.project ?? snapshotSource?.projectName ?? config.defaultProject;
 	if (!projectName) {
 		throw new ConfigError(
-			"Provide a <file> argument, or --project <name> (or a defaultProject) to read the live board.",
+			options.selectProjectHelp ??
+				selectProjectRefusal({ fileArgument: null, projectOption: false }),
 		);
 	}
 

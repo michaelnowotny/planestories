@@ -20,6 +20,7 @@ import {
 	resolveGraph,
 } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
+import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
 export type GraphQueryKind = "ready" | "inconsistent" | "blocked" | "orphans" | "abandoned";
@@ -33,6 +34,8 @@ export interface GraphQueryCommandOptions {
 	staleOk?: boolean;
 	epic?: string;
 	limit?: string | number;
+	/** Refusal text composed from this command's own registered routes. */
+	selectProjectHelp?: string;
 }
 
 export interface GraphQueryCommandRuntime {
@@ -288,6 +291,7 @@ export async function runGraphQueryCommand(
 					staleOk: options.staleOk === true,
 				},
 		dependencies: true,
+		selectProjectHelp: options.selectProjectHelp,
 	});
 
 	let graph: AtlasGraph;
@@ -332,10 +336,18 @@ function addSourceOptions(command: Command): Command {
 		);
 }
 
-function action(kind: GraphQueryKind): (options: GraphQueryCommandOptions) => Promise<void> {
-	return async (options) => {
+function action(
+	kind: GraphQueryKind,
+): (options: GraphQueryCommandOptions, command: Command) => Promise<void> {
+	return async (options, command) => {
 		try {
-			if (!(await runGraphQueryCommand(kind, options))) process.exitCode = 1;
+			// The refusal must name only what THIS verb registers: none of these
+			// take a stories-file argument.
+			const withHelp = {
+				...options,
+				selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
+			};
+			if (!(await runGraphQueryCommand(kind, withHelp))) process.exitCode = 1;
 		} catch (error) {
 			handleError(error);
 		}

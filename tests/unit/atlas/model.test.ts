@@ -423,3 +423,69 @@ describe("dependency edges", () => {
 		expect(buildAtlasFromBoard(c, P, "ENG", "Proj", index).edges).toEqual([]);
 	});
 });
+
+/**
+ * A parent CYCLE used to make work silently disappear.
+ *
+ * `assembleTree` treats "has a resolvable parent" as "is not a root", so two
+ * items that name each other are attached to one another and never reach the
+ * root list. Measured before the fix, a two-story file whose stories are each
+ * other's parent produced `roots: 0` and every count zero — `count` printing
+ * `0 of 0 stories` for a file with two stories in it, with no warning anywhere.
+ *
+ * That is the null-ban in structural form: the absence of a representable tree
+ * became a confident, valid-looking empty answer. Refusing is the house
+ * behaviour; dropping the rows is not.
+ */
+describe("parent cycles", () => {
+	const CYCLE = [
+		"---",
+		'project: "P"',
+		"---",
+		"",
+		"## As a user, I want A, so that I benefit",
+		"",
+		"```yaml",
+		"plane_identifier: P-1",
+		"parent: P-2",
+		"```",
+		"",
+		"Body A, long enough to be a real story body.",
+		"",
+		"## As a user, I want B, so that I benefit",
+		"",
+		"```yaml",
+		"plane_identifier: P-2",
+		"parent: P-1",
+		"```",
+		"",
+		"Body B, long enough to be a real story body.",
+		"",
+	].join("\n");
+
+	test("a mutually-parented pair refuses instead of vanishing", () => {
+		expect(() => buildAtlasFromFile(CYCLE, "cycle.md")).toThrow(/cycle/i);
+	});
+
+	test("the refusal names the items involved, so it can be fixed", () => {
+		try {
+			buildAtlasFromFile(CYCLE, "cycle.md");
+			throw new Error("expected a refusal");
+		} catch (error) {
+			const message = (error as Error).message;
+			expect(message).toContain("P-1");
+			expect(message).toContain("P-2");
+		}
+	});
+
+	test("an ordinary parent chain still assembles", () => {
+		// The same file with the loop broken: P-1 parentless, P-2 its child. The
+		// guard must reject cycles without rejecting nesting.
+		const nested = CYCLE.replace("plane_identifier: P-1\nparent: P-2", "plane_identifier: P-1");
+		const graph = buildAtlasFromFile(nested, "nested.md");
+		expect(graph.nodes).toHaveLength(1);
+		expect(graph.nodes[0]?.identifier).toBe("P-1");
+		expect(graph.nodes[0]?.children).toHaveLength(1);
+		expect(graph.nodes[0]?.children[0]?.identifier).toBe("P-2");
+	});
+});
