@@ -510,6 +510,25 @@ An unknown identifier exits non-zero and names the board searched, so `show` is 
 an existence guard in a script. Every answer states its board provenance; snapshot JSON also
 embeds the snapshot timestamp.
 
+### `ls` and `count`
+
+Small, fixed local queries over the same Atlas graph and identity-bound board cache. Predicates
+compose with AND; there is deliberately no query grammar. `--epic` scopes to descendant leaf
+stories (nested epics included), and `--open` means not completed or cancelled.
+
+```
+planestories ls --label ingestion --open
+planestories ls --epic DATA-100 --blocked --json
+planestories count --epic DATA-100 --open             # e.g. 57 open of 69 stories
+planestories count --open --group-by status
+```
+
+Available predicates are `--open`, `--status`, `--label`, `--assignee`, `--epic`, `--flagged`,
+`--no-estimate`, and `--blocked`. Counts always include a denominator; group counts use the
+selected set as theirs. A missing `--epic` identifier exits non-zero. Both commands print board
+provenance and cache age, and `--blocked` refuses unless dependency coverage is complete. For a
+predicate outside this intentionally small surface, use `atlas --json` with `jq`.
+
 ### `critical-path`
 
 The longest chain of blocking work, in dev-days — the floor under finishing the project, and the

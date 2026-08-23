@@ -541,7 +541,7 @@ function runCli(args: string[], cwd: string): { code: number; out: string; err: 
 	};
 }
 
-describe("show and atlas — real CLI cache wiring", () => {
+describe("cached read commands — real CLI cache wiring", () => {
 	beforeEach(() => {
 		writeFileSync(
 			configPath,
@@ -585,6 +585,43 @@ describe("show and atlas — real CLI cache wiring", () => {
 		});
 		expect(result.err).toContain("cached board state");
 		expect(result.err).toContain("fetched 14m ago");
+	});
+
+	for (const command of ["ls", "count"]) {
+		test(`${command} reads the cache, embeds provenance, and prints its age`, () => {
+			const result = runCli([command, "--json"], directory);
+
+			expect(result.code).toBe(0);
+			expect(JSON.parse(result.out)).toMatchObject({
+				count: 1,
+				denominator: 1,
+				provenance: { kind: "cache", fetchedAt: expect.any(String) },
+			});
+			expect(result.err).toContain(
+				"→ cached board state · Data Platform · 1 item · fetched 14m ago",
+			);
+			expect(result.out).not.toContain("cached board state");
+		});
+	}
+
+	test("ls --blocked uses the cache's complete dependency graph", () => {
+		writeCache(
+			cache({
+				fetchedAt: new Date(Date.now() - 14 * 60_000).toISOString(),
+				itemCount: 2,
+				graph: graphWithEdge(),
+				instance: { baseUrl: "http://127.0.0.1:1", workspaceSlug: WORKSPACE },
+			}),
+		);
+		const result = runCli(["ls", "--blocked", "--json"], directory);
+
+		expect(result.code).toBe(0);
+		expect(JSON.parse(result.out)).toMatchObject({
+			count: 1,
+			denominator: 2,
+			items: [{ identifier: "DATA-2" }],
+			provenance: { kind: "cache" },
+		});
 	});
 
 	test("stale show refuses, while --stale-ok proceeds with an acknowledgement", () => {
