@@ -20,6 +20,8 @@ function story(
 		assignee: null,
 		effortDays,
 		priority: null,
+		createdAt: null,
+		updatedAt: null,
 		criteria: [],
 		quality: null,
 		children: [],

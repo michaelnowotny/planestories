@@ -12,6 +12,8 @@ const item = (
 	id,
 	sequenceId,
 	name: `Item ${sequenceId}`,
+	createdAt: null,
+	updatedAt: null,
 	description,
 	priority: undefined,
 	estimate: undefined,

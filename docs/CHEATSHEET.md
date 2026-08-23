@@ -54,6 +54,8 @@ planestories atlas --project X --json -o g.json    # the same graph, as data
 planestories atlas --project X --no-dependencies   # skip the relation sweep (faster; NOT "no deps")
 
 planestories epic DATA-100                         # rollup: status split, completion %, Σ effort
+planestories show DATA-123                         # compact one-item answer; no description body
+planestories show DATA-123 --json                  # the same answer for scripts
 planestories packet DATA-123                       # implementable brief for an agent (an epic emits all descendants)
 planestories critical-path --project X             # dependency floor in dev-days, slack, biggest lever
 planestories critical-path stories/q1.md --json

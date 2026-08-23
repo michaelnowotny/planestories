@@ -16,6 +16,8 @@ function node(id: string, kind: "epic" | "story", children: AtlasNode[] = []): A
 		assignee: null,
 		effortDays: null,
 		priority: null,
+		createdAt: null,
+		updatedAt: null,
 		criteria: [],
 		quality: null,
 		children,

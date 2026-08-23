@@ -409,6 +409,8 @@ describe("effort survives the board round-trip warm", () => {
 			id: "w1",
 			sequenceId: 7,
 			name: story.title,
+			createdAt: null,
+			updatedAt: null,
 			description: story.body,
 			priority: undefined,
 			estimate: undefined,

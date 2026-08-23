@@ -131,11 +131,16 @@ only ever carry `http(s)` URLs. The cockpit is dark-only by design.
 ## Machine-readable output — `atlas --json`
 
 `atlas --json` emits the exact graph the cockpit renders — nodes (id, kind, identifier,
-title, status/statusGroup, labels, assignee, effortDays, priority, criteria, quality),
+title, status/statusGroup, labels, assignee, effortDays, priority, createdAt, updatedAt,
+criteria, quality),
 dependency edges (`blocks`/`relates`), and counts — so external tooling and the HTML can
 never disagree. That is enforced rather than promised: both artifacts are produced by one
 `atlasJsonPayload()`, and a test asserts the emitted file deep-equals the graph embedded in the
 page.
+
+`createdAt` and `updatedAt` are ISO-8601 UTC strings for board-sourced nodes. They are `null`
+when Plane did not supply the timestamp, and always `null` for a markdown-file source — a file
+mtime is not a board timestamp and is never substituted for one.
 
 It also carries **`dependencyCoverage`**: `{"kind":"complete"}`, `{"kind":"partial","failures":N}`
 when some relation lookups failed, or `{"kind":"skipped"}` under `--no-dependencies`. Read it

@@ -15,6 +15,8 @@ function item(
 ): FetchedWorkItem {
 	return {
 		name: `Item ${partial.sequenceId}`,
+		createdAt: null,
+		updatedAt: null,
 		description: undefined,
 		priority: undefined,
 		estimate: undefined,
