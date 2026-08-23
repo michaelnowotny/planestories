@@ -202,8 +202,10 @@ planestories inconsistent [--epic X]               # Done items with a non-Done 
 ## Units 1–8: ALL BUILT and merged (2026-08-23) — the plan is complete
 
 Built by Codex across three dispatches, gate-verified and smoke-tested against the live CE board by
-the orchestrator, then reviewed by Grok in one round with the bar declared up front
-(P0/P1 block; P2 records). **Verdict: APPROVE — no P0, no P1.**
+the orchestrator, then reviewed by Grok in **two rounds, one per scope**, with the bar declared up
+front (P0/P1 block; P2 records).
+
+### Round A — units 1–5. **APPROVE, no P0, no P1.**
 
 > *"The load-bearing safety property holds: a cache from board A does not answer about board B on
 > any path an operator actually uses. Freshness is labelled or refused. Partials do not publish.
@@ -212,8 +214,60 @@ the orchestrator, then reviewed by Grok in one round with the bar declared up fr
 Measured effect: `show DATA-2469` went from **2m34s / 885 requests** to **0.103s** — the operation
 finance runs several times per session.
 
+### Round B — units 6–8 (2026-08-23). **BLOCK on one P1**, fixed in `757ea1a`.
+
+These carried less scrutiny than 1–5, which is exactly why they got their own round.
+
+**P1 — `ls`/`count` `--no-estimate` never filtered.** Commander maps a `--no-x` boolean onto
+`options.x`; the predicate read a `noEstimate` key that is never set, so the documented flag was a
+no-op on every run. `count --no-estimate --open` printed the *unfiltered* open count and an operator
+would quote it as the unestimated pile. Measured live: **389 before, 277 after.** 921 tests missed it
+because the pure function was tested directly with `{ noEstimate: true }` and the CLI test only
+asserted that `--help` *contains the string*. Neither invokes the flag; both new tests drive the real
+CLI. The `false` default came out in the same change — keeping it while reading `estimate === false`
+would have inverted the predicate into "unestimated only, always".
+
+**P1 found in smoke-testing, not by the round** — the shared "no board selected" refusal named
+`<file>` and `--project` unconditionally, from a helper that cannot see which the calling command
+registers. `audit` accepted **neither**; the suggested `--project` came back as `unknown option`.
+Seven more commands named a `<file>` argument they do not take. `audit` gained `-p, --project`, and
+the sentence is now derived from commander's actual registration (`src/cli/project_selection.ts`), so
+it cannot drift from the surface. The round independently recorded the `<file>` half as its P2 #2.
+
+**Two P2s closed in the same commit**, because both are silent-wrong-answer classes:
+- An activity whose `actor` is not a string was read as *"not mine"*. CE returns a UUID string, but a
+  nested shape would have excluded every row while the non-empty-trail guard still passed —
+  publishing a confident "No matching writes" for a session that wrote plenty. Fails closed now.
+- A **parent cycle made work vanish.** Every member has a resolvable parent, so none becomes a root.
+  Measured: a two-story file whose stories name each other produced **zero roots and zero counts** —
+  `count` answering `0 of 0 stories` for a file with two stories in it. The round predicted a stack
+  overflow; the truth was worse, because nothing failed. It refuses and names the items now.
+
+**Judgements the round settled**, so they do not get re-litigated:
+- `ready` returning 93% of open work is the correct graph answer on a sparsely-linked board.
+  Narrowing it to "must have had a blocker" would invent policy and make `ready ∩ orphans` a matter
+  of taste. **Do not narrow it.** Change only the headline, if anything.
+- `orphans`/`abandoned` taking no `--epic` is enforced, not silent — `unknown option`, not a
+  wrong-scoped answer. A help-text question, not a correctness one.
+- `audit`'s asymmetric empty-guard is right: zero rows from a non-empty candidate set is an
+  API-shape suspicion; rows that exist with none matching is a measured zero.
+- `count --epic` and the `epic` rollup agree for nested epics and epics-with-only-sub-epics — both
+  mean "descendant non-epic leaves". Verified live: `count --epic DATA-2630 --open` = `22 of 22`
+  against the rollup's `Stories: 22 (0 done)`.
+- Requiring `Z`/offset on an ISO date-time is right. It surprises someone once; a timezone-dependent
+  answer would surprise them silently forever.
+
 ### P2s recorded, not blocking — fix when next in the file
 
+0. **Graph verbs have no `--json`.** Scripting `ready` means parsing `Ready: 361 of 389`, and that is
+   the flagship number most likely to be quoted without its denominator. `ls`/`count`/`show`/`audit`
+   all emit JSON. (Round B.)
+0b. **The `ready` headline invites a wrong reading.** `Ready: 361 of 389 open` is true, and each row
+   already says `none (no prerequisite)`. A split — `12 gated + 349 with no prerequisite, of 389
+   open` — would stop the numerator lying by omission without inventing policy. (Round B.)
+0c. **`ls --blocked` completeness is implemented but not CLI-tested.** The graph verbs have an
+   incomplete-sweep CLI test; `ls`/`count` do not. (Round B; the behaviour itself was checked and is
+   correct on every path.)
 1. **Relation create/remove capability is a dialect heuristic after a list GET**, not an independent
    measurement. Cloud + an explicitly configured `work-items` dialect would wrongly print
    "relation removal: NOT SUPPORTED". Not a path in use here, but the command's whole purpose is

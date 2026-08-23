@@ -62,6 +62,20 @@ once and answers locally, at depths a row filter could not reach.
 - `Exported 0 stories` no longer prints in green with exit 0. An empty export now says whether the
   project index was empty (usually the wrong board) or the filters excluded everything, and names
   requested identifiers that do not exist — exiting non-zero, so it guards a script.
+- **`ls` / `count` `--no-estimate` filtered nothing.** Commander maps a `--no-x` boolean onto
+  `options.x`, so the predicate read a key that was never set and the documented flag was a no-op:
+  `count --no-estimate --open` printed the *unfiltered* open count. Measured on a live board, 389
+  before and 277 after. It had passed both a unit test of the underlying function and a CLI test
+  that only asserted `--help` mentions the flag — neither invoked it.
+- **The "no board selected" refusal named routes that do not exist.** One shared sentence offered
+  `<file>` and `--project` regardless of the command; `audit` accepted neither, so following its
+  advice produced `unknown option '--project'`. `audit` now has `-p, --project`, and the sentence is
+  derived from each command's actual registration.
+- **An activity whose `actor` is not a string** was read as "not mine" rather than as an
+  unrecognised response — which would have published a confident empty `audit`. It refuses now.
+- **A parent cycle silently deleted work.** Every member of a cycle has a resolvable parent, so none
+  became a root and the whole group vanished from the tree: a two-story file whose stories named
+  each other produced `0 of 0 stories`. It now refuses and names the items involved.
 
 ### Known limits
 

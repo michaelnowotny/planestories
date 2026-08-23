@@ -331,34 +331,45 @@ red first. Ordered as the roadmap sections that produced them.
 
 ## 8e. ⚠ WHERE TO PICK UP (2026-08-23) — READ THIS FIRST, IT SUPERSEDES §8d
 
-**State: `main` @ `43f3d5f` + a version bump. 921 tests, zero biome findings, clean tree, pushed.
-Version 0.6.0 in all three places. `docs/PLAN_local-query-build.md` is COMPLETE — all eight units
-built, merged and live-smoke-tested.**
+**State: `main` @ `757ea1a`. 943 tests, zero biome findings, clean tree, pushed. Version 0.6.0 in
+all three places. `docs/PLAN_local-query-build.md` is COMPLETE — all eight units built, merged,
+live-smoke-tested, and BOTH review rounds are done.**
 
-### The single most important thing to do first
+### The units 6–8 round is DONE (2026-08-23) — do not re-run it
 
-**One Grok review round over units 6–8** (`ls`/`count`, the five graph verbs, `audit`). They are
-gate-green and I smoke-tested them against the live CE board, but they carry **less scrutiny than
-units 1–5**, which got a review that returned APPROVE. That difference is real: on the previous
-branch, review round 3 found a P0 in code that had already passed round 1.
+It returned **BLOCK on one P1** and it was a good catch: `ls`/`count` `--no-estimate` had shipped as
+a **no-op**. Commander maps a `--no-x` boolean onto `options.x`, the predicate read a key that is
+never set, and `count --no-estimate --open` printed the *unfiltered* count — the number an operator
+would quote as the unestimated pile. Live: **389 before, 277 after.**
 
-```bash
-git worktree add --detach /tmp/wt HEAD        # NEVER let a worktree carry .env
-~/PycharmProjects/finance_csv_importer/scripts/external_review.sh grok /tmp/wt <brief> <report>
-```
+Two things about how it slipped through are worth carrying forward:
 
-Follow the protocol in `AGENTS.md` § "Review protocol": **declare the bar in the brief** (P0/P1
-block, P2 records), **one round**, and go again only for a P0/P1 that a previous FIX introduced. Do
-NOT ask the brief for "another instance of a pattern" — that primes a finding you then mistake for
-evidence.
+- **A flag can be tested twice and still never be invoked.** The pure function was tested with
+  `{ noEstimate: true }`; the CLI test asserted `--help` *contains the string* `--no-estimate`.
+  Both passed. Neither ran the flag. **For any CLI flag, at least one test must go through the real
+  argv path** — `tests/unit/cli/query.test.ts` has the `runCli` harness for exactly this.
+- **Smoke-testing found a second P1 the round did not.** The shared "no board selected" refusal
+  named `<file>` and `--project` unconditionally; `audit` accepted *neither*, so its suggested
+  `--project` came back as `unknown option`. It was the first thing that happened when I ran the
+  command. Running the tool as a new user does something a code review structurally cannot.
+
+Both fixed in `757ea1a`, red-green proven, plus two P2s that were silent-wrong-answer classes (a
+non-string activity `actor` read as "not mine"; a parent cycle making work **vanish** — measured
+`0 of 0 stories` for a two-story file). Full write-up: `PLAN_local-query-build.md` § "Round B".
+
+**The round also settled five questions with reasons — do not re-open them.** Most importantly:
+`ready` returning 93% of open work is correct, and narrowing it would invent policy. That section
+lists the rest.
 
 ### Then, in order
 
-1. **The seven P2s from the units 1–5 review**, listed in `PLAN_local-query-build.md`. Two are worth
+1. **The remaining P2s**, listed in `PLAN_local-query-build.md`. Three are worth
    more than their rank: `capabilities` infers relation create/remove from a dialect heuristic
    rather than measuring it (in the one command whose purpose is not making confident claims from
-   indirect evidence), and `atlas` artifacts carry no `fetchedAt` (the whole argument for the age
-   stamp is that an artifact outlives the stderr beside it).
+   indirect evidence); `atlas` artifacts carry no `fetchedAt` (the whole argument for the age
+   stamp is that an artifact outlives the stderr beside it); and the graph verbs have **no
+   `--json`**, so scripting `ready` means parsing `Ready: 361 of 389` — the flagship number, in the
+   one form most likely to be quoted without its denominator.
 2. **Publish.** `npm publish` is interactive (WebAuthn) — the operator must be at the keyboard.
    Before tagging, resolve the tag trap: `v1.0.0`/`v1.1.0` are inherited from upstream linearstories
    and ARE ancestors of `main`; `v1.2.0`–`v1.4.0` are not on `main` at all. Either way `v1.4.0`
