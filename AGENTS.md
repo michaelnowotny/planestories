@@ -71,6 +71,10 @@ overriding it to be thorough is how the loop restarts.
 `packet` briefs — goes under `exports/` at the REPOSITORY ROOT, and `exports/` is gitignored.
 Never commit board content.**
 
+**Deliberate exception:** `.planestories/board.json` is the identity-bound local query cache, not an
+export. It lives at the repository root under `.planestories/`, is gitignored, and is published only
+by atomic replacement after a complete board + relation sweep.
+
 **Replication artifacts are deliberately NOT covered by this rule.** `replicate snapshot -o`,
 `verify -o` and `backup --dir` all require an explicit path, and they belong OUTSIDE the repo
 (the operator keeps them in `~/plane-replication`) — see `docs/REPLICATE.md`. Do not "helpfully"
@@ -142,6 +146,10 @@ Don't blur these.
   (`markdownToHtml`/`htmlToMarkdown`).
 - `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`capabilities`/`groom`/`doctor`/`atlas`/`lint`/`packet`/`epic`.
   `src/types.ts` is the type home.
+- `src/cli/board_cache.ts` — versioned `.planestories/board.json` schema, deep validation,
+  host/workspace/project identity guard, 1h freshness contract, provenance line, and atomic
+  temp+rename publication. `resolveGraph` selects it only after explicit file/snapshot sources and
+  before any live connection; only complete dependency coverage is cacheable.
 - `src/sync/rollup.ts` — the **epic rollup** (`epic` command). `rollupEpic` reuses packet's
   `collectDescendants`/`isEpic` to summarize an epic: leaf-story status breakdown, completion %
   (cancelled excluded from the denominator), Σ leaf effort + unestimated count, and blocked/blocking

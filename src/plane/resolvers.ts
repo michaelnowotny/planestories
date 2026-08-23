@@ -15,6 +15,8 @@ export interface ResolvedProject {
 	id: string;
 	/** Short identifier used in human-readable work item ids, e.g. "BLOOM". */
 	identifier: string;
+	/** Canonical Plane display name (needed for durable board identity/provenance). */
+	name: string;
 }
 
 interface PlaneProject {
@@ -94,7 +96,11 @@ export class Resolver {
 			);
 		}
 
-		const resolved: ResolvedProject = { id: match.id, identifier: match.identifier };
+		const resolved: ResolvedProject = {
+			id: match.id,
+			identifier: match.identifier,
+			name: match.name,
+		};
 		this.projectCache.set(name, resolved);
 		this.projectCache.set(match.id, resolved);
 		return resolved;

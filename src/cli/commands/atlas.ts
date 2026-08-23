@@ -66,6 +66,12 @@ export function registerAtlasCommand(program: Command) {
 			"Skip fetching dependency relations for the live board (faster; hierarchy only)",
 		)
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
+		.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)
+		.option(
+			"--stale-ok",
+			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
+			false,
+		)
 		.action(async (file: string | undefined, options) => {
 			try {
 				// ONE graph-construction path, shared with `critical-path` and `trend`.
@@ -78,6 +84,14 @@ export function registerAtlasCommand(program: Command) {
 					context: options.context,
 					project: options.project,
 					fromSnapshot: options.fromSnapshot,
+					boardCache:
+						file || options.fromSnapshot
+							? undefined
+							: {
+									refresh: options.refresh === true,
+									staleOk: options.staleOk === true,
+									writeRequired: options.refresh === true,
+								},
 					dependencies: options.dependencies,
 					json: options.json === true,
 				});

@@ -48,14 +48,18 @@ planestories projects                              # identifier + name for --pro
 ## Read the board
 
 ```bash
+planestories board fetch --project "Data Platform" # one sweep -> .planestories/board.json
 planestories atlas --project "Data Platform"       # -> exports/atlas.html (offline, self-contained)
 planestories atlas stories/q1.md                   # from a file, no credentials
 planestories atlas --project X --json -o g.json    # the same graph, as data
 planestories atlas --project X --no-dependencies   # skip the relation sweep (faster; NOT "no deps")
+planestories atlas --project X --refresh           # bypass + atomically replace the matching cache
+planestories atlas --project X --stale-ok          # explicitly accept a cache older than 1h
 
 planestories epic DATA-100                         # rollup: status split, completion %, Σ effort
 planestories show DATA-123                         # compact one-item answer; no description body
 planestories show DATA-123 --json                  # the same answer for scripts
+planestories show DATA-123 --refresh               # live re-fetch + cache replacement
 planestories packet DATA-123                       # implementable brief for an agent (an epic emits all descendants)
 planestories critical-path --project X             # dependency floor in dev-days, slack, biggest lever
 planestories critical-path stories/q1.md --json
@@ -192,6 +196,8 @@ reproductions: [`PLANE_CAPABILITIES.md`](./PLANE_CAPABILITIES.md).
 ## Things that will bite you
 
 - **Every `##` heading becomes a work item.** Design docs and stories do not share a file.
+- **Cached answers always print their age.** Past 1h they refuse unless you re-fetch with
+  `--refresh` or explicitly acknowledge the old state with `--stale-ok`.
 - **`--no-dependencies` is not "this board has no dependencies."** It skips the sweep; the atlas
   says `skipped`, and the floor shows `—` rather than a number.
 - **A dependency floor is a floor, not a date.** It assumes unlimited parallelism, and it reads

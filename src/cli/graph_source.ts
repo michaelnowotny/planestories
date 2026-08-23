@@ -14,12 +14,32 @@ import { Resolver } from "../plane/resolvers.ts";
 import { isCriterionChild } from "../sync/board-story.ts";
 import { announceTarget } from "./announce_target.ts";
 import {
+	BOARD_CACHE_MAX_AGE_MS,
+	type BoardCache,
+	boardCacheMatchesTarget,
+	defaultBoardCachePath,
+	formatBoardCacheAge,
+	formatCachedBoardState,
+	isBoardCacheStale,
+	readBoardCache,
+	writeBoardCacheAtomic,
+} from "./board_cache.ts";
+import {
 	announceSnapshotSource,
 	asClient,
 	loadConfigForSnapshot,
 	openSnapshotSource,
 } from "./snapshot_option.ts";
 import { connectTarget } from "./target_client.ts";
+
+export interface BoardCacheSourceOptions {
+	/** Bypass a matching cache, fetch live, and replace the cache when complete. */
+	refresh?: boolean;
+	/** Explicitly acknowledge and use a matching cache older than the freshness limit. */
+	staleOk?: boolean;
+	/** A partial refresh is a command failure, never a published cache or success. */
+	writeRequired?: boolean;
+}
 
 export interface GraphSourceOptions {
 	/** A markdown stories file — offline, no config, no API. */
@@ -28,13 +48,25 @@ export interface GraphSourceOptions {
 	context?: string;
 	project?: string;
 	fromSnapshot?: string;
+	/** Opt this command into the board cache as a third graph source. */
+	boardCache?: BoardCacheSourceOptions;
 	/** False skips the relation sweep (hierarchy only). */
 	dependencies?: boolean;
 	/** True keeps stdout machine-clean; provenance goes to stderr. */
 	json?: boolean;
 }
 
-/** Durable provenance for a graph-backed answer, including snapshot age where applicable. */
+/** Injectable boundaries used by no-network source-selection tests. */
+export interface GraphSourceRuntime {
+	cachePath?: string;
+	maxCacheAgeMs?: number;
+	now?: () => Date;
+	log?: (message: string) => void;
+	warn?: (message: string) => void;
+	connectTarget?: typeof connectTarget;
+}
+
+/** Durable provenance for a graph-backed answer, including recorded-source age. */
 export type GraphSourceProvenance =
 	| { kind: "file"; project: string; path: string }
 	| { kind: "live"; project: string; baseUrl: string; workspaceSlug: string }
@@ -44,6 +76,14 @@ export type GraphSourceProvenance =
 			baseUrl: string;
 			workspaceSlug: string;
 			takenAt: string;
+	  }
+	| {
+			kind: "cache";
+			project: string;
+			baseUrl: string;
+			workspaceSlug: string;
+			fetchedAt: string;
+			itemCount: number;
 	  };
 
 /** Thrown by `requireCompleteGraph`. Carries the coverage so callers can explain it. */
@@ -58,6 +98,16 @@ export class IncompleteGraphError extends Error {
 				: `Refusing to compute ${purpose}: ${coverage.kind === "partial" ? coverage.failures : 0} relation lookup(s) failed, so the dependency graph is incomplete.`,
 		);
 		this.name = "IncompleteGraphError";
+	}
+}
+
+/** A stale answer is a refusal, distinct from a network/configuration failure. */
+export class StaleBoardCacheError extends Error {
+	constructor(age: string) {
+		super(
+			`Cached board state is ${age} old — refusing to serve it as current. Pass --refresh to re-fetch, or --stale-ok to use it anyway.`,
+		);
+		this.name = "StaleBoardCacheError";
 	}
 }
 
@@ -94,15 +144,16 @@ export interface GraphSourceResult {
 }
 
 /**
- * Build an `AtlasGraph` from a stories file, a live board, or a snapshot.
+ * Build an `AtlasGraph` from a stories file, a snapshot, a matching board cache,
+ * or a live board — in that precedence order.
  *
- * Extracted from the `atlas` command so every graph consumer shares ONE
- * construction path. The alternative — each command assembling its own — is the
- * shape that produced the relation-ref defect, where five call sites did the
- * same job and one of them did it differently (docs/HANDOFF.md §9.5e). A second
- * builder here would be free to drift in exactly the same way.
+ * This remains the one graph-construction path. The cache stores the output of
+ * this same live builder; it does not introduce a parallel board interpretation.
  */
-export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSourceResult> {
+export async function resolveGraph(
+	options: GraphSourceOptions,
+	runtime: GraphSourceRuntime = {},
+): Promise<GraphSourceResult> {
 	if (options.file) {
 		const content = await Bun.file(options.file).text();
 		// A stories file carries its own `blocks:` lines, so the dependency
@@ -114,6 +165,18 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 			project: graph.project,
 			path: options.file,
 		});
+	}
+
+	if (options.boardCache?.refresh && options.boardCache.staleOk) {
+		throw new ConfigError("--refresh and --stale-ok are mutually exclusive.");
+	}
+	if (options.boardCache?.refresh && options.dependencies === false) {
+		throw new ConfigError(
+			"--refresh cannot be combined with --no-dependencies: omit --no-dependencies to refresh the complete cache, or omit --refresh for a hierarchy-only view.",
+		);
+	}
+	if (options.boardCache?.writeRequired && !options.boardCache.refresh) {
+		throw new ConfigError("A required board-cache write must also request a refresh.");
 	}
 
 	let config = options.fromSnapshot
@@ -131,9 +194,45 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 		);
 	}
 
+	// Cache lookup MUST precede connectTarget: even its cheap dialect probe is a
+	// network call, which would make a supposedly local answer neither instant nor
+	// offline. Explicit files/snapshots returned or selected above and never reach it.
+	if (!snapshotSource && options.boardCache && !options.boardCache.refresh) {
+		const cached = await readBoardCache(runtime.cachePath ?? defaultBoardCachePath(), {
+			warn: cacheWarn(runtime),
+		});
+		if (
+			cached &&
+			boardCacheMatchesTarget(cached, {
+				baseUrl: config.baseUrl,
+				workspaceSlug: config.workspaceSlug,
+				project: projectName,
+			})
+		) {
+			const now = (runtime.now ?? (() => new Date()))();
+			cacheLog(runtime)(formatCachedBoardState(cached, now));
+			const age = formatBoardCacheAge(cached, now);
+			if (isBoardCacheStale(cached, now, runtime.maxCacheAgeMs ?? BOARD_CACHE_MAX_AGE_MS)) {
+				if (!options.boardCache.staleOk) throw new StaleBoardCacheError(age);
+				cacheWarn(runtime)(
+					`⚠ Cached state is ${age} old — proceeding because --stale-ok was explicitly passed.`,
+				);
+			}
+
+			const coverage: DependencyCoverage =
+				options.dependencies === false ? { kind: "skipped" } : { kind: "complete" };
+			return graphSourceResult(
+				options.dependencies === false ? hierarchyOnly(cached.graph) : cached.graph,
+				coverage,
+				0,
+				cacheProvenance(cached),
+			);
+		}
+	}
+
 	let client = snapshotSource ? asClient(snapshotSource) : undefined;
 	if (!client) {
-		const target = await connectTarget(config, { project: projectName });
+		const target = await (runtime.connectTarget ?? connectTarget)(config, { project: projectName });
 		config = target.config;
 		client = target.client;
 		// Read-only commands say it too: "which board am I looking at" is the first
@@ -148,8 +247,7 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 	// Dependency edges need each non-criterion item's relations (one GET each).
 	// A per-item failure DROPS that item's edges rather than aborting: for a
 	// read-only view a graph with most edges beats no graph. Callers that cannot
-	// tolerate a missing edge must say so — see the note in the critical-path
-	// command, where a dropped edge could silently shorten the reported floor.
+	// tolerate a missing edge must say so via GraphSourceResult.
 	let relationsById: Map<string, PlaneIssueRelations> | undefined;
 	let relationFailures = 0;
 	let relationRecovered = 0;
@@ -181,29 +279,91 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 			: relationFailures > 0
 				? { kind: "partial", failures: relationFailures }
 				: { kind: "complete" };
+	const graph = buildAtlasFromBoard(
+		client,
+		project.id,
+		project.identifier,
+		project.name,
+		index,
+		relationsById,
+	);
+
+	if (!snapshotSource && options.boardCache?.refresh) {
+		if (coverage.kind !== "complete") {
+			const reason =
+				coverage.kind === "skipped"
+					? "dependency relations were skipped"
+					: `${coverage.failures} relation lookup(s) failed`;
+			const message = `Board cache was not written because ${reason}; the previous complete cache, if any, is unchanged.`;
+			if (options.boardCache.writeRequired) throw new Error(message);
+			cacheWarn(runtime)(`⚠ ${message}`);
+		} else {
+			const now = (runtime.now ?? (() => new Date()))();
+			const cache: BoardCache = {
+				schemaVersion: 1,
+				fetchedAt: now.toISOString(),
+				instance: { baseUrl: config.baseUrl, workspaceSlug: config.workspaceSlug },
+				project: {
+					id: project.id,
+					identifier: project.identifier,
+					name: project.name,
+					selectedAs: projectName,
+				},
+				itemCount: index.items.length,
+				dependencyCoverage: { kind: "complete" },
+				graph,
+			};
+			await writeBoardCacheAtomic(runtime.cachePath ?? defaultBoardCachePath(), cache);
+			cacheLog(runtime)(
+				`→ board cache refreshed · ${project.name} · ${index.items.length} ${index.items.length === 1 ? "item" : "items"}`,
+			);
+		}
+	}
 
 	const provenance: GraphSourceProvenance = snapshotSource
 		? {
 				kind: "snapshot",
-				project: projectName,
+				project: project.name,
 				baseUrl: snapshotSource.baseUrl,
 				workspaceSlug: snapshotSource.workspaceSlug,
 				takenAt: snapshotSource.takenAt,
 			}
 		: {
 				kind: "live",
-				project: projectName,
+				project: project.name,
 				baseUrl: config.baseUrl,
 				workspaceSlug: config.workspaceSlug,
 			};
 
-	return graphSourceResult(
-		buildAtlasFromBoard(client, project.id, project.identifier, projectName, index, relationsById),
-		coverage,
-		relationRecovered,
-		provenance,
-		client,
-	);
+	return graphSourceResult(graph, coverage, relationRecovered, provenance, client);
+}
+
+function cacheProvenance(cache: BoardCache): GraphSourceProvenance {
+	return {
+		kind: "cache",
+		project: cache.project.name,
+		baseUrl: cache.instance.baseUrl,
+		workspaceSlug: cache.instance.workspaceSlug,
+		fetchedAt: cache.fetchedAt,
+		itemCount: cache.itemCount,
+	};
+}
+
+/** Preserve `--no-dependencies`: cached edges must not leak into a hierarchy-only view. */
+function hierarchyOnly(graph: AtlasGraph): AtlasGraph {
+	return {
+		...graph,
+		edges: [],
+		counts: { ...graph.counts, edges: 0 },
+	};
+}
+
+function cacheLog(runtime: GraphSourceRuntime): (message: string) => void {
+	return runtime.log ?? ((message) => console.error(chalk.dim(message)));
+}
+
+function cacheWarn(runtime: GraphSourceRuntime): (message: string) => void {
+	return runtime.warn ?? ((message) => console.error(chalk.yellow(message)));
 }
 
 function graphSourceResult(
