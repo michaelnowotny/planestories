@@ -11,7 +11,7 @@ describe("Resolver.resolveProject", () => {
 		const resolver = new Resolver(client);
 
 		const resolved = await resolver.resolveProject("Web App");
-		expect(resolved).toEqual({ id: PROJECT.id, identifier: "WEB" });
+		expect(resolved).toEqual({ id: PROJECT.id, identifier: "WEB", name: "Web App" });
 	});
 
 	test("passes through a UUID by matching on id", async () => {

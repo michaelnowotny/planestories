@@ -26,6 +26,9 @@ function formatProvenance(provenance: GraphSourceProvenance): string {
 	if (provenance.kind === "snapshot") {
 		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · snapshot taken ${provenance.takenAt}`;
 	}
+	if (provenance.kind === "cache") {
+		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · cached at ${provenance.fetchedAt}`;
+	}
 	if (provenance.kind === "live") {
 		return `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug} · live`;
 	}
@@ -48,6 +51,12 @@ export function registerShowCommand(program: Command) {
 		)
 		.option("--json", "Emit the same one-item summary as machine-readable JSON", false)
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
+		.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)
+		.option(
+			"--stale-ok",
+			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
+			false,
+		)
 		.action(async (identifier: string, options) => {
 			try {
 				const source = await resolveGraph({
@@ -55,6 +64,13 @@ export function registerShowCommand(program: Command) {
 					context: options.context,
 					project: options.project,
 					fromSnapshot: options.fromSnapshot,
+					boardCache: options.fromSnapshot
+						? undefined
+						: {
+								refresh: options.refresh === true,
+								staleOk: options.staleOk === true,
+								writeRequired: options.refresh === true,
+							},
 					json: options.json === true,
 				});
 				// `show` does not compute a board-wide dependency figure: all scalar,

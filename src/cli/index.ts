@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { registerAtlasCommand } from "./commands/atlas.ts";
+import { registerBoardCommand } from "./commands/board.ts";
 import { registerCapabilitiesCommand } from "./commands/capabilities.ts";
 import { registerCriticalPathCommand } from "./commands/critical-path.ts";
 import { registerDeleteCommand } from "./commands/delete.ts";
@@ -41,6 +42,7 @@ registerProjectsCommand(program);
 registerGroomCommand(program);
 registerMigrateCriteriaCommand(program);
 registerDoctorCommand(program);
+registerBoardCommand(program);
 registerAtlasCommand(program);
 registerShowCommand(program);
 registerLintCommand(program);

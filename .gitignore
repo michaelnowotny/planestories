@@ -36,6 +36,9 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 .cache
 *.tsbuildinfo
 
+# Identity-bound local board state. This is data, not a committable export.
+/.planestories/
+
 # IntelliJ based IDEs
 .idea
 
