@@ -88,6 +88,32 @@ describe("dialect detection", () => {
 		expect(split.writes).toHaveLength(0);
 	});
 
+	test("source-side detection samples one live item instead of paginating the board", async () => {
+		let samples = 0;
+		const dialect = await detectSourceDialect(
+			(d) => ({
+				dialect: d,
+				async sampleWorkItem<T>(): Promise<T | null> {
+					samples++;
+					return { id: "item-existing" } as T;
+				},
+				async listWorkItems<T>(): Promise<T[]> {
+					throw new Error("full-board list must not run during dialect detection");
+				},
+				async listArchivedWorkItems<T>(): Promise<T[] | null> {
+					return [] as T[];
+				},
+				async getRelations(): Promise<PlaneIssueRelations> {
+					if (d !== "work-items") throw new PlaneApiError("Page not found.", 404);
+					return EMPTY_RELATIONS;
+				},
+			}),
+			"src-project",
+		);
+		expect(dialect).toBe("work-items");
+		expect(samples).toBe(1);
+	});
+
 	test("an archived-only project is not misread as empty (archived items discriminate)", async () => {
 		// Codex review scenario: live inventory is empty under BOTH dialects but
 		// archived items exist. Choosing /issues/ on its empty live list would

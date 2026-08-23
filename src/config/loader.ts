@@ -351,7 +351,10 @@ function resolveConfig(
 		// snapshot run must never look like a live instance, and an empty string is
 		// visibly not one. With credentials, the default is correct as before.
 		baseUrl: config.baseUrl ?? (options.allowMissingCredentials ? "" : DEFAULT_PLANE_BASE_URL),
-		dialect: config.dialect ?? "issues",
+		// Preserve absence: live commands auto-detect once per context. PlaneClient
+		// still owns the loud-failure fallback to its historical `issues` default.
+		dialect: config.dialect,
+		dialectSource: config.dialect === undefined ? undefined : "configured",
 		defaultProject: config.defaultProject ?? null,
 		defaultLabels: config.defaultLabels ?? [],
 		sourceLabel: config.sourceLabel ?? null,

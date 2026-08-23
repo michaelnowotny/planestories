@@ -2,8 +2,8 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient } from "../../plane/client.ts";
 import { generatePacket } from "../../sync/packet.ts";
+import { announceTarget } from "../announce_target.ts";
 import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
 import {
@@ -13,6 +13,7 @@ import {
 	loadConfigForSnapshot,
 	openSnapshotSource,
 } from "../snapshot_option.ts";
+import { connectTarget } from "../target_client.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -50,25 +51,20 @@ export function registerPacketCommand(program: Command) {
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (identifier: string, options) => {
 			try {
-				const config = options.fromSnapshot
+				let config = options.fromSnapshot
 					? await loadConfigForSnapshot(options.config, options.context)
 					: await loadConfig({ configPath: options.config, context: options.context });
 				const snapshotSource = options.fromSnapshot
 					? await openSnapshotSource(String(options.fromSnapshot))
 					: null;
 				if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
-				const client = snapshotSource
-					? asClient(snapshotSource)
-					: createPlaneClient({
-							apiKey: config.apiKey,
-							workspaceSlug: config.workspaceSlug,
-							baseUrl: config.baseUrl,
-							maxRetries: config.maxRetries,
-							dialect: config.dialect,
-							requestsPerMinute: config.apiRateLimit,
-							rateHeadroom: config.rateHeadroom,
-							maxConcurrency: config.maxConcurrency,
-						});
+				let client = snapshotSource ? asClient(snapshotSource) : undefined;
+				if (!client) {
+					const target = await connectTarget(config, { project: options.project });
+					config = target.config;
+					client = target.client;
+					announceTarget(config, options.context, options.project);
+				}
 
 				const { markdown, packet } = await generatePacket(client, {
 					config,

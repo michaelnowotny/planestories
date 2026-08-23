@@ -8,7 +8,7 @@ import {
 import { fetchRelationsWithSweep } from "../atlas/relations.ts";
 import { loadConfig } from "../config/loader.ts";
 import { ConfigError } from "../errors.ts";
-import { createPlaneClient, type PlaneClient, type PlaneIssueRelations } from "../plane/client.ts";
+import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import { fetchProjectIndex } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import { isCriterionChild } from "../sync/board-story.ts";
@@ -19,6 +19,7 @@ import {
 	loadConfigForSnapshot,
 	openSnapshotSource,
 } from "./snapshot_option.ts";
+import { connectTarget } from "./target_client.ts";
 
 export interface GraphSourceOptions {
 	/** A markdown stories file — offline, no config, no API. */
@@ -97,7 +98,7 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 		return graphSourceResult(buildAtlasFromFile(content, options.file), { kind: "complete" }, 0);
 	}
 
-	const config = options.fromSnapshot
+	let config = options.fromSnapshot
 		? await loadConfigForSnapshot(options.config, options.context)
 		: await loadConfig({ configPath: options.config, context: options.context });
 	const snapshotSource = options.fromSnapshot
@@ -106,27 +107,21 @@ export async function resolveGraph(options: GraphSourceOptions): Promise<GraphSo
 	if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
 
 	const projectName = options.project ?? snapshotSource?.projectName ?? config.defaultProject;
-	// Read-only commands say it too: "which board am I looking at" is the first
-	// question when a number surprises you.
-	if (!snapshotSource) announceTarget(config, options.context, projectName ?? undefined);
 	if (!projectName) {
 		throw new ConfigError(
 			"Provide a <file> argument, or --project <name> (or a defaultProject) to read the live board.",
 		);
 	}
 
-	const client = snapshotSource
-		? asClient(snapshotSource)
-		: createPlaneClient({
-				apiKey: config.apiKey,
-				workspaceSlug: config.workspaceSlug,
-				baseUrl: config.baseUrl,
-				maxRetries: config.maxRetries,
-				dialect: config.dialect,
-				requestsPerMinute: config.apiRateLimit,
-				rateHeadroom: config.rateHeadroom,
-				maxConcurrency: config.maxConcurrency,
-			});
+	let client = snapshotSource ? asClient(snapshotSource) : undefined;
+	if (!client) {
+		const target = await connectTarget(config, { project: projectName });
+		config = target.config;
+		client = target.client;
+		// Read-only commands say it too: "which board am I looking at" is the first
+		// question when a number surprises you.
+		announceTarget(config, options.context, projectName);
+	}
 
 	const resolver = new Resolver(client);
 	const project = await resolver.resolveProject(projectName);

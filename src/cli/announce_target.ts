@@ -30,9 +30,11 @@ export function announceTarget(
 			? `context ${config.contextName} (implicit)`
 			: "default (bare PLANE_* env)";
 	const proj = project ?? config.defaultProject;
+	const dialect = config.dialect ?? "issues";
+	const dialectSource = config.dialectSource ?? (config.dialect ? "configured" : "fallback");
 	console.error(
 		chalk.dim(
-			`→ ${host} · workspace ${config.workspaceSlug} · ${proj ? `project ${proj} · ` : ""}${where}`,
+			`→ ${host} · workspace ${config.workspaceSlug} · ${proj ? `project ${proj} · ` : ""}dialect ${dialect} (${dialectSource}) · ${where}`,
 		),
 	);
 }

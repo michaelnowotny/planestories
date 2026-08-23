@@ -21,15 +21,19 @@ describe("config endpoint dialect", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	test("defaults to issues and reads flat file/env with env precedence", async () => {
+	test("preserves an absent dialect and reads flat file/env with env precedence", async () => {
 		const path = join(dir, "config.json");
 		writeFileSync(path, JSON.stringify({ apiKey: "k", workspaceSlug: "ws" }));
-		expect((await loadConfig({ configPath: path })).dialect).toBe("issues");
+		const absent = await loadConfig({ configPath: path });
+		expect(absent.dialect).toBeUndefined();
+		expect(absent.dialectSource).toBeUndefined();
 		writeFileSync(
 			path,
 			JSON.stringify({ apiKey: "k", workspaceSlug: "ws", dialect: "work-items" }),
 		);
-		expect((await loadConfig({ configPath: path })).dialect).toBe("work-items");
+		const configured = await loadConfig({ configPath: path });
+		expect(configured.dialect).toBe("work-items");
+		expect(configured.dialectSource).toBe("configured");
 		process.env.PLANE_DIALECT = "issues";
 		expect((await loadConfig({ configPath: path })).dialect).toBe("issues");
 	});

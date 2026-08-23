@@ -2,10 +2,10 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient } from "../../plane/client.ts";
 import { type GroomReport, groom } from "../../sync/groomer.ts";
 import { reverseSyncCriteria, type WriteBackReport } from "../../sync/writeback.ts";
 import { announceTarget } from "../announce_target.ts";
+import { connectTarget } from "../target_client.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -145,18 +145,9 @@ export function registerGroomCommand(program: Command) {
 		)
 		.action(async (options) => {
 			try {
-				const config = await loadConfig({ configPath: options.config, context: options.context });
+				const loaded = await loadConfig({ configPath: options.config, context: options.context });
+				const { config, client } = await connectTarget(loaded, { project: options.project });
 				announceTarget(config, options.context, options.project);
-				const client = createPlaneClient({
-					apiKey: config.apiKey,
-					workspaceSlug: config.workspaceSlug,
-					baseUrl: config.baseUrl,
-					maxRetries: config.maxRetries,
-					dialect: config.dialect,
-					requestsPerMinute: config.apiRateLimit,
-					rateHeadroom: config.rateHeadroom,
-					maxConcurrency: config.maxConcurrency,
-				});
 
 				const writeBackFiles: string[] = options.writeBack ?? [];
 

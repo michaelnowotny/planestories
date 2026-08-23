@@ -27,6 +27,9 @@ export interface RecordedCall {
 export interface FakeData {
 	/** Simulate Plane CE, which 404s on the relation-removal endpoint. */
 	relationRemovalUnsupported?: boolean;
+	instance?: { edition?: string; current_version?: string };
+	pqlUnsupported?: boolean;
+	countEndpointUnsupported?: boolean;
 	projects?: FakeProject[];
 	states?: Record<string, FakeNamed[]>;
 	labels?: Record<string, FakeNamed[]>;
@@ -117,6 +120,10 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 	}
 
 	const impl = {
+		baseUrl: "https://api.plane.so",
+		workspaceSlug: "ws",
+		dialect: "issues" as const,
+		dialectConfigured: true,
 		concurrency: (): number | undefined => undefined,
 		pacingSummary: (): string | undefined => undefined,
 		workItemWebUrl(projectId: string, workItemId: string): string {
@@ -130,6 +137,13 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 		async listProjects<T>(): Promise<T[]> {
 			record("listProjects", []);
 			return (data.projects ?? []) as unknown as T[];
+		},
+
+		async getInstance<T>(): Promise<T> {
+			record("getInstance", []);
+			return {
+				instance: data.instance ?? { edition: "PLANE_CLOUD", current_version: "test" },
+			} as T;
 		},
 
 		async listStates<T>(projectId: string): Promise<T[]> {
@@ -233,6 +247,28 @@ export function makeFakeClient(data: FakeData = {}): FakeClient {
 				items = items.filter((i) => i.external_id === query.external_id);
 			}
 			return items as unknown as T[];
+		},
+
+		async sampleWorkItem<T>(projectId: string): Promise<T | null> {
+			record("sampleWorkItem", [projectId]);
+			return ((data.workItems?.[projectId] ?? [])[0] ?? null) as T | null;
+		},
+
+		async probePql(projectId: string): Promise<void> {
+			record("probePql", [projectId]);
+			if (data.pqlUnsupported) {
+				throw new PlaneApiError(
+					'Plane API GET failed (400 Bad Request): {"pql":"PQL is not supported","unsupported_parameters":["pql"]}',
+					400,
+				);
+			}
+		},
+
+		async probeWorkspaceCount(): Promise<void> {
+			record("probeWorkspaceCount", []);
+			if (data.countEndpointUnsupported) {
+				throw new PlaneApiError("Plane API GET failed (404 Not Found)", 404);
+			}
 		},
 
 		// Mirrors Plane's single-object lookup: returns the matching work item or null.

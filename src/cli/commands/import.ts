@@ -3,11 +3,11 @@ import type { Command } from "commander";
 import { glob } from "glob";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient } from "../../plane/client.ts";
 import { importStories } from "../../sync/importer.ts";
 import type { ImportSummary } from "../../types.ts";
 import { announceTarget } from "../announce_target.ts";
 import { reportPacing } from "../pacing.ts";
+import { connectTarget } from "../target_client.ts";
 
 /**
  * Resolve an array of file paths / glob patterns into deduplicated file paths.
@@ -276,21 +276,10 @@ export function registerImportCommand(program: Command) {
 				}
 
 				// Load config
-				const config = await loadConfig({ configPath: options.config, context: options.context });
-				// Before ANY work: say which board this is about to touch.
+				const loaded = await loadConfig({ configPath: options.config, context: options.context });
+				const { config, client } = await connectTarget(loaded, { project: options.project });
+				// Before any mutation: say which board and detected dialect this will use.
 				announceTarget(config, options.context, options.project);
-
-				// Create client
-				const client = createPlaneClient({
-					apiKey: config.apiKey,
-					workspaceSlug: config.workspaceSlug,
-					baseUrl: config.baseUrl,
-					maxRetries: config.maxRetries,
-					dialect: config.dialect,
-					requestsPerMinute: config.apiRateLimit,
-					rateHeadroom: config.rateHeadroom,
-					maxConcurrency: config.maxConcurrency,
-				});
 
 				// Import
 				const summary = await importStories(client, {

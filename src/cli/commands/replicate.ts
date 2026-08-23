@@ -94,7 +94,9 @@ async function sourceFor(
 				`Available: ${projects.map((p) => p.name).join(", ")}`,
 		);
 	}
-	const dialect = await detectSourceDialect((d) => withDialect(base, d), match.id);
+	const dialect = base.dialectConfigured
+		? base.dialect
+		: await detectSourceDialect((d) => withDialect(base, d), match.id);
 	return { client: withDialect(base, dialect), projectId: match.id };
 }
 
@@ -165,7 +167,7 @@ async function runApply(
 		);
 	}
 	let applyClient = client;
-	if (options.yes === true) {
+	if (options.yes === true && !client.dialectConfigured) {
 		// Select the endpoint dialect that serves this TARGET's full surface
 		// (temp-project probe — a write, so real runs only; dry-run stays
 		// zero-write and reports under the default dialect).

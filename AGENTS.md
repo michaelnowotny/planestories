@@ -110,6 +110,11 @@ Don't blur these.
 - `src/plane/client.ts` — REST client. `request()` wraps every call in transient-failure retry
   (429/5xx/network, `Retry-After` or exponential backoff+jitter; `PLANE_MAX_RETRIES`). Never add
   a parallel HTTP path.
+- `src/plane/dialect.ts` — the shared read-only endpoint-family detector and per-context resolver.
+  It samples one item and discriminates with relation `GET`; explicit configuration wins, and an
+  inconclusive result stays visibly `fallback`, never masquerades as detected.
+- `src/plane/capabilities.ts` — independent read-only capability probes with tri-state results
+  (`supported` / `not-supported` / `could-not-determine`); powers the `capabilities` command.
 - `src/plane/relation_refs.ts` — **the ONE place relation references are normalized.** Plane
   returns them as bare id strings on `/issues/` and as `{project_id, issue_id}` objects on
   `/work-items/`, while the type says `string[]` — so an un-normalized ref becomes an
@@ -135,7 +140,7 @@ Don't blur these.
 - `src/markdown/` — `parser.ts`/`serializer.ts` (YAML keys incl. `plane_hash`), `writer.ts`
   (`writeBackIds`/`clearWriteBack`), `criteria.ts` (`splitBody`/checklist), `html.ts`
   (`markdownToHtml`/`htmlToMarkdown`).
-- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`groom`/`doctor`/`atlas`/`lint`/`packet`/`epic`.
+- `src/cli/commands/` — `import`/`export`/`delete`/`set`/`projects`/`capabilities`/`groom`/`doctor`/`atlas`/`lint`/`packet`/`epic`.
   `src/types.ts` is the type home.
 - `src/sync/rollup.ts` — the **epic rollup** (`epic` command). `rollupEpic` reuses packet's
   `collectDescendants`/`isEpic` to summarize an epic: leaf-story status breakdown, completion %

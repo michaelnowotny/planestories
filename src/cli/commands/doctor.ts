@@ -2,7 +2,7 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
-import { createPlaneClient, type PlaneClient } from "../../plane/client.ts";
+import type { PlaneClient } from "../../plane/client.ts";
 import { fetchProjectIndex } from "../../plane/issues.ts";
 import { Resolver } from "../../plane/resolvers.ts";
 import { parseSnapshot } from "../../replicate/snapshot.ts";
@@ -12,12 +12,14 @@ import { checkDependencyGraph } from "../../sync/graph_check.ts";
 import { groom } from "../../sync/groomer.ts";
 import { checkHouseRules, type HouseRuleFindings } from "../../sync/house_rules.ts";
 import { checkCriteriaMigration } from "../../sync/migrate.ts";
+import { announceTarget } from "../announce_target.ts";
 import { reportPacing } from "../pacing.ts";
 import {
 	announceSnapshotSource,
 	loadConfigForSnapshot,
 	snapshotProvenance,
 } from "../snapshot_option.ts";
+import { connectTarget } from "../target_client.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -69,7 +71,7 @@ export function registerDoctorCommand(program: Command) {
 		)
 		.action(async (options) => {
 			try {
-				const config = options.fromSnapshot
+				let config = options.fromSnapshot
 					? await loadConfigForSnapshot(options.config, options.context)
 					: await loadConfig({ configPath: options.config, context: options.context });
 				// A snapshot contains exactly what doctor enumerates, so it can stand in for
@@ -78,17 +80,13 @@ export function registerDoctorCommand(program: Command) {
 				const snapshotSource = options.fromSnapshot
 					? new SnapshotSource(parseSnapshot(await Bun.file(String(options.fromSnapshot)).text()))
 					: null;
-				const client = (snapshotSource ??
-					createPlaneClient({
-						apiKey: config.apiKey,
-						workspaceSlug: config.workspaceSlug,
-						baseUrl: config.baseUrl,
-						maxRetries: config.maxRetries,
-						dialect: config.dialect,
-						requestsPerMinute: config.apiRateLimit,
-						rateHeadroom: config.rateHeadroom,
-						maxConcurrency: config.maxConcurrency,
-					})) as unknown as PlaneClient;
+				let client = snapshotSource as unknown as PlaneClient | null;
+				if (!client) {
+					const target = await connectTarget(config, { project: options.project });
+					config = target.config;
+					client = target.client;
+					announceTarget(config, options.context, options.project);
+				}
 				// stderr, so --json stdout stays machine-clean; and INSIDE the payload, so a
 				// stored CI artifact cannot be mistaken for a live reading later.
 				if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
