@@ -46,7 +46,12 @@ export interface ExportOptions {
 export async function exportStories(
 	client: PlaneClient,
 	options: ExportOptions,
-): Promise<{ count: number; outputPath: string }> {
+): Promise<{
+	count: number;
+	outputPath: string;
+	projectItemCount: number;
+	unmatchedIdentifiers: string[];
+}> {
 	const resolver = new Resolver(client);
 
 	const projectName =
@@ -190,5 +195,16 @@ export async function exportStories(
 	const markdown = serializeStories(stories, frontmatter, { frontmatterComments });
 	await Bun.write(options.outputPath, markdown);
 
-	return { count: stories.length, outputPath: options.outputPath };
+	return {
+		count: stories.length,
+		outputPath: options.outputPath,
+		// How many items the PROJECT holds, before filtering. An empty export from a
+		// populated project means the filters excluded everything; an empty export
+		// from an empty project index usually means the wrong board.
+		projectItemCount: items.length,
+		// Requested identifiers that matched nothing here — the existence check.
+		unmatchedIdentifiers: (options.filters.issues ?? []).filter(
+			(wanted) => !stories.some((story) => story.planeIdentifier === wanted),
+		),
+	};
 }

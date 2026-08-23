@@ -52,6 +52,29 @@ neither happens by accident. Commands keep working against `--from-snapshot <fil
 This also makes the **analysis reproducible**: two people (or an agent re-running tomorrow) get the
 same answer from the same `board.json`, which matters when the output feeds a decision.
 
+## 2b. ⚠ A refusal must say what WOULD answer the question
+
+The single most valuable line in either session's reply, from finance:
+
+> *"When a query cannot be answered, the failure mode is not 'no answer' — it is a confident wrong
+> claim about why."*
+
+They asked for a child count, hit the PQL rejection, and generalised one failed call into a
+**capability claim about the whole edition** — which went into a retirement register as an explicit,
+durable, false limitation. The number was obtainable the whole time (69 direct children, 12 done,
+57 open) and needed no PQL, because child count is hierarchy.
+
+So every refusal in this surface names the alternative:
+
+```
+count --epic DATA-2449 --open
+✗ this deployment cannot filter server-side (Community Edition: no PQL)
+  → answered locally instead: 57 open of 69 direct children   [board state 14m old]
+```
+
+Not "unsupported". Either the answer by another route, or the exact command that gets it. This
+applies to the whole CLI, not just the new verbs.
+
 ## 3. The commands, grouped by the question — not by the filter
 
 The rule: **a command answers a question a person actually asks.** Where a generic filter is
@@ -79,6 +102,10 @@ Open items with at least one unfinished blocker, each shown with its blocker cha
 blocker's status/owner. Distinguishes three cases that look identical in a raw list: blocked by
 open work, blocked by an item that is itself blocked (chain depth), and blocked by a **dangling**
 reference (`doctor` already detects these).
+
+**Drop the `--owner` half.** Finance: *"single-operator project, the owner is always the same
+person — the `--owner` half is you inventing a need."* Correct; removed. What survives from both
+sessions is *"what does this block?"*, and the titles below.
 
 **Each blocker prints its one-line TITLE, not just its identifier.** Research session, 2026-08-23,
 from a real mis-dispatch: *"`blocked` as specced would have told me CFAP-111 is blocked by CFAP-116.
@@ -127,9 +154,17 @@ They are right, and it is the better idea: it needs no schema change and it is a
 planestories risks [--epic X]
 ```
 
-Per-epic: unestimated share, blocked share, criteria-completion vs status-completion drift (a story
-marked Done with unticked criteria, or the reverse), and single-owner concentration. Every input is
-already in the graph; none is available from Plane directly.
+**Cut to the one piece both sessions confirmed is real.** Research would "trade the whole verb"
+for `inconsistent`; finance called unestimated-share and criteria-drift invented for their use. What
+IS real, and urgent for finance right now:
+
+```
+planestories abandoned          # open items whose parent epic is cancelled/abandoned
+```
+
+*"Which open tickets belong to an epic we have abandoned"* — that is what their entire retirement
+register is, currently answered with two subagents and a git sweep. Single-owner concentration and
+unestimated share are dropped until someone asks.
 
 ### D. The honest filter
 
@@ -152,6 +187,29 @@ planestories show DATA-2449
 One item, human-shaped: fields, parent, direct children with status split, relations with each
 counterpart's status, criteria. `packet` already covers the agent-shaped version; `show` is the
 five-line answer. Both read the cache when present.
+
+### E2. "Where did MY writes land?" — the one neither of us listed
+
+```
+planestories audit [--since <n>] [--context X]
+```
+
+Writes made by this actor, newest first, **with the instance identity stamped on each**. Finance,
+during the wrong-instance scare:
+
+> *"The question I actually needed was 'which of my writes went where?' I had posted comments and
+> status transitions across a whole session and had to reconstruct them from memory."*
+
+The stakes are specific to unattended agents: had those landed on a frozen instance, a
+DO-NOT-IMPLEMENT ruling on a dangerous ticket would have been invisible to everyone. "Did that land
+where I think it did" is not a question a human usually has to ask, and it is one an agent must be
+able to.
+
+Feasibility caveat: Plane's activity endpoint is per-item, so a board-wide actor query means either
+walking activities for recently-updated items (bounded, needs `updatedAt`) or planestories keeping
+its own local write journal. The journal is cheaper, works on any edition, and is honest about only
+covering writes made *through planestories* — which is the majority of them but must be labelled as
+such.
 
 ### F. "Do the files and the board agree?"
 
@@ -196,7 +254,31 @@ Then the routing becomes automatic:
 
 Honesty about the boundary, so nobody promises these before the data exists.
 
-`AtlasNode` carries no timestamps. So these are **out of scope until the graph is extended**:
+### The two sessions disagree here, and the disagreement is the useful part
+
+- **Research: do not bother.** *"I did not once want 'what shipped last week'. My work is
+  dependency-shaped, not calendar-shaped. Build the verbs."*
+- **Finance: do it FIRST.** *"`createdAt` is worth more to me right now than `ready`, `blocked` and
+  `risks` combined."*
+
+Both are right, because they are doing different work. Finance is doing **archaeology** — retiring
+three generations of abandoned work — and their most effective discriminator was first-appearance
+date in git (`git log --diff-filter=A`: 55 files in the healer window, 12 that neither register
+mentioned, all 12 correctly classified). They could run that on the codebase and **not on the
+board**: *"which tickets were created during 2026-07-27 → 2026-08-17?"* is the third signal they
+needed and had to reconstruct one MCP retrieve at a time.
+
+**Resolution: add `createdAt` (and `updatedAt`) to `AtlasNode`.** It is cheap, both fields are on
+every work item already, it unblocks finance's live work, and it costs research nothing — a field
+they do not read. Note precisely what finance does NOT need, because it keeps the scope small:
+neither "what shipped last week" nor cycle time. **The question is "when was this conceived, and
+does that put it inside a dead generation's window?"** — `createdAt` only, and it need not be live.
+
+`updatedAt` earns its place separately, as the cheap half of research's §4 ("did anything move here
+since I last looked") — though their actual want there was **comment count + last commenter**, which
+is a different field and probably the better answer to that question.
+
+`AtlasNode` carries no timestamps TODAY. So these are **out of scope until the graph is extended**:
 
 - "What changed this week / what shipped in the last sprint"
 - "What is stale — untouched for N days"
@@ -214,10 +296,51 @@ better).
 
 ## 6. Sequencing
 
-*Re-ordered 2026-08-23 after the research session's scoring. They rated `ls`/`count` LEAST useful
+*Re-ordered 2026-08-23 after BOTH sessions replied. Where they conflict, the note says so rather
+than averaging them away.*
+
+| verb | research | finance |
+|---|---|---|
+| `show` | real | **#2 — highest frequency, hand-rolled 3× in one day** |
+| `capabilities` | real, "would have saved 15 min" | **#3 — above `ready`** |
+| `count` | least useful, "a number quoted without its denominator" | **#4 — already cost a false claim in a register** |
+| `ls` (existence guard, non-zero exit) | least useful | **#5 — wants it as a script guard** |
+| `createdAt` | "do not bother" | **#1 — above every verb** |
+| `ready` | **#1 want** | real but prospective — "ask me again later" |
+| `inconsistent` | **top-tier, catches a WRONG board** | not raised |
+| `blocked` | real, with titles | half-invented; `--owner` explicitly not wanted |
+| `risks` | weakest; would trade it entirely | invented, EXCEPT "orphaned under an abandoned parent" |
+| `audit` | not raised | **#6 — "where did my writes land?"** |
+
+The honest read: `count`/`ls` are near-worthless to one session and load-bearing to the other, so
+they get built but stay small. `ready` and `inconsistent` matter to research now and to finance
+later. `createdAt` is contested only in priority, not in value — and it is cheap.
+
+*Older note, from the research session's reply alone: They rated `ls`/`count` LEAST useful
 ("I do not think in counts, and a count is the kind of number that gets quoted without its
 denominator") and `risks` weakest, while adding `inconsistent` as a top-tier want. Their ranking
 beats my guesses, so the plan follows it — pending the finance session's, which may differ.*
+
+**Merged order:**
+
+1. **`capabilities` + auto-detected dialect** — top-3 for both sessions, smallest thing here, and it
+   retires a class of confusion that has now cost three sessions. Must state NEGATIVES (relation
+   removal: unavailable).
+2. **`show`** — finance's highest-frequency verb, hand-rolled 3× in a day; also cuts their MCP token
+   burn, since `retrieve_by_identifier` returns the whole `description_html` for a five-line
+   question. Needs a **visible staleness stamp** on every answer, and a live path for
+   write-confirmation (an hour-stale answer there is worse than useless — it reports a successful
+   write as failed).
+3. **`createdAt` / `updatedAt` on `AtlasNode`** — unblocks finance's archaeology; costs research
+   nothing.
+4. **The board cache** with the freshness contract.
+5. **`count` / `ls`** — small, with `ls` exiting non-zero on a missing identifier so it works as a
+   guard in a script.
+6. **`ready` + `inconsistent`** — research's pair, and the reason this beats PQL rather than
+   substituting for it.
+7. **`abandoned`**, **`audit`**, **`drift`**, **`orphans`**, **`blocked`** (with titles).
+
+*Superseded first-cut order:*
 
 1. **`capabilities` + auto-detected dialect.** Smallest, and it retires an entire class of
    confusion that has now cost three sessions.

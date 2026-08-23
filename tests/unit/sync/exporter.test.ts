@@ -377,3 +377,60 @@ describe("export relation-fetch resilience (sweep + fail-hard)", () => {
 		).rejects.toThrow("export aborted");
 	});
 });
+
+describe("an empty export explains ITSELF", () => {
+	// "Exported 0 stories", printed green with exit 0, is what a wrong-instance or
+	// wrong-project run produces — and it is indistinguishable from a genuinely
+	// empty board. The finance session lost a detour to exactly that. The exporter
+	// now returns enough for the caller to tell the two apart.
+
+	test("reports the project's TRUE item count, so an empty index is visible", async () => {
+		const fake = makeFakeClient({
+			projects: [{ id: PROJECT_UUID, name: "Q1 Release", identifier: "ENG" }],
+			workItems: { [PROJECT_UUID]: [] },
+		});
+		const result = await exportStories(fake.client, {
+			config,
+			filters: {},
+			outputPath: join(tmpDir, "out.md"),
+		});
+		expect(result.count).toBe(0);
+		// 0 items in the index => "wrong board", not "board with nothing matching".
+		expect(result.projectItemCount).toBe(0);
+	});
+
+	test("a populated project with excluding filters is a DIFFERENT zero", async () => {
+		const fake = makeFakeClient(dataWithItems());
+		const result = await exportStories(fake.client, {
+			config,
+			filters: { status: "NoSuchState" },
+			outputPath: join(tmpDir, "out2.md"),
+		});
+		expect(result.count).toBe(0);
+		// The board was really observed and really has items — the filters did this.
+		expect(result.projectItemCount).toBeGreaterThan(0);
+	});
+
+	test("identifiers that do not exist here are named, not silently dropped", async () => {
+		// The existence-guard case: DATA-2569 was inherited from a handover, did not
+		// exist, and propagated into four documents before anyone checked.
+		const fake = makeFakeClient(dataWithItems());
+		const result = await exportStories(fake.client, {
+			config,
+			filters: { issues: ["ENG-8", "ENG-9999"] },
+			outputPath: join(tmpDir, "out3.md"),
+		});
+		expect(result.unmatchedIdentifiers).toEqual(["ENG-9999"]);
+	});
+
+	test("every requested identifier matching leaves nothing unmatched", async () => {
+		const fake = makeFakeClient(dataWithItems());
+		const result = await exportStories(fake.client, {
+			config,
+			filters: { issues: ["ENG-8"] },
+			outputPath: join(tmpDir, "out4.md"),
+		});
+		expect(result.count).toBeGreaterThan(0);
+		expect(result.unmatchedIdentifiers).toEqual([]);
+	});
+});

@@ -111,7 +111,47 @@ export function registerExportCommand(program: Command) {
 					orphansOnly: options.orphansOnly,
 				});
 
-				console.log(chalk.green(`Exported ${result.count} stories to ${result.outputPath}`));
+				// An empty export must not look like a successful one. "Exported 0
+				// stories" in green, exit 0, is what a wrong-instance or wrong-project
+				// run produces — the finance session lost a detour to exactly that. A
+				// zero here is only legitimate when the board really was observed and
+				// really is empty of matches, so say WHICH it was.
+				if (result.count === 0) {
+					console.log(
+						chalk.yellow(`Exported 0 stories to ${result.outputPath} — nothing matched.`),
+					);
+					if (result.projectItemCount === 0) {
+						console.error(
+							chalk.yellow(
+								`  The project index is EMPTY. That usually means the wrong installation or the wrong project, not an empty board.`,
+							),
+						);
+						console.error(
+							chalk.dim(
+								"  Check the target line above, then: planestories projects [--context <name>]",
+							),
+						);
+					} else {
+						console.error(
+							chalk.dim(
+								`  The project holds ${result.projectItemCount} item(s); the filters excluded all of them.`,
+							),
+						);
+					}
+				} else {
+					console.log(chalk.green(`Exported ${result.count} stories to ${result.outputPath}`));
+				}
+				// Identifiers asked for by name that do not exist here. Non-zero so this
+				// is usable as an existence GUARD in a script: a mistyped or inherited
+				// identifier should stop a pipeline, not flow into four documents.
+				if (result.unmatchedIdentifiers.length > 0) {
+					console.error(
+						chalk.red(
+							`  ${result.unmatchedIdentifiers.length} requested identifier(s) do not exist on this board: ${result.unmatchedIdentifiers.join(", ")}`,
+						),
+					);
+					process.exitCode = 1;
+				}
 				reportPacing(client);
 			} catch (error) {
 				handleError(error);
