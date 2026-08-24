@@ -65,6 +65,50 @@ about each item, and what you are least sure of. It does not argue for a verdict
 — *"closing it would hide a useful filter on a still-legible map"* — that is judgment, and
 overriding it to be thorough is how the loop restarts.
 
+## An assertion that would still pass with the feature DELETED is not a test
+
+`--no-estimate` shipped doing **nothing** — commander stores a `--no-x` boolean under the
+un-prefixed name, the predicate read a key that was never set, and `count --no-estimate --open`
+printed the unfiltered count. It had two passing tests:
+
+```ts
+queryStories(graph, { noEstimate: true })          // tests the function. Not the flag.
+expect(help).toContain("--no-estimate")            // tests the help text. Not the flag.
+```
+
+Both would pass with the option deleted from the action entirely. **That is the test.** Before
+writing an assertion, ask what it would do if the behaviour under it were removed. If the answer is
+"still pass", it is documentation, not verification.
+
+The family, all seen in this repo:
+- asserting `--help` **contains** a flag (the flag can be dead)
+- asserting a function was **called** rather than that its effect happened
+- asserting a count **is a number** rather than the right number
+- asserting a mocked layer above the decorator, so the decorator never runs
+- an agreement that holds for the **wrong reason** — a check that passes because two things are
+  both wrong in the same way
+
+**The rules that follow:**
+
+1. **Every CLI flag needs at least one test that drives it through argv or an action-level entry
+   point.** `tests/unit/cli/surface-invariants.test.ts` enforces this across all 251 options and
+   both backlogs; a new option fails the suite until it is exercised or explicitly declared with a
+   reason. It also pins the two structural facts that broke: the stored attribute must be READ by
+   the registering module, and no `--no-x` may carry a default (a `false` default inverts the flag
+   into permanently-on).
+
+2. **Sabotage every new guard once, and watch it fail.** A check nobody has seen fail is not a
+   check. This is the same discipline as red-green for bug fixes, applied to invariants. It is not
+   ceremony: the first version of the wiring invariant reported "0 problems" **with the bug
+   re-introduced**, because it searched the whole tree and matched an unrelated `estimate:` key. It
+   agreed with reality by accident. A later sabotage silently failed to apply (wrong anchor string)
+   and would have left an invariant unproven while looking proven — so **assert the anchor before
+   the edit, and check the sabotage actually landed** before trusting the run.
+
+3. **Run the tool as a new user before calling it done.** The `audit` refusal that named two flags
+   the command rejects was found on the first real invocation, not by review. A code reader sees
+   what the code says; only running it shows what a user gets.
+
 ## Board exports go in `exports/` — always
 
 **THE RULE: what the board-reading commands write — `atlas` renders, `export` story files,
