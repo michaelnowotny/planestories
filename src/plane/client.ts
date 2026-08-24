@@ -26,6 +26,14 @@ export interface RelationMethodProbe {
 /** All-zero UUID: a syntactically valid id that cannot name a real relation. */
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
+/** Full re-walks allowed when the board mutates mid-pagination. */
+const LIST_CONSISTENCY_ATTEMPTS = 3;
+/** Marker prefix identifying a mid-walk board change (retryable) vs a protocol fault (not). */
+const BOARD_CHURN = "Plane board changed during pagination:";
+function isBoardChurnError(error: PlaneApiError): boolean {
+	return error.message.startsWith(BOARD_CHURN);
+}
+
 export const DEFAULT_PLANE_BASE_URL = "https://api.plane.so";
 
 /** Default number of retry attempts for transient failures (on top of the initial try). */
@@ -350,7 +358,38 @@ export class PlaneClient {
 	}
 
 	/** Fetch every page of a cursor-paginated list endpoint. */
+	/**
+	 * Walk every page, retrying the WHOLE walk when the board changed underneath
+	 * it.
+	 *
+	 * The integrity checks below (total_count drift, deduplicated total vs
+	 * total_count) are correct about one attempt and wrong as a verdict: a create
+	 * or delete during a 27-page, 2m35s walk is ORDINARY on an active board, and
+	 * failing the whole command after minutes of work would make `board fetch`,
+	 * `export`, `doctor` and `snapshot` intermittently unusable.
+	 *
+	 * Retrying from page one with the accumulation DISCARDED is the honest middle:
+	 * it never returns a stitched-together mix of two board states, and it never
+	 * publishes a partial read as complete. If the board is genuinely too busy to
+	 * observe consistently, refuse and say so — that is a real answer.
+	 */
 	async listAll<T>(suffix: string, query: RequestOptions["query"] = {}): Promise<T[]> {
+		let lastUnstable: PlaneApiError | undefined;
+		for (let attempt = 1; attempt <= LIST_CONSISTENCY_ATTEMPTS; attempt++) {
+			try {
+				return await this.listAllOnce<T>(suffix, query);
+			} catch (error) {
+				if (!(error instanceof PlaneApiError) || !isBoardChurnError(error)) throw error;
+				lastUnstable = error;
+			}
+		}
+		throw new PlaneApiError(
+			`The board changed during pagination on ${suffix} across ${LIST_CONSISTENCY_ATTEMPTS} full attempts, so no consistent snapshot could be read. ` +
+				`Retry at a quieter time. (last: ${lastUnstable?.message ?? "unknown"})`,
+		);
+	}
+
+	private async listAllOnce<T>(suffix: string, query: RequestOptions["query"] = {}): Promise<T[]> {
 		const path = this.workspacePath(suffix);
 		const all: T[] = [];
 		const byId = new Map<string, T>();
@@ -372,7 +411,7 @@ export class PlaneClient {
 				}
 				if (!sameJsonContent(byId.get(id), item)) {
 					throw new PlaneApiError(
-						`Plane API list endpoint ${path} returned duplicate id "${id}" with changed content`,
+						`${BOARD_CHURN} list endpoint ${path} returned duplicate id "${id}" with changed content`,
 					);
 				}
 			}
@@ -402,7 +441,7 @@ export class PlaneClient {
 					}
 					if (expectedTotalCount !== undefined && expectedTotalCount !== page.total_count) {
 						throw new PlaneApiError(
-							`Plane API list endpoint ${path} changed total_count from ${expectedTotalCount} to ${page.total_count} during pagination`,
+							`${BOARD_CHURN} list endpoint ${path} changed total_count from ${expectedTotalCount} to ${page.total_count} during pagination`,
 						);
 					}
 					expectedTotalCount = page.total_count;
@@ -420,7 +459,7 @@ export class PlaneClient {
 
 		if (expectedTotalCount !== undefined && all.length !== expectedTotalCount) {
 			throw new PlaneApiError(
-				`Plane API list endpoint ${path} returned ${all.length} unique items after pagination, but total_count=${expectedTotalCount}`,
+				`${BOARD_CHURN} list endpoint ${path} returned ${all.length} unique items after pagination, but total_count=${expectedTotalCount}`,
 			);
 		}
 

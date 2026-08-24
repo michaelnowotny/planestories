@@ -1453,3 +1453,98 @@ B body.
 		]);
 	});
 });
+
+/**
+ * A malformed story must abort the run BEFORE the board is touched — not after
+ * the stories ahead of it have already been created.
+ *
+ * `splitBody` refuses a duplicate `### Acceptance Criteria` heading and a nested
+ * checkbox, which is the right policy. It was called inside the per-story loop,
+ * so story 2 being malformed aborted the run after story 1 had already been
+ * created, with no summary and no write-back. The operator sees a ParseError and
+ * concludes nothing happened; retrying then double-creates.
+ *
+ * Same shape as the `plane_id` pre-flight beside it: the whole point of a
+ * pre-flight is that a later file cannot arrive after an earlier one has
+ * mutated the board.
+ */
+describe("malformed stories are refused before any write", () => {
+	// This block sits outside the main describe, so it needs its own temp dir.
+	beforeEach(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "importer-preflight-"));
+	});
+	afterEach(() => {
+		try {
+			rmSync(tmpDir, { recursive: true, force: true });
+		} catch {
+			// ignore cleanup errors
+		}
+	});
+
+	const twoStoriesSecondMalformed = [
+		"---",
+		'project: "Test Project"',
+		"---",
+		"",
+		"## As a user, I want the first story imported",
+		"",
+		"First story body, perfectly valid.",
+		"",
+		"### Acceptance Criteria",
+		"- [ ] it works",
+		"",
+		"## As a user, I want the second story to be malformed",
+		"",
+		"Second story body.",
+		"",
+		"### Acceptance Criteria",
+		"- [ ] one",
+		"",
+		"### Acceptance Criteria",
+		"- [ ] a duplicate heading, which splitBody refuses",
+		"",
+	].join("\n");
+
+	test("story 1 is NOT created when story 2 is malformed", async () => {
+		const filePath = writeTmpFile("half-bad.md", twoStoriesSecondMalformed);
+		const { client, calls } = makeFakeClient(baseData());
+
+		await expect(
+			importStories(client, { files: [filePath], config: defaultConfig }),
+		).rejects.toThrow(/Acceptance Criteria/);
+
+		// The assertion that matters: nothing was written. A create for story 1
+		// here is the defect — a half-applied import the operator believes did not
+		// happen at all.
+		const writes = calls.filter((c) => /create|update|patch|delete/i.test(c.method));
+		expect(writes).toEqual([]);
+	});
+
+	test("the refusal names the file, the story, and says no writes were made", async () => {
+		// House rule: a refusal names what would answer it. "Duplicate heading at
+		// line 11" alone does not tell the operator whether it is safe to re-run.
+		const filePath = writeTmpFile("half-bad.md", twoStoriesSecondMalformed);
+		const { client } = makeFakeClient(baseData());
+
+		try {
+			await importStories(client, { files: [filePath], config: defaultConfig });
+			throw new Error("expected a refusal");
+		} catch (error) {
+			const message = (error as Error).message;
+			expect(message).toContain("half-bad.md");
+			expect(message).toContain("Acceptance Criteria");
+			// The clause that tells the operator a re-run is safe. Without it, the
+			// only rational response to a mid-run failure is to inspect the board.
+			expect(message).toMatch(/no board writes/i);
+		}
+	});
+
+	test("a file whose stories all parse still imports normally", () => {
+		// The pre-flight must not become a new way to refuse valid input.
+		const filePath = writeTmpFile("fine.md", markdownNewStories);
+		const { client } = makeFakeClient(baseData());
+		return expect(
+			importStories(client, { files: [filePath], config: defaultConfig }),
+		).resolves.toMatchObject({ total: 2 });
+	});
+});

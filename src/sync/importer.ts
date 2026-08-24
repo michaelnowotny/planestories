@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { EXTERNAL_SOURCE } from "../constants.ts";
+import { ParseError } from "../errors.ts";
 import { type AcceptanceCriterion, splitBody } from "../markdown/criteria.ts";
 import { findNonStoryHeadings, parseMarkdownFile } from "../markdown/parser.ts";
 import { type WriteBackUpdate, writeBackIds } from "../markdown/writer.ts";
@@ -86,6 +87,42 @@ export interface ImportOptions {
  * 7. Continue on failure per story
  * 8. Return ImportSummary
  */
+/**
+ * Parse every story body BEFORE any board write.
+ *
+ * `splitBody` refuses a duplicate `### Acceptance Criteria` heading and a nested
+ * checkbox — correct policy, but it was called inside the per-story loop, so a
+ * malformed story N aborted the run AFTER stories 1..N-1 had already been
+ * created or PATCHed. The operator saw a ParseError and no summary, and would
+ * reasonably conclude nothing had been written; retrying then double-creates.
+ *
+ * Worse, it fired on the unchanged fast path too (the content hash is computed
+ * after `splitBody`), so a previously-imported multi-story file that used to
+ * no-op died mid-run.
+ *
+ * Same shape and same reason as `assertUniquePlaneIds` beside it: refuse the
+ * whole import before the board is touched, never half-way through.
+ */
+function assertBodiesParse(
+	files: readonly {
+		filePath: string;
+		parsed: { stories: readonly { title: string; body: string }[] };
+	}[],
+): void {
+	for (const { filePath, parsed } of files) {
+		for (const story of parsed.stories) {
+			try {
+				splitBody(story.body);
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error);
+				throw new ParseError(
+					`${filePath} — "${story.title}": ${detail} No board writes were made; fix the file and re-run.`,
+				);
+			}
+		}
+	}
+}
+
 export async function importStories(
 	client: PlaneClient,
 	options: ImportOptions,
@@ -96,10 +133,21 @@ export async function importStories(
 	const parsedFiles = await Promise.all(
 		options.files.map(async (filePath) => {
 			const fileContent = await Bun.file(filePath).text();
-			return { filePath, fileContent, parsed: parseMarkdownFile(fileContent, filePath) };
+			try {
+				return { filePath, fileContent, parsed: parseMarkdownFile(fileContent, filePath) };
+			} catch (error) {
+				// A structural refusal (duplicate `### Acceptance Criteria`, a nested
+				// checkbox) surfaces here, during the pre-flight parse, so no board
+				// write has happened yet. Say so: "Duplicate heading at line 6" alone
+				// leaves the operator unable to tell whether a re-run is safe, and the
+				// bare message names neither the file nor the story.
+				const detail = error instanceof Error ? error.message : String(error);
+				throw new ParseError(`${filePath}: ${detail} No board writes were made.`);
+			}
 		}),
 	);
 	assertUniquePlaneIds(parsedFiles.map(({ parsed }) => parsed));
+	assertBodiesParse(parsedFiles);
 
 	const resolver = new Resolver(client);
 	const results: ImportResult[] = [];

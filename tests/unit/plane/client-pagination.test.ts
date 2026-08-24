@@ -18,11 +18,18 @@ function makeClient(): PlaneClient {
 	});
 }
 
-function jsonPages(pages: unknown[]): { urls: string[] } {
+/**
+ * Serve a fixed page sequence. `cycle` repeats it for every re-walk, which is
+ * what a PERSISTENTLY unstable board looks like — the only way to reach the
+ * refusal now that ordinary churn is retried rather than thrown on.
+ */
+function jsonPages(pages: unknown[], options: { cycle?: boolean } = {}): { urls: string[] } {
 	const urls: string[] = [];
+	const source = [...pages];
+	let index = 0;
 	globalThis.fetch = (async (input: string | URL | Request) => {
 		urls.push(String(input));
-		const page = pages.shift();
+		const page = options.cycle ? source[index++ % source.length] : source[index++];
 		if (page === undefined) {
 			throw new Error("pagination test made an unexpected fetch");
 		}
@@ -124,37 +131,44 @@ describe("PlaneClient.listAll pagination integrity", () => {
 		expect(stub.urls[1]).toContain("cursor=page-2");
 	});
 
-	test("rejects a duplicate id whose content changed during the walk", async () => {
-		const stub = jsonPages([
-			{
-				results: [{ id: "moving", name: "before" }],
-				next_page_results: true,
-				next_cursor: "page-2",
-			},
-			{
-				results: [{ id: "moving", name: "after" }],
-				next_page_results: false,
-				next_cursor: null,
-			},
-		]);
+	test("refuses when a duplicate id keeps changing content across full re-walks", async () => {
+		const stub = jsonPages(
+			[
+				{
+					results: [{ id: "moving", name: "before" }],
+					next_page_results: true,
+					next_cursor: "page-2",
+				},
+				{
+					results: [{ id: "moving", name: "after" }],
+					next_page_results: false,
+					next_cursor: null,
+				},
+			],
+			{ cycle: true },
+		);
 
 		const error = await rejectedBy(makeClient().listWorkItems("project-1"));
 
 		expect(error).toBeInstanceOf(PlaneApiError);
 		expect((error as Error).message).toContain('duplicate id "moving"');
-		expect((error as Error).message).toContain("changed content");
-		expect(stub.urls).toHaveLength(2);
+		expect((error as Error).message).toMatch(/quieter time/i);
+		// Three FULL re-walks were attempted before refusing, not one.
+		expect(stub.urls.length).toBeGreaterThan(2);
 	});
 
-	test("rejects a completed walk whose unique result count differs from total_count", async () => {
-		const stub = jsonPages([
-			{
-				results: [{ id: "only-item" }],
-				total_count: 2,
-				next_page_results: false,
-				next_cursor: null,
-			},
-		]);
+	test("refuses when the unique count keeps disagreeing with total_count across re-walks", async () => {
+		const stub = jsonPages(
+			[
+				{
+					results: [{ id: "only-item" }],
+					total_count: 2,
+					next_page_results: false,
+					next_cursor: null,
+				},
+			],
+			{ cycle: true },
+		);
 
 		const error = await rejectedBy(makeClient().listWorkItems("project-1"));
 
@@ -162,7 +176,8 @@ describe("PlaneClient.listAll pagination integrity", () => {
 		expect((error as Error).message).toContain("returned 1 unique items");
 		expect((error as Error).message).toContain("total_count=2");
 		expect((error as Error).message).toContain("/projects/project-1/issues/");
-		expect(stub.urls).toHaveLength(1);
+		// One page per attempt, three attempts before the refusal.
+		expect(stub.urls).toHaveLength(3);
 	});
 
 	test("allows an absent total_count without claiming it was checked", async () => {
@@ -215,5 +230,86 @@ describe("PlaneClient.listAll pagination integrity", () => {
 		expect((error as Error).message).toContain("maximum of 100 pages");
 		expect((error as Error).message).toContain("/projects/project-1/issues/");
 		expect(calls).toBe(100);
+	});
+});
+
+/**
+ * Board churn during a walk is ORDINARY, not a fault.
+ *
+ * The integrity checks are correct about a single attempt and wrong as a
+ * verdict: a create or delete during a 27-page, 2m35s walk happens on any active
+ * board, and failing the whole command after minutes of work would make
+ * `board fetch`, `export`, `doctor` and `snapshot` intermittently unusable.
+ *
+ * So the walk is retried from page one with the accumulation DISCARDED — never a
+ * stitched-together mix of two board states, never a partial read published as
+ * complete — and refuses explicitly if the board never settles.
+ */
+describe("listAll retries a whole walk when the board changes underneath it", () => {
+	function serve(responses: object[][]): { calls: () => number; restore: () => void } {
+		let call = 0;
+		const original = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			const flat = responses.flat();
+			const body = flat[call++] ?? { results: [], next_page_results: false };
+			return new Response(JSON.stringify(body), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+		return {
+			calls: () => call,
+			restore: () => {
+				globalThis.fetch = original;
+			},
+		};
+	}
+
+	test("a total_count that moves mid-walk causes a re-walk, and the retry succeeds", async () => {
+		// Attempt 1: page 1 says 2, page 2 says 3 -> churn. Attempt 2: consistent.
+		const server = serve([
+			[
+				{ results: [{ id: "a" }], total_count: 2, next_page_results: true, next_cursor: "c1" },
+				{ results: [{ id: "b" }], total_count: 3, next_page_results: false },
+			],
+			[
+				{ results: [{ id: "a" }], total_count: 2, next_page_results: true, next_cursor: "c1" },
+				{ results: [{ id: "b" }], total_count: 2, next_page_results: false },
+			],
+		]);
+		try {
+			const all = await makeClient().listWorkItems<{ id: string }>("p");
+			// The SECOND attempt's data, whole — not attempt 1's page 1 stitched to
+			// attempt 2's page 2.
+			expect(all).toEqual([{ id: "a" }, { id: "b" }]);
+			expect(server.calls()).toBe(4);
+		} finally {
+			server.restore();
+		}
+	});
+
+	test("a board that never settles REFUSES, and says what to do", async () => {
+		const unstable = Array.from({ length: 12 }, (_, i) => [
+			{ results: [{ id: "a" }], total_count: 2, next_page_results: true, next_cursor: "c1" },
+			{ results: [{ id: "b" }], total_count: 3 + i, next_page_results: false },
+		]).flat();
+		const server = serve([unstable]);
+		try {
+			await expect(makeClient().listWorkItems("p")).rejects.toThrow(/quieter time/i);
+		} finally {
+			server.restore();
+		}
+	});
+
+	test("a PROTOCOL fault is not retried — only board churn is", async () => {
+		// next_page_results=true with no cursor is a broken server, not a busy
+		// board. Retrying it would just burn three full walks before failing.
+		const server = serve([[{ results: [{ id: "a" }], next_page_results: true }]]);
+		try {
+			await expect(makeClient().listWorkItems("p")).rejects.toThrow(/next_cursor is absent/);
+			expect(server.calls()).toBe(1);
+		} finally {
+			server.restore();
+		}
 	});
 });
