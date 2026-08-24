@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { defaultBoardCachePath } from "../board_cache.ts";
 import { type GraphSourceResult, type GraphSourceRuntime, resolveGraph } from "../graph_source.ts";
@@ -33,6 +34,7 @@ export async function fetchBoardToCache(
 
 function handleError(error: unknown): never {
 	if (
+		error instanceof ParentCycleError ||
 		error instanceof ConfigError ||
 		error instanceof ParseError ||
 		error instanceof PlaneApiError ||

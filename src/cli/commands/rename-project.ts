@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, PlaneApiError, ReplicateError } from "../../errors.ts";
 import { announceTarget } from "../announce_target.ts";
@@ -115,6 +116,7 @@ export async function renameProject(
 
 function handleError(error: unknown): never {
 	if (
+		error instanceof ParentCycleError ||
 		error instanceof ConfigError ||
 		error instanceof PlaneApiError ||
 		error instanceof ReplicateError

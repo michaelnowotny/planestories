@@ -52,7 +52,9 @@ describe("the artifact records where its board state came from", () => {
 		expect(stamp.kind).toBe("cache");
 		expect(stamp.project).toBe("Data Platform");
 		expect(stamp.description).toContain("plane.example");
-		expect(stamp.description).toContain("3h ago");
+		// The ABSOLUTE instant, not "3h ago" — see the guard below.
+		expect(stamp.description).toContain("2026-08-23T09:00:00.000Z");
+		expect(stamp.description.toLowerCase()).not.toContain(" ago");
 		// The field that would have destroyed determinism.
 		expect(Object.hasOwn(stamp, "renderedAt")).toBe(false);
 	});
@@ -75,14 +77,16 @@ describe("the artifact records where its board state came from", () => {
 		// file no test executes, and a review round once found a blank page caused
 		// by editing it.
 		expect(html).toContain("SOURCE: CACHE · DATA PLATFORM · 2026-08-23T09:00:00.000Z");
-		// NOT a relative age: "1H AGO" frozen into a file still reads as fresh a
-		// week later, which is the confusion the stamp exists to remove.
-		expect(html).not.toContain("AGO");
+		// NOT a relative age, in EITHER case: the visible line is uppercased, but
+		// the embedded JSON blob is not. The first version of this guard asserted
+		// only `"AGO"` and the lowercase copy inside the payload sailed past it —
+		// an assertion that would still pass with the defect present.
+		expect(html.toLowerCase()).not.toContain(" ago");
 	});
 
 	test("an artifact with no stamp SAYS so rather than looking fresh", () => {
 		const graph = buildAtlasFromFile(STORIES, "stories.md");
-		const html = renderAtlasHtml(graph, { coverage: { kind: "complete" } });
+		const html = renderAtlasHtml(graph, { coverage: { kind: "complete" }, provenance: null });
 		expect(html).toContain("SOURCE: NOT RECORDED IN THIS ARTIFACT");
 	});
 
@@ -90,7 +94,7 @@ describe("the artifact records where its board state came from", () => {
 		const graph = buildAtlasFromFile(STORIES, "stories.md");
 		const stamp = graphSourceStamp(CACHE, NOW);
 		expect(atlasJsonPayload(graph, { kind: "complete" }, stamp).provenance).toEqual(stamp);
-		expect(atlasJsonPayload(graph, { kind: "complete" }).provenance).toBeNull();
+		expect(atlasJsonPayload(graph, { kind: "complete" }, null).provenance).toBeNull();
 	});
 
 	test("the stamp does not collide with AtlasGraph.source", () => {

@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, PlaneApiError } from "../../errors.ts";
 import { formatCapabilitiesTable, probeDeploymentCapabilities } from "../../plane/capabilities.ts";
@@ -7,7 +8,11 @@ import { announceTarget } from "../announce_target.ts";
 import { connectTarget } from "../target_client.ts";
 
 function handleError(error: unknown): never {
-	if (error instanceof ConfigError || error instanceof PlaneApiError) {
+	if (
+		error instanceof ParentCycleError ||
+		error instanceof ConfigError ||
+		error instanceof PlaneApiError
+	) {
 		console.error(chalk.red(`${error.name}: ${error.message}`));
 	} else if (error instanceof Error) {
 		console.error(chalk.red(`Error: ${error.message}`));

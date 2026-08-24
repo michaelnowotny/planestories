@@ -19,6 +19,14 @@ export function formatGraphSourceProvenance(
 	return `${provenance.project} · file ${provenance.path}`;
 }
 
+/** Board identity in absolute terms only — no relative age, ever. */
+function absoluteDescription(provenance: GraphSourceProvenance, observedAt: string | null): string {
+	if (provenance.kind === "file") return `${provenance.project} · file ${provenance.path}`;
+	const where = `${provenance.project} board · ${provenance.baseUrl} · workspace ${provenance.workspaceSlug}`;
+	if (provenance.kind === "live") return `${where} · live, read ${observedAt}`;
+	return `${where} · ${provenance.kind} taken ${observedAt}`;
+}
+
 /**
  * The same provenance, shaped for embedding INSIDE a durable artifact.
  *
@@ -49,6 +57,10 @@ export function graphSourceStamp(
 		kind: provenance.kind,
 		project: provenance.project,
 		observedAt,
-		description: formatGraphSourceProvenance(provenance, renderedAt),
+		// NOT `formatGraphSourceProvenance`: that renders a RELATIVE age ("cached
+		// 3h ago") for a human reading stderr now. Frozen into a file, that
+		// sentence is false a week later — the exact confusion this stamp exists
+		// to remove, smuggled back in via prose.
+		description: absoluteDescription(provenance, observedAt),
 	};
 }

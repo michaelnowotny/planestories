@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { announceTarget } from "../announce_target.ts";
@@ -12,6 +13,7 @@ interface ProjectRow {
 
 function handleError(error: unknown): never {
 	if (
+		error instanceof ParentCycleError ||
 		error instanceof ConfigError ||
 		error instanceof ParseError ||
 		error instanceof PlaneApiError ||

@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import type { PlaneClient } from "../../plane/client.ts";
@@ -23,6 +24,7 @@ import { connectTarget } from "../target_client.ts";
 
 function handleError(error: unknown): never {
 	if (
+		error instanceof ParentCycleError ||
 		error instanceof ConfigError ||
 		error instanceof ParseError ||
 		error instanceof PlaneApiError ||

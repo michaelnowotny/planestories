@@ -64,8 +64,8 @@ describe("pre-settled layout", () => {
 		// make every regeneration differ and destroy diff-stability, so the settle
 		// uses a fixed nudge instead.
 		expect(settleLayout(BOARD)).toEqual(settleLayout(BOARD));
-		expect(renderAtlasHtml(BOARD, { coverage: { kind: "complete" } })).toBe(
-			renderAtlasHtml(BOARD, { coverage: { kind: "complete" } }),
+		expect(renderAtlasHtml(BOARD, { coverage: { kind: "complete" }, provenance: null })).toBe(
+			renderAtlasHtml(BOARD, { coverage: { kind: "complete" }, provenance: null }),
 		);
 	});
 
@@ -76,7 +76,7 @@ describe("pre-settled layout", () => {
 
 describe("the renderer ships the settled layout", () => {
 	test("embeds POS0 for every node and starts the simulation COLD", () => {
-		const html = renderAtlasHtml(BOARD, { coverage: { kind: "complete" } });
+		const html = renderAtlasHtml(BOARD, { coverage: { kind: "complete" }, provenance: null });
 		const match = html.match(/const POS0 = (\{[\s\S]*?\});\n/);
 		expect(match).not.toBeNull();
 		const pos = JSON.parse((match?.[1] as string).replace(/\\u003c/g, "<"));
@@ -96,7 +96,7 @@ describe("the renderer ships the settled layout", () => {
 		// drag drops the board into a world it never inhabited — and the failure is
 		// silent. An earlier version of this claim was written in a comment while
 		// render.ts still carried its own literals; this test is what makes it true.
-		const html = renderAtlasHtml(BOARD, { coverage: { kind: "complete" } });
+		const html = renderAtlasHtml(BOARD, { coverage: { kind: "complete" }, provenance: null });
 		expect(html).toContain(`const REP=${PHYSICS.REP},`);
 		expect(html).toContain(`parent:${PHYSICS.SPRING.parent}`);
 		expect(html).toContain(`blocks:${PHYSICS.REST.blocks}`);
@@ -106,7 +106,7 @@ describe("the renderer ships the settled layout", () => {
 	});
 
 	test("an empty board still produces a valid page", () => {
-		const html = renderAtlasHtml(graph([]), { coverage: { kind: "complete" } });
+		const html = renderAtlasHtml(graph([]), { coverage: { kind: "complete" }, provenance: null });
 		expect(html).toContain("const POS0 = {}");
 		expect(html).toContain("<!doctype html>");
 	});

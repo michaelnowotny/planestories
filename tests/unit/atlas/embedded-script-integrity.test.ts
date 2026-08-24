@@ -31,7 +31,10 @@ Body.
 
 /** Coverage is required, so every render site states it. A file graph is complete. */
 function renderAtlas(): string {
-	return renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), { coverage: { kind: "complete" } });
+	return renderAtlasHtml(buildAtlasFromFile(FILE, "x.md"), {
+		coverage: { kind: "complete" },
+		provenance: null,
+	});
 }
 
 /** Browser and language globals the script is entitled to use undeclared. */

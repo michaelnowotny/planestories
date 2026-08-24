@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { type Command, Option } from "commander";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import {
 	groupQueryItems,
@@ -165,6 +166,7 @@ function handleError(error: unknown, options: QueryCommandOptions): never {
 			),
 		);
 	} else if (
+		error instanceof ParentCycleError ||
 		error instanceof ConfigError ||
 		error instanceof ParseError ||
 		error instanceof PlaneApiError ||

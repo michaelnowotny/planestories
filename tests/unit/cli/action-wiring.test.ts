@@ -291,6 +291,93 @@ describe("the action-suppressing flags — the ones whose failure mode is DOING 
 	});
 });
 
+describe("the flags a tightened surface check found nobody was driving", () => {
+	// The exercise invariant used to accept "an object key with this name appears
+	// somewhere under tests/" as coverage, so `estimate:` in a YAML fixture and
+	// `concurrency:` on a fake client marked 46 options covered that no test
+	// invoked. With that arm narrowed, these 18 surfaced as real gaps. They are
+	// argv->options assertions: the wiring is exactly what the invariant claims.
+
+	test("import: the six switches that change what a run WRITES", () => {
+		const base = ["import", "stories.md"];
+		const off = opts(base);
+		for (const flag of [
+			"createLabels",
+			"adoptDuplicates",
+			"forceCreate",
+			"strict",
+			"dryRun",
+			"check",
+		]) {
+			expect(off[flag]).toBeFalsy();
+		}
+		const on = opts([
+			...base,
+			"--create-labels",
+			"--adopt-duplicates",
+			"--force-create",
+			"--strict",
+			"--dry-run",
+			"--check",
+		]);
+		expect(on.createLabels).toBe(true);
+		expect(on.adoptDuplicates).toBe(true);
+		expect(on.forceCreate).toBe(true);
+		expect(on.strict).toBe(true);
+		expect(on.dryRun).toBe(true);
+		expect(on.check).toBe(true);
+	});
+
+	test("delete: --dry-run is the default-safety switch, --external-source the scope", () => {
+		// `delete` is the most destructive verb in the tool; both of these decide
+		// how much of a board it touches.
+		const parsed = opts([
+			"delete",
+			"-p",
+			"Data Platform",
+			"--dry-run",
+			"--external-source",
+			"linear",
+		]);
+		expect(parsed.dryRun).toBe(true);
+		expect(parsed.externalSource).toBe("linear");
+		expect(opts(["delete", "-p", "Data Platform"]).dryRun).toBeFalsy();
+	});
+
+	test("migrate-criteria: --only narrows an otherwise whole-project migration", () => {
+		// It SPLITS on commas rather than arriving as a raw string — a custom parser
+		// the action depends on, and the sort of shape that quietly degrades to
+		// one-element if the parser is ever dropped.
+		expect(opts(["migrate-criteria", "-p", "X", "--only", "DATA-1,DATA-2"]).only).toEqual([
+			"DATA-1",
+			"DATA-2",
+		]);
+		expect(opts(["migrate-criteria", "-p", "X", "--only", "DATA-1"]).only).toEqual(["DATA-1"]);
+	});
+
+	test("every graph verb takes --refresh, not just ready", () => {
+		for (const verb of ["ready", "inconsistent", "blocked", "orphans", "abandoned"]) {
+			expect(opts([verb, "--refresh"]).refresh).toBe(true);
+			expect(opts([verb]).refresh).toBe(false);
+		}
+	});
+
+	test("replicate: --concurrency reaches every subcommand that paces reads", () => {
+		// It was "covered" only by a `concurrency:` property on a fake client
+		// object in an unrelated test — the incidental-key hole in one line.
+		const cases: Array<[string[], string]> = [
+			[["replicate", "snapshot", "--from", "cloud", "-p", "X", "-o", "s.json"], "snapshot"],
+			[["replicate", "backup", "--from", "cloud", "-p", "X", "--dir", "/tmp/b"], "backup"],
+			[["replicate", "verify", "--to", "ce", "--snapshot", "s.json"], "verify"],
+			[["replicate", "freshness", "--from", "cloud", "--snapshot", "s.json"], "freshness"],
+		];
+		for (const [argv, name] of cases) {
+			expect(opts([...argv, "--concurrency", "3"]).concurrency).toBe("3");
+			expect(opts(argv).concurrency, `${name} default`).toBeUndefined();
+		}
+	});
+});
+
 describe("the harness itself", () => {
 	test("the action never runs — otherwise these would need a live board", () => {
 		// If the hook stopped aborting, every test above would start making network

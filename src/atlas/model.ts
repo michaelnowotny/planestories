@@ -169,6 +169,23 @@ interface RawNode {
 }
 
 /**
+ * A parent loop, refused by name.
+ *
+ * Typed so every command's `handleError` can treat it like `ConfigError` — with
+ * the "what would answer it" line — instead of dropping it into the generic
+ * `Error` arm where it arrives as a bare message.
+ */
+export class ParentCycleError extends Error {
+	constructor(readonly members: readonly string[]) {
+		super(
+			`Parent cycle: ${members.join(", ")} — each of these has a parent inside the group, so none can be reached from the top of the board. ` +
+				"Clear one item's parent to break the loop. (Refused rather than dropped: they would otherwise be missing from every count and query with no warning.)",
+		);
+		this.name = "ParentCycleError";
+	}
+}
+
+/**
  * Attach nodes to their parents by key; anything without a resolvable parent is
  * a root.
  *
@@ -210,10 +227,7 @@ function assembleTree(raws: RawNode[]): AtlasNode[] {
 		const named = trapped
 			.map((r) => r.node.identifier ?? r.node.title)
 			.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-		throw new Error(
-			`Parent cycle: ${named.join(", ")} — each of these has a parent inside the group, so none of them can be reached from the top of the board. ` +
-				"Break the loop by clearing one item's parent. (Refusing rather than dropping them: they would otherwise be missing from every count and query with no warning.)",
-		);
+		throw new ParentCycleError(named);
 	}
 	return roots;
 }

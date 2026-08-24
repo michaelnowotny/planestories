@@ -327,7 +327,7 @@ describe("atlas --json — the HTML/JSON agreement invariant", () => {
 		// renderAtlasHtml its own model call, this and the test above both break.
 		const graph = buildAtlasFromFile(STORIES, "stories.md");
 		const coverage = { kind: "complete" } as const;
-		const html = renderAtlasHtml(graph, { coverage });
+		const html = renderAtlasHtml(graph, { coverage, provenance: null });
 		const match = html.match(/const GRAPH = ([\s\S]*?);\n/);
 		const embedded = (match?.[1] as string).replace(/\\u003c/g, "<");
 		// Both artifacts are now built from `atlasJsonPayload`, so the agreement is
@@ -335,7 +335,7 @@ describe("atlas --json — the HTML/JSON agreement invariant", () => {
 		// the JSON writer ALONE the two silently diverged, and the sibling test
 		// above is what noticed.
 		expect(JSON.parse(embedded)).toEqual(
-			JSON.parse(JSON.stringify(atlasJsonPayload(graph, coverage))),
+			JSON.parse(JSON.stringify(atlasJsonPayload(graph, coverage, null))),
 		);
 	});
 });

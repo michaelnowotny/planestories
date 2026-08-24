@@ -1,12 +1,17 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { loadRepoConfig } from "../../config/repo_config.ts";
 import { ConfigError, ParseError } from "../../errors.ts";
 import { type LintReport, lintFiles } from "../../lint/linter.ts";
 import type { LintFinding } from "../../lint/rules.ts";
 
 function handleError(error: unknown): never {
-	if (error instanceof ConfigError || error instanceof ParseError) {
+	if (
+		error instanceof ParentCycleError ||
+		error instanceof ConfigError ||
+		error instanceof ParseError
+	) {
 		console.error(chalk.red(`${error.name}: ${error.message}`));
 	} else if (error instanceof Error) {
 		console.error(chalk.red(`Error: ${error.message}`));

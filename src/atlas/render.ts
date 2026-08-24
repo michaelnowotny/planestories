@@ -53,7 +53,7 @@ export interface RenderOptions {
 	 * the age at all. Null means the artifact does not record it, which is
 	 * honest; a fabricated "now" would not be.
 	 */
-	provenance?: AtlasSourceStamp | null;
+	provenance: AtlasSourceStamp | null;
 }
 
 /** Board identity + observation time, carried INSIDE the artifact. */
@@ -78,7 +78,7 @@ export interface AtlasSourceStamp {
 export function atlasJsonPayload(
 	graph: AtlasGraph,
 	coverage: DependencyCoverage,
-	provenance: AtlasSourceStamp | null = null,
+	provenance: AtlasSourceStamp | null,
 ): AtlasGraph & { dependencyCoverage: DependencyCoverage; provenance: AtlasSourceStamp | null } {
 	// NOT keyed `source`: AtlasGraph already uses that for "file | board".
 	return { ...graph, dependencyCoverage: coverage, provenance };
@@ -96,7 +96,7 @@ export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): stri
 	// coverage from `CP`), but an embedded graph that documents its own
 	// completeness is the more honest artifact anyway.
 	const data = JSON.stringify(
-		atlasJsonPayload(graph, options.coverage, options.provenance ?? null),
+		atlasJsonPayload(graph, options.coverage, options.provenance),
 	).replace(/</g, "\\u003c");
 	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
 	// Static markup, deliberately: the embedded script is the one part of this

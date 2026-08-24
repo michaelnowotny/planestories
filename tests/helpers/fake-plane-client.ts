@@ -40,6 +40,16 @@ export interface FakeData {
 	workItems?: Record<string, Array<Record<string, unknown>>>;
 	/** Existing comments keyed by work item id, returned by listWorkItemComments. */
 	comments?: Record<string, Array<Record<string, unknown>>>;
+	/** Existing activity entries keyed by work item id, returned by /** House rule: a new PlaneClient method belongs on the fake. Read-only OPTIONS probe. */
+	/** Existing activity entries keyed by work item id, returned by probeRelationMethods(_projectId: string, _workItemId: string) {
+	/** Existing activity entries keyed by work item id, returned by 	return Promise.resolve({
+	/** Existing activity entries keyed by work item id, returned by 		collection: { status: 405, allow: ["GET", "POST"] },
+	/** Existing activity entries keyed by work item id, returned by 		removal: [
+	/** Existing activity entries keyed by work item id, returned by 			{ status: 404, allow: [] as string[] },
+	/** Existing activity entries keyed by work item id, returned by 			{ status: 404, allow: [] as string[] },
+	/** Existing activity entries keyed by work item id, returned by 		],
+	/** Existing activity entries keyed by work item id, returned by 	});
+	/** Existing activity entries keyed by work item id, returned by },
 	/** Existing activity entries keyed by work item id, returned by listWorkItemActivities. */
 	activities?: Record<string, Array<Record<string, unknown>>>;
 	/** Plane relation UUID arrays keyed by work item id. */

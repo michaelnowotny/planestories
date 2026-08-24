@@ -75,6 +75,24 @@ function surface(): SurfaceOption[] {
 }
 
 const SURFACE = surface();
+
+/**
+ * The module that REGISTERS this option's command.
+ *
+ * The first version took `SOURCES.find(f => f.text.includes(flags))` — the first
+ * file in readdir order quoting that flag string. `"--open"` appears in both
+ * `atlas.ts` (open the rendered file) and `query.ts` (filter to open stories),
+ * so `ls --open` resolved to ATLAS and was "read" because atlas reads
+ * `options.open`. Deleting the ls filter would not have failed the check.
+ * Measured, not theorised: the review ran the heuristic and showed it.
+ */
+function ownerModule(row: SurfaceOption): { path: string; text: string } | undefined {
+	const leaf = row.command.split(" ").at(-1) as string;
+	const registering = SOURCES.find((file) => file.text.includes(`.command("${leaf}`));
+	// The option must be registered in that same module — a shared `addXOptions`
+	// helper lives beside its commands, so this holds for every current option.
+	return registering?.text.includes(`"${row.flags}"`) ? registering : undefined;
+}
 const key = (row: SurfaceOption): string => `${row.command} ${row.long}`;
 
 /**
@@ -118,12 +136,19 @@ describe("CLI surface — every option is connected to behaviour", () => {
 		// all of src/, matched `estimate:` in the story-YAML parser, and reported
 		// the flag wired while it was dead. It agreed with reality by accident.
 		const dead: string[] = [];
+		const unresolved: string[] = [];
 		for (const row of SURFACE) {
-			const owner = SOURCES.find((file) => file.text.includes(`"${row.flags}"`));
-			if (!owner) continue; // flags built dynamically; covered by the exercise check
+			const owner = ownerModule(row);
+			if (!owner) {
+				unresolved.push(key(row));
+				continue;
+			}
 			const read = new RegExp(`options\\.${row.attribute}\\b|\\b${row.attribute}\\s*[,}]`);
 			if (!read.test(owner.text)) dead.push(`${key(row)} (stored as \`${row.attribute}\`)`);
 		}
+		// An option whose registering module cannot be located is NOT quietly
+		// skipped: an unresolvable owner means this check said nothing about it.
+		expect(unresolved).toEqual([]);
 		expect(dead).toEqual([]);
 	});
 
@@ -147,11 +172,19 @@ describe("CLI surface — every option is connected to behaviour", () => {
 			// Short form counts: `-o exports/board.md` exercises `--output`.
 			const forms = [row.long, row.option.short].filter((form): form is string => Boolean(form));
 			const argv = new RegExp(`\\[[^\\]]*["'](?:${forms.join("|")})["']`, "s");
+			// An action-level object key counts ONLY in a file that also names the
+			// command. Without that, `\bestimate\s*:` matched YAML `estimate: 3` in
+			// a serializer test, `concurrency:` matched a fake client's property, and
+			// 46 of 251 options were reported covered by tests that never invoke
+			// them. The backlog being empty was a claim about the suite, and it was
+			// false.
+			const leaf = row.command.split(" ").at(-1) as string;
+			const namesCommand = new RegExp(`["'\`/]${leaf}\\b`);
 			const asObjectKey = new RegExp(`\\b${row.attribute}\\s*:`);
 			const covered = TESTS.some(
 				(file) =>
 					(forms.some((form) => file.text.includes(`"${form}"`)) && argv.test(file.text)) ||
-					asObjectKey.test(file.text),
+					(asObjectKey.test(file.text) && namesCommand.test(file.text)),
 			);
 			if (!covered) unexercised.push(key(row));
 		}

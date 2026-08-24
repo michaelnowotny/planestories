@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import type { Command } from "commander";
 import type { AtlasGraph } from "../../atlas/model.ts";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import {
 	type GraphQueryAnswerRoutes,
@@ -47,6 +48,7 @@ export interface GraphQueryCommandRuntime {
 
 function handleError(error: unknown): void {
 	if (
+		error instanceof ParentCycleError ||
 		error instanceof ConfigError ||
 		error instanceof ParseError ||
 		error instanceof PlaneApiError ||

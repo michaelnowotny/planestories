@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import type { Command } from "commander";
+import { ParentCycleError } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { instanceTag } from "../../replicate/backup.ts";
 import { diffGraphs, formatGraphDiff } from "../../sync/graph_diff.ts";
@@ -8,6 +9,7 @@ import { openSnapshotSource } from "../snapshot_option.ts";
 
 function handleError(error: unknown): never {
 	if (
+		error instanceof ParentCycleError ||
 		error instanceof ConfigError ||
 		error instanceof ParseError ||
 		error instanceof PlaneApiError ||
