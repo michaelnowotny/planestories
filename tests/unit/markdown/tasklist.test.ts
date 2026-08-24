@@ -191,6 +191,91 @@ describe("spliceAcceptanceCriteria preserves prefix and suffix", () => {
 		expect(out).toContain("**Depends on:** X-1");
 	});
 
+	test("keeps nested details with their criterion", () => {
+		const body = [
+			"Pre",
+			"",
+			"### Acceptance Criteria",
+			"",
+			"- [ ] first",
+			"  - first detail",
+			"    - deeper detail",
+			"- [x] second",
+			"  - second detail",
+			"",
+			"### Notes",
+			"",
+			"Keep this suffix.",
+		].join("\n");
+		const replacement = [crit("first", true), crit("second", false)];
+		const expected = body
+			.replace("- [ ] first", "- [x] first")
+			.replace("- [x] second", "- [ ] second");
+
+		expect(splitBody(body).criteria).toEqual([
+			{ text: "first", checked: false },
+			{ text: "second", checked: true },
+		]);
+
+		const once = spliceAcceptanceCriteria(body, replacement);
+		expect(once).toBe(expected);
+		// The first repair must be the fixed point; a later export/import cannot
+		// relocate or flatten the preserved child blocks.
+		expect(spliceAcceptanceCriteria(once, replacement)).toBe(once);
+	});
+
+	test("refuses a nested checkbox instead of flattening it into a peer criterion", () => {
+		const body = [
+			"### Acceptance Criteria",
+			"",
+			"- [ ] parent",
+			"  - [ ] nested check",
+			"- [x] peer",
+		].join("\n");
+
+		expect(() => splitBody(body)).toThrow(/nested checkbox.*nested check/i);
+		expect(() =>
+			spliceAcceptanceCriteria(body, [crit("parent", false), crit("peer", true)]),
+		).toThrow(/nested checkbox.*nested check/i);
+	});
+
+	test("preserves a checkbox example inside a nested code fence as detail content", () => {
+		const body = [
+			"### Acceptance Criteria",
+			"",
+			"- [ ] parent",
+			"  ```markdown",
+			"  - [ ] example only",
+			"  ```",
+			"- [x] peer",
+		].join("\n");
+		const replacement = [crit("parent", true), crit("peer", false)];
+
+		expect(splitBody(body).criteria).toEqual([
+			{ text: "parent", checked: false },
+			{ text: "peer", checked: true },
+		]);
+		const once = spliceAcceptanceCriteria(body, replacement);
+		expect(once).toBe(
+			body.replace("- [ ] parent", "- [x] parent").replace("- [x] peer", "- [ ] peer"),
+		);
+		expect(spliceAcceptanceCriteria(once, replacement)).toBe(once);
+	});
+
+	test("refuses to orphan nested details when their criterion is removed", () => {
+		const body = [
+			"### Acceptance Criteria",
+			"",
+			"- [ ] keep",
+			"- [ ] detailed",
+			"  - this belongs to detailed",
+		].join("\n");
+
+		expect(() => spliceAcceptanceCriteria(body, [crit("keep", false)])).toThrow(
+			/detailed.*nested content/i,
+		);
+	});
+
 	test("empty criteria drops the AC block but keeps prefix + suffix", () => {
 		const body = "Pre\n\n### Acceptance Criteria\n\n- [ ] gone\n\n### Post\n\nkeep";
 		const out = spliceAcceptanceCriteria(body, []);
