@@ -223,6 +223,9 @@ function validateBoardCache(value: unknown): BoardCache {
 		);
 	}
 	const fetchedAt = instant(cache.fetchedAt, "fetchedAt");
+	if (Date.parse(fetchedAt) > Date.now()) {
+		throw new Error(`fetchedAt ${JSON.stringify(fetchedAt)} is in the future`);
+	}
 	const instance = record(cache.instance, "instance");
 	const baseUrl = nonEmptyString(instance.baseUrl, "instance.baseUrl");
 	normalizeBoardBaseUrl(baseUrl);

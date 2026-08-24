@@ -252,6 +252,53 @@ describe("importStories", () => {
 		expect(summary.results[0]?.action).toBe("updated");
 	});
 
+	test("refuses duplicate plane_id values across files before any board write", async () => {
+		const sharedId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+		const firstFile = writeTmpFile(
+			"first.md",
+			`## Story One
+
+\`\`\`yaml
+plane_id: ${sharedId}
+plane_identifier: ENG-1
+\`\`\`
+
+First body.
+`,
+		);
+		const secondFile = writeTmpFile(
+			"second.md",
+			`## Story Two
+
+\`\`\`yaml
+plane_id: ${sharedId}
+plane_identifier: ENG-2
+\`\`\`
+
+Second body.
+`,
+		);
+		const { client, calls, createdItems, updatedItems } = makeFakeClient(baseData());
+
+		const error = await importStories(client, {
+			files: [firstFile, secondFile],
+			config: defaultConfig,
+			noWriteBack: true,
+		}).then(
+			() => null,
+			(caught: unknown) => caught,
+		);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain(sharedId);
+		expect((error as Error).message).toContain("Story One");
+		expect((error as Error).message).toContain("Story Two");
+		expect((error as Error).message).toMatch(/edit.*plane_id/i);
+		expect(createdItems).toEqual([]);
+		expect(updatedItems).toEqual([]);
+		expect(calls).toEqual([]);
+	});
+
 	test("writes back plane ids to markdown after successful creation", async () => {
 		const filePath = writeTmpFile("writeback.md", markdownNewStories);
 		const { client } = makeFakeClient(baseData());

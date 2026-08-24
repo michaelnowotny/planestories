@@ -249,4 +249,30 @@ describe("parseAuditWindow", () => {
 		expect(() => parseAuditWindow("everything", NOW)).toThrow(/duration|ISO/i);
 		expect(() => parseAuditWindow("2026-08-24T00:00:00Z", NOW)).toThrow(/future/i);
 	});
+
+	test("rejects a calendar-invalid ISO date instead of rolling it into March", () => {
+		let error: unknown;
+		try {
+			parseAuditWindow("2026-02-30", NOW);
+		} catch (caught) {
+			error = caught;
+		}
+
+		expect(error).toBeInstanceOf(AuditBoundError);
+		expect((error as Error).message).toContain("2026-02-30");
+		expect((error as Error).message).toMatch(/calendar date/i);
+	});
+
+	test("rejects a finite duration outside Date's range as an AuditBoundError", () => {
+		let error: unknown;
+		try {
+			parseAuditWindow("999999999999d", NOW);
+		} catch (caught) {
+			error = caught;
+		}
+
+		expect(error).toBeInstanceOf(AuditBoundError);
+		expect((error as Error).message).toContain("999999999999d");
+		expect((error as Error).message).toMatch(/supported date range/i);
+	});
 });

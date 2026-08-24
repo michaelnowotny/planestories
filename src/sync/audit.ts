@@ -112,19 +112,32 @@ export function parseAuditWindow(value: string | undefined, now: Date = new Date
 		// Date-only is unambiguously UTC in ECMAScript. Date-times must carry Z or
 		// an offset so the same command means the same instant in every timezone.
 		const iso =
-			/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2}))?$/i;
-		if (!iso.test(requested.trim())) throw invalidSince(requested);
-		sinceMs = Date.parse(requested.trim());
+			/^(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2}))?$/i;
+		const requestedInstant = requested.trim();
+		const match = iso.exec(requestedInstant);
+		if (!match) throw invalidSince(requested);
+		if (!isCalendarDate(Number(match[1]), Number(match[2]), Number(match[3]))) {
+			throw new AuditBoundError(
+				`--since ${JSON.stringify(requested)} is not a valid calendar date. Use a real YYYY-MM-DD date or an ISO-8601 instant with a timezone.`,
+			);
+		}
+		sinceMs = Date.parse(requestedInstant);
 		if (Number.isNaN(sinceMs)) throw invalidSince(requested);
 	}
 
 	if (!Number.isFinite(sinceMs)) throw invalidSince(requested);
+	const since = new Date(sinceMs);
+	if (Number.isNaN(since.getTime())) {
+		throw new AuditBoundError(
+			`--since ${JSON.stringify(requested)} falls outside the supported date range. Use a shorter duration or an ISO-8601 instant between years 0000 and 9999.`,
+		);
+	}
 	if (sinceMs > now.getTime()) {
 		throw new AuditBoundError(`--since ${JSON.stringify(requested)} is in the future.`);
 	}
 	return {
 		requested,
-		since: new Date(sinceMs).toISOString(),
+		since: since.toISOString(),
 		through: now.toISOString(),
 	};
 }
@@ -349,6 +362,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function invalidSince(value: string): AuditBoundError {
 	return new AuditBoundError(
 		`Invalid --since ${JSON.stringify(value)}. Use a positive duration such as 90m, 24h, or 7d, or an ISO-8601 instant with a timezone.`,
+	);
+}
+
+/** Validate the authored calendar components without relying on Date.parse rollover. */
+function isCalendarDate(year: number, month: number, day: number): boolean {
+	const roundTrip = new Date(0);
+	roundTrip.setUTCFullYear(year, month - 1, day);
+	return (
+		roundTrip.getUTCFullYear() === year &&
+		roundTrip.getUTCMonth() === month - 1 &&
+		roundTrip.getUTCDate() === day
 	);
 }
 
