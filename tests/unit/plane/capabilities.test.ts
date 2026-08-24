@@ -4,7 +4,23 @@ import {
 	formatCapabilitiesTable,
 	probeDeploymentCapabilities,
 } from "../../../src/plane/capabilities.ts";
-import type { PlaneEndpointDialect, PlaneIssueRelations } from "../../../src/plane/client.ts";
+import type {
+	PlaneEndpointDialect,
+	PlaneIssueRelations,
+	RelationMethodProbe,
+} from "../../../src/plane/client.ts";
+
+/** Plane answers OPTIONS with 405 but still sets `Allow` — that header is the measurement. */
+const COLLECTION_GET_POST = { status: 405, allow: ["GET", "POST"] };
+/** Both known removal routes returning 404 with no Allow: the routes do not exist. */
+const REMOVAL_ABSENT = [
+	{ status: 404, allow: [] },
+	{ status: 404, allow: [] },
+];
+const REMOVAL_PRESENT = [
+	{ status: 405, allow: ["POST"] },
+	{ status: 404, allow: [] },
+];
 
 const EMPTY_RELATIONS: PlaneIssueRelations = {
 	blocking: [],
@@ -24,6 +40,7 @@ function stub(options: {
 	pql: "supported" | "unsupported" | "throws";
 	count: "supported" | "unsupported" | "throws";
 	relations?: "supported" | "throws";
+	relationMethods?: RelationMethodProbe | "throws";
 }) {
 	return {
 		baseUrl: "https://plane.example",
@@ -43,6 +60,15 @@ function stub(options: {
 		async getRelations(): Promise<PlaneIssueRelations> {
 			if (options.relations === "throws") throw new Error("relations unavailable");
 			return EMPTY_RELATIONS;
+		},
+		async probeRelationMethods(): Promise<RelationMethodProbe> {
+			if (options.relationMethods === "throws") throw new Error("OPTIONS probe failed");
+			return (
+				options.relationMethods ?? {
+					collection: COLLECTION_GET_POST,
+					removal: options.dialect === "work-items" ? REMOVAL_ABSENT : REMOVAL_PRESENT,
+				}
+			);
 		},
 		async probePql(): Promise<void> {
 			if (options.pql === "unsupported") {
@@ -118,7 +144,8 @@ describe("deployment capabilities", () => {
 				version: "2.6.0",
 				pql: "throws",
 				count: "throws",
-				relations: "throws",
+				// The relation surface is probed by OPTIONS now, not by a list GET.
+				relationMethods: "throws",
 			}),
 			{ dialectSource: "fallback" },
 		);
@@ -171,5 +198,125 @@ describe("deployment capabilities", () => {
 		const table = formatCapabilitiesTable(result);
 		expect(table).toContain("edition: could not determine");
 		expect(table).toContain("version: could not determine");
+	});
+});
+
+/**
+ * Relation create/list/remove used to be INFERRED: a successful list GET meant
+ * create works, and `client.dialect === "work-items"` meant removal does not.
+ * In the one command whose entire purpose is refusing to make confident claims
+ * from indirect evidence, that was the wrong shape — a Cloud deployment with an
+ * explicitly configured work-items dialect would have been told
+ * "relation removal: NOT SUPPORTED" by a check that measured nothing.
+ *
+ * They are measured now, read-only. Plane rejects OPTIONS with
+ * `405 Method "OPTIONS" not allowed` and still returns `Allow: GET, POST`; the
+ * removal routes answer 404 with no `Allow` at all. Both are real statements,
+ * and neither writes — which matters, because the obvious way to find out
+ * whether removal works is to remove something.
+ */
+describe("relation capabilities are measured, not inferred from the dialect", () => {
+	test("the dialect does not decide removal: work-items + a live route reports SUPPORTED", async () => {
+		const result = await probeDeploymentCapabilities(
+			stub({
+				dialect: "work-items",
+				edition: "PLANE_COMMUNITY",
+				version: "1.4.1",
+				pql: "unsupported",
+				count: "unsupported",
+				relationMethods: {
+					collection: COLLECTION_GET_POST,
+					removal: [
+						{ status: 405, allow: ["POST"] },
+						{ status: 404, allow: [] },
+					],
+				},
+			}),
+			{ dialectSource: "configured" },
+		);
+
+		expect(result.capabilities.relationRemove).toBe("supported");
+	});
+
+	test("...and issues + absent routes reports NOT SUPPORTED", async () => {
+		const result = await probeDeploymentCapabilities(
+			stub({
+				dialect: "issues",
+				edition: "PLANE_CLOUD",
+				version: "2.6.0",
+				pql: "supported",
+				count: "supported",
+				relationMethods: {
+					collection: COLLECTION_GET_POST,
+					removal: [
+						{ status: 404, allow: [] },
+						{ status: 404, allow: [] },
+					],
+				},
+			}),
+			{ dialectSource: "configured" },
+		);
+
+		expect(result.capabilities.relationRemove).toBe("not-supported");
+	});
+
+	test("an endpoint that does not state Allow is indeterminate, never a negative", async () => {
+		// Silence is not a measurement. The old code could not tell these apart,
+		// because it never asked the endpoint anything about create or remove.
+		const result = await probeDeploymentCapabilities(
+			stub({
+				dialect: "issues",
+				edition: "PLANE_CLOUD",
+				version: "2.6.0",
+				pql: "supported",
+				count: "supported",
+				relationMethods: {
+					collection: { status: 200, allow: [] },
+					removal: [{ status: 403, allow: [] }],
+				},
+			}),
+			{ dialectSource: "configured" },
+		);
+
+		expect(result.capabilities.relationCreate).toBe("could-not-determine");
+		expect(result.capabilities.relationList).toBe("could-not-determine");
+		expect(result.capabilities.relationRemove).toBe("could-not-determine");
+	});
+
+	test("a collection that allows GET but not POST reports create unsupported", async () => {
+		const result = await probeDeploymentCapabilities(
+			stub({
+				dialect: "issues",
+				edition: "PLANE_CLOUD",
+				version: "2.6.0",
+				pql: "supported",
+				count: "supported",
+				relationMethods: {
+					collection: { status: 405, allow: ["GET"] },
+					removal: REMOVAL_ABSENT,
+				},
+			}),
+			{ dialectSource: "configured" },
+		);
+
+		expect(result.capabilities.relationList).toBe("supported");
+		expect(result.capabilities.relationCreate).toBe("not-supported");
+	});
+
+	test("a failed OPTIONS probe leaves all three indeterminate", async () => {
+		const result = await probeDeploymentCapabilities(
+			stub({
+				dialect: "work-items",
+				edition: "PLANE_COMMUNITY",
+				version: "1.4.1",
+				pql: "unsupported",
+				count: "unsupported",
+				relationMethods: "throws",
+			}),
+			{ dialectSource: "detected" },
+		);
+
+		expect(result.capabilities.relationCreate).toBe("could-not-determine");
+		expect(result.capabilities.relationRemove).toBe("could-not-determine");
 	});
 });
