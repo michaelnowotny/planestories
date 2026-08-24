@@ -70,12 +70,63 @@ Each issue is scored on a 0-100% scale using the rubric for its type.
 
 ### User story
 
+Every criterion is first classified **gate** or **task** by one question:
+
+> **Describe a build that satisfies every OTHER criterion but fails this one. Is that build WRONG,
+> or merely UNFINISHED?**
+
+Wrong → **gate**: it excludes a way the work could be wrong while looking right. Unfinished →
+**task**: it describes work, and cannot fail in a way that changes a decision.
+
 | Dimension | Weight | What it measures |
 |-----------|--------|-----------------|
-| **Specificity** | 30% | Concrete values, actors, states, and boundaries rather than vague language |
-| **Testability** | 35% | Each criterion has a clear pass/fail a QA engineer could turn into a test case |
-| **Completeness** | 25% | Happy path, error states, edge cases, and relevant boundaries covered |
-| **Description Quality** | 10% | Enough implementation context and constraints for a developer |
+| **Discrimination** | 30% | What fraction of criteria are **gates** (reported as `gates/total`). **Non-monotonic: adding a task LOWERS it.** |
+| **Risk Coverage** | 20% | For each way this could be wrong-while-looking-right, is there a gate? Not "did you list all the work" |
+| **Testability** | 20% | Each criterion has a clear pass/fail. Necessary, and unable to tell a gate from a task |
+| **Specificity** | 20% | Concrete where it changes what gets built; evidence belongs in the body |
+| **Description Quality** | 10% | Implementation context and constraints, including the outcome-delta sentence |
+
+A user story must state **what is true after it lands that is not true now**. Missing or circular
+caps it at **75%** — below the pass threshold — the same way a missing `### Why is this needed?`
+caps an epic at 70%. If that sentence needs an "and", it is two stories.
+
+#### Why this changed (2026-08-23)
+
+The previous rubric was **Specificity 30 / Testability 35 / Completeness 25 / Description 10**, and
+every one of those dimensions was **monotonic in writing effort**: adding a criterion, a concrete
+value, or a paragraph could only ever raise the score. A rubric with that property cannot
+distinguish *writing the right things* from *writing more things*, so length was free and dilution
+was invisible.
+
+The case that surfaced it (relayed from a sibling session, 2026-08-23): a spec with **twenty**
+acceptance criteria produced a build with two defects, and **neither defect was in any of the
+twenty**. One criterion enumerated five required diagnostic columns by name — and the field a human
+would ask for first, *why* the estimator failed, was not among them. Under the old rubric that
+ticket scored close to exemplary: twenty clean pass/fail lines, concrete values throughout, maximum
+Completeness. Roughly four of the twenty were gates, and the reviewer's attention was spread over
+all twenty.
+
+Three deliberate choices in the fix:
+
+- **Discrimination penalises the RATIO, not the count.** Penalising the count would push an author
+  to delete criteria — including gates — to score better. Penalising the ratio means the only way up
+  is to delete **tasks**. A story with ten criteria of which nine are gates is not badly written; it
+  is too big, and gets a **split recommendation with no score penalty**.
+- **"Completeness" was renamed "Risk Coverage",** because the name was driving the behaviour. The
+  old name asks *have I listed everything?*; the new one asks *what could go wrong?* — and only the
+  second has an answer that can be missing.
+- **The classification is shown, not hidden.** Judging gate-vs-task needs domain understanding and
+  will sometimes be wrong. A visible wrong classification is correctable; a hidden one silently
+  moves the score.
+
+This is the same rule as the assertion rule in `AGENTS.md` — *an assertion that would still pass
+with the feature deleted is not a test* — applied to the specification instead of the check. Both
+are instances of: **the value of any check is exactly the set of worlds it excludes.**
+
+Calibration specimens, with expected verdicts, are in
+[RATE_USERSTORIES_CALIBRATION.md](./RATE_USERSTORIES_CALIBRATION.md) — including the guard against
+the perverse incentive above. The outcome-based study that would actually settle this, and the one
+cheap thing needed to make it runnable, are described there too.
 
 ### Epic
 
@@ -145,6 +196,20 @@ If any condition fails, the issue fails. Tensions are reported but do not cause 
 - **Unquantified performance** — "fast", "responsive", "smooth", "quick" (without thresholds like "< 200ms")
 - **Weasel words** — "should work well", "properly handles", "appropriate", "reasonable", "seamless", "robust"
 - **Ambiguous scope** — "etc.", "and more", "as needed", "where applicable", "various"
+
+Three more that are written in *precise, confident, quantified* prose, which is exactly why a rubric
+rewarding precision alone rates them highly:
+
+- **Closed enumeration as coverage** — "the diagnostic row contains columns A, B, C, D, E". Passes
+  the moment those five exist, and encodes no way to discover a sixth was needed. Rewrite
+  generatively: "for every way the estimator can fail, the diagnostic row identifies which failure
+  occurred."
+- **Measurement smuggling** — a measured value moved into a checkbox because concrete numbers score
+  well there. "Baseline p95 is 812ms as measured on 2026-08-19" is true, precise, and cannot fail:
+  it is a fact about the past, not a condition on the build. It belongs in the body; the criterion is
+  the line it argues for.
+- **Restated title** — a criterion that says the story's title back, which cannot fail unless the
+  story was not done at all.
 
 **In epics**, the skill flags: unbounded scope, solution-first wording with no stated outcome, missing workstreams or boundaries, implementation-level acceptance criteria (epics should have none), circular rationale, and placeholder rationale.
 

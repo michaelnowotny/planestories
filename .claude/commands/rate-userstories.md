@@ -60,14 +60,71 @@ A missing or empty `### Why is this needed?` section is not a structural hard fa
 
 **House-convention override (optional).** Files produced by `export` are already AC-less for epics by construction (inline ACs become `kind: criterion` children), so this override is mainly for HAND-AUTHORED pre-import files where an epic keeps inline acceptance criteria. In that case, if the invoker states that the project's convention is that epics carry acceptance criteria as their close/exit conditions, treat "an epic with acceptance criteria" as a WARNING for this run rather than a structural failure. The `### Why is this needed?` → zero-Rationale → 70% cap still applies, so a rationale-less epic still fails on score — this override only relaxes the epic-with-AC structural gate so an existing board can be rated without drowning real findings in structural fails.
 
+## The governing question
+
+Before any dimension, apply this to every criterion, and say so in the report:
+
+> **Describe a build that satisfies every OTHER criterion but fails this one.
+> Is that build WRONG, or merely UNFINISHED?**
+
+- **Wrong** → the criterion is a **gate**. It excludes a way the work could be wrong while
+  looking right.
+- **Unfinished** → the criterion is a **task**. It describes work. It cannot fail in a way that
+  changes a decision: do the work and it passes; skip it and you simply are not done.
+
+Both of these have a clean pass/fail, and only one of them is doing any work:
+
+- *"Dead branches removed, with 'no consumer found' recorded per branch."* → **task**
+- *"The γ₀ == 0 rate stays within [38.3%, 47.9%] on the reference day; below the floor FAILS."*
+  → **gate** (it encodes expansion dissolving real constrained solutions)
+
+**A criterion that would be satisfied however you built it is not a gate.** This is the same rule
+as the assertion rule in `AGENTS.md` — *an assertion that would still pass with the feature deleted
+is not a test* — applied one level up, to the specification instead of the check. Both are
+instances of: **the value of any check is exactly the set of worlds it excludes.** One that
+excludes no world is decoration, however precisely it is worded.
+
+Classify every criterion **gate** or **task** and show the classification, so a human can overrule
+you. This judgement needs domain understanding and you will sometimes get it wrong; a visible
+wrong classification is correctable, a hidden one is not.
+
 ## User Story Rubric
 
 Score user stories from 0-100%:
 
-1. **Specificity (30%)** — Concrete values, actors, states, and boundaries rather than vague language.
-2. **Testability (35%)** — Each criterion has a clear pass/fail result a QA engineer could turn directly into a test case.
-3. **Completeness (25%)** — Happy path, error states, edge cases, and relevant boundaries are covered.
-4. **Description Quality (10%)** — The description gives enough implementation context and constraints.
+1. **Discrimination (30%)** — What fraction of the criteria are **gates**? Report it as
+   `gates/total`. A story that is 4 gates and 1 task scores far above one that is 4 gates and 16
+   tasks, because the reviewer's attention is finite and sixteen tasks spend four-fifths of it.
+   **This dimension is deliberately non-monotonic: adding a task LOWERS the score.** Every other
+   dimension here can only be helped by writing more, which is why length used to be free.
+2. **Risk Coverage (20%)** — For each way this change could be **wrong while looking right**, is
+   there a gate? Judge against the risks the story itself names in its body, plus the obvious ones
+   for its domain. *This is not "did you list everything you will do"* — that reading is what the
+   old **Completeness** dimension rewarded, and it is why a twenty-criterion spec could miss both
+   defects that later shipped. Enumerating more work does not raise this score; gating more failure
+   modes does.
+3. **Testability (20%)** — Each criterion has a clear pass/fail a QA engineer could turn into a test
+   case. Necessary, and by itself worth much less than it used to be: it cannot tell a gate from a
+   task, and both pass it.
+4. **Specificity (20%)** — Concrete values, actors, states and boundaries **where they change what
+   gets built**. A number that only justifies the work belongs in the body, not in a checkbox — see
+   *Measurement smuggling* below.
+5. **Description Quality (10%)** — Enough implementation context and constraints, including the
+   outcome-delta sentence required below.
+
+### Two structural caps
+
+**Outcome delta.** A user story must state, in one sentence, **what is true after it lands that is
+not true now**. Any phrasing that names a checkable post-condition qualifies — do not pattern-match
+a template. If it is missing, or merely restates the title, cap the story at **75%** (below the
+pass threshold), the same way a missing `### Why is this needed?` caps an epic at 70%. If the
+sentence needs an "and" to be true, that is two stories: recommend the split.
+
+**Split, do not trim.** When a story has many criteria and MOST of them are gates, it is not badly
+written — it is too big. Recommend splitting it and do **not** dock Discrimination for the count.
+Never recommend deleting criteria to raise a score: penalising the raw count would push an author
+to delete gates, which is the opposite of the point. Discrimination penalises the *ratio*, so the
+only way to raise it is to remove **tasks**.
 
 ## Epic Rubric
 
@@ -124,6 +181,25 @@ Treat contradictions as especially important for agentic coding: they create amb
 - **Weasel words**: "should work well", "properly handles", "appropriate", "reasonable", "adequate", "suitable", "seamless", "robust".
 - **Ambiguous scope**: "etc.", "and more", "as needed", "where applicable", "various", "all relevant".
 
+Three further anti-patterns, all of which produce criteria that read as rigorous and exclude
+nothing. Unlike the vague language above, **these are written in precise, confident, quantified
+prose** — which is why a rubric that rewards precision alone will rate them highly.
+
+- **Closed enumeration as coverage.** A criterion that names its items exhaustively —
+  *"the diagnostic row contains columns `estimator`, `window`, `n_trades`, `gamma0`, `status`"* —
+  passes the moment those five exist and encodes **no way to discover that a sixth was needed**.
+  It feels complete because it is finite. Prefer a **generative** form, which can fail by finding
+  a gap:
+  **Before:** "the diagnostic row contains columns A, B, C, D, E"
+  **After:** "for every way the estimator can fail, the diagnostic row identifies *which* failure
+  occurred; a run that fails for an unlisted reason is itself a finding"
+- **Measurement smuggling.** A measured value moved into a checkbox because concrete numbers score
+  well there. The measurement is *evidence for why the work matters* and belongs in the body; the
+  criterion is the bare falsifiable line that the body's number justifies. Smuggling inflates both
+  Specificity and the criterion count while adding no gate.
+- **Restated title.** A criterion that says the story's own title back. It cannot fail unless the
+  story was not done at all.
+
 **In epics**, flag: unbounded scope, solution-first wording with no stated outcome, missing workstreams or boundaries, implementation-level acceptance criteria (epics should have none), circular rationale, and placeholder rationale.
 
 ## Style Guide Recommendation
@@ -148,8 +224,16 @@ An issue passes only when ALL of these hold:
 - It is structurally valid for its type.
 - It has no internal hard contradiction.
 - It does not hard-contradict another issue.
+- **A user story states its outcome delta** (missing or circular caps it at 75%, which fails).
+- **An epic has a substantive `### Why is this needed?`** (missing caps it at 70%, which fails).
 
 Tensions do not cause failure.
+
+**A high score is not a defence.** If a story scores 92% on four gates and sixteen tasks, say so in
+the notes: the reviewer's attention will be spread over twenty lines and four of them are load-
+bearing. Recommend deleting the tasks. The old rubric would have rated exactly that ticket close to
+exemplary — twenty clean pass/fail criteria, concrete values throughout, maximum Completeness — and
+it shipped two defects, neither of which was in any of the twenty.
 
 ## Output Format
 
@@ -157,9 +241,13 @@ Tensions do not cause failure.
 
 Include every epic and user story (criterion sub-items are covered under their parent story):
 
-| Issue | Type | Score | Result | Notes |
-|-------|------|-------|--------|-------|
-| Title (truncated if long) | Epic / User story | XX% | PASS / FAIL | primary reason: contradiction / structural / below-threshold / pass |
+| Issue | Type | Score | Gates | Result | Notes |
+|-------|------|-------|-------|--------|-------|
+| Title (truncated if long) | Epic / User story | XX% | 4/5 | PASS / FAIL | primary reason: contradiction / structural / below-threshold / no outcome delta / pass |
+
+The **Gates** column is `gates/total criteria` and is blank for epics. Put it in the summary, not
+buried in the detail: it is the number that tells a reader at a glance whether a long ticket is
+thorough or merely long.
 
 ### 2. Hierarchy Review
 
