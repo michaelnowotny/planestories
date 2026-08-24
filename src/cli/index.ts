@@ -1,29 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
-import { registerAtlasCommand } from "./commands/atlas.ts";
-import { registerAuditCommand } from "./commands/audit.ts";
-import { registerBoardCommand } from "./commands/board.ts";
-import { registerCapabilitiesCommand } from "./commands/capabilities.ts";
-import { registerCriticalPathCommand } from "./commands/critical-path.ts";
-import { registerDeleteCommand } from "./commands/delete.ts";
-import { registerDiffCommand } from "./commands/diff.ts";
-import { registerDoctorCommand } from "./commands/doctor.ts";
-import { registerEpicCommand } from "./commands/epic.ts";
-import { registerExportCommand } from "./commands/export.ts";
-import { registerGraphQueryCommands } from "./commands/graph-queries.ts";
-import { registerGroomCommand } from "./commands/groom.ts";
-import { registerImportCommand } from "./commands/import.ts";
-import { registerLintCommand } from "./commands/lint.ts";
-import { registerMigrateCriteriaCommand } from "./commands/migrate.ts";
-import { registerPacketCommand } from "./commands/packet.ts";
-import { registerProjectsCommand } from "./commands/projects.ts";
-import { registerCountCommand, registerLsCommand } from "./commands/query.ts";
-import { registerRenameProjectCommand } from "./commands/rename-project.ts";
-import { registerReplicateCommand } from "./commands/replicate.ts";
-import { registerSetCommand } from "./commands/set.ts";
-import { registerShowCommand } from "./commands/show.ts";
-import { registerTrendCommand } from "./commands/trend.ts";
 import { armLingerNotice } from "./flush.ts";
+import { registerAllCommands } from "./register_all.ts";
 
 const program = new Command();
 
@@ -36,30 +14,7 @@ program
 	// (a parent would otherwise consume `-p`/`-o` before the subcommand parses).
 	.enablePositionalOptions();
 
-registerImportCommand(program);
-registerCapabilitiesCommand(program);
-registerExportCommand(program);
-registerDeleteCommand(program);
-registerSetCommand(program);
-registerProjectsCommand(program);
-registerGroomCommand(program);
-registerMigrateCriteriaCommand(program);
-registerDoctorCommand(program);
-registerBoardCommand(program);
-registerAuditCommand(program);
-registerAtlasCommand(program);
-registerShowCommand(program);
-registerGraphQueryCommands(program);
-registerLsCommand(program);
-registerCountCommand(program);
-registerLintCommand(program);
-registerPacketCommand(program);
-registerEpicCommand(program);
-registerCriticalPathCommand(program);
-registerDiffCommand(program);
-registerTrendCommand(program);
-registerReplicateCommand(program);
-registerRenameProjectCommand(program);
+registerAllCommands(program);
 
 // Long runs were observed idling for ~45 MINUTES after their final output, because a
 // lingering keep-alive socket keeps the runtime alive long after every write has been
