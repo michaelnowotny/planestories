@@ -1,3 +1,5 @@
+import { ParseError } from "../errors.ts";
+
 export interface AcceptanceCriterion {
 	text: string;
 	checked: boolean;
@@ -11,14 +13,24 @@ export interface SplitBody {
 	/** Whether an acceptance-criteria heading was present. */
 	hasHeading: boolean;
 	/**
-	 * Body content from the NEXT heading after the criteria block onward (or ""
+	 * Body content from the next heading after the criteria block onward (or ""
 	 * when the criteria block runs to end-of-file). This is the load-bearing field
-	 * that lets a rebuild preserve trailing sections — `### Testing Notes`,
-	 * `**Effort:** …`, `**Depends on:** …` — instead of the old
-	 * `joinBody(narrative, block)` which silently DROPPED everything after the
-	 * criteria. See `spliceAcceptanceCriteria`.
+	 * that lets a rebuild preserve trailing content instead of silently dropping
+	 * it. See `spliceAcceptanceCriteria`.
 	 */
 	suffix: string;
+}
+
+interface CriterionBlock {
+	criterion: AcceptanceCriterion;
+	/** Raw indented/blank lines structurally owned by this top-level criterion. */
+	nestedLines: string[];
+}
+
+interface ParsedBody extends SplitBody {
+	criterionBlocks: CriterionBlock[];
+	/** Unindented non-checkbox content inside the AC section. */
+	extras: string;
 }
 
 /**
@@ -29,17 +41,68 @@ export interface SplitBody {
  */
 export const AC_HEADING = /^#{1,6}\s+acceptance criteria\s*#*\s*$/i;
 /**
- * A single checklist line, split into (prefix)(mark)(rest) so the mark can be
- * rewritten in place while preserving the exact bullet/indentation/text. This is
- * the ONE source of truth for what counts as a criterion checkbox — `splitBody`
- * (which numbers criteria for the `::ac<n>` sub-item ids) and the write-back
- * reverse-sync BOTH derive from it, so a checkbox's position can never drift
- * between the two.
+ * A TOP-LEVEL checklist line, split into (prefix)(mark)(rest) so the mark can be
+ * rewritten in place while preserving the exact bullet and text. Indented
+ * checkboxes are nested content belonging to their nearest top-level criterion,
+ * not peer acceptance criteria. This remains the ONE source of truth used by
+ * `splitBody` and write-back numbering, so their positions cannot drift.
  */
-export const CHECKBOX_LINE = /^(\s*[-*]\s+)\[([ xX])\](\s+.*)$/;
+export const CHECKBOX_LINE = /^([-*]\s+)\[([ xX])\](\s+.*)$/;
+const INDENTED_CHECKBOX_LINE = /^[\t ]+[-*]\s+\[[ xX]\](\s+.*)$/;
 const ANY_HEADING = /^#{1,6}\s+/;
 const AC_TEXT = /^acceptance criteria$/i;
 const SETEXT_UNDERLINE = /^(?:=+|-+)$/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+function acHeadingLength(lines: string[], index: number): 0 | 1 | 2 {
+	const trimmed = (lines[index] ?? "").trim();
+	if (AC_HEADING.test(trimmed)) {
+		return 1;
+	}
+	if (
+		AC_TEXT.test(trimmed) &&
+		index + 1 < lines.length &&
+		SETEXT_UNDERLINE.test((lines[index + 1] ?? "").trim())
+	) {
+		return 2;
+	}
+	return 0;
+}
+
+/** Lines inside (or delimiting) a CommonMark fenced code block. */
+function markdownFenceMask(lines: string[]): boolean[] {
+	const mask = new Array<boolean>(lines.length).fill(false);
+	let open: { char: string; length: number } | null = null;
+	for (let i = 0; i < lines.length; i++) {
+		const match = (lines[i] as string).match(FENCE);
+		if (match) {
+			const run = match[1] as string;
+			const info = (match[2] as string).trim();
+			if (open === null) {
+				open = { char: run[0] as string, length: run.length };
+			} else if (run[0] === open.char && run.length >= open.length && info === "") {
+				open = null;
+			}
+			mask[i] = true;
+			continue;
+		}
+		mask[i] = open !== null;
+	}
+	return mask;
+}
+
+/** Trim only empty boundary lines; never strip indentation from real content. */
+function trimBoundaryBlankLines(lines: string[]): string {
+	let start = 0;
+	let end = lines.length;
+	while (start < end && (lines[start] ?? "").trim() === "") {
+		start++;
+	}
+	while (end > start && (lines[end - 1] ?? "").trim() === "") {
+		end--;
+	}
+	return lines.slice(start, end).join("\n");
+}
 
 /**
  * Index of the Acceptance-Criteria heading, or -1. Recognizes an ATX heading
@@ -47,59 +110,116 @@ const SETEXT_UNDERLINE = /^(?:=+|-+)$/;
  * (`Acceptance Criteria` on one line, `===`/`---` underline on the next). The
  * Setext form matters because Plane's HTML round-trip normalizes it to ATX; if
  * this splitter recognized only ATX, the narrative boundary (and any field
- * derived from it, like effort) would shift across the round-trip. Returns the
- * index of the heading (the TEXT line for a Setext heading).
+ * derived from it, like effort) would shift across the round-trip. Fenced-code
+ * examples are ignored. Returns the index of the heading (the TEXT line for a
+ * Setext heading).
  */
 export function acHeadingIndex(lines: string[]): number {
+	const fenced = markdownFenceMask(lines);
 	for (let i = 0; i < lines.length; i++) {
-		const trimmed = (lines[i] as string).trim();
-		if (AC_HEADING.test(trimmed)) {
-			return i; // ATX
-		}
-		if (
-			AC_TEXT.test(trimmed) &&
-			i + 1 < lines.length &&
-			SETEXT_UNDERLINE.test((lines[i + 1] as string).trim())
-		) {
-			return i; // Setext (text line; underline is at i+1)
+		if (!fenced[i] && acHeadingLength(lines, i) > 0) {
+			return i;
 		}
 	}
 	return -1;
 }
 
-/**
- * Split a story body into its narrative and its acceptance-criteria checklist.
- *
- * The acceptance-criteria section starts at an Acceptance-Criteria heading (ATX
- * or Setext; see `acHeadingIndex`) and runs until the next heading or end of file.
- * Only checkbox lines (`- [ ]` / `- [x]`) are collected as criteria.
- */
-export function splitBody(body: string): SplitBody {
+/** Parse the one permitted AC section, retaining nested blocks for a lossless splice. */
+function parseBody(body: string): ParsedBody {
 	const lines = body.split("\n");
 	const headingIndex = acHeadingIndex(lines);
 
 	if (headingIndex === -1) {
-		return { narrative: body.trim(), criteria: [], hasHeading: false, suffix: "" };
+		return {
+			narrative: body.trim(),
+			criteria: [],
+			hasHeading: false,
+			suffix: "",
+			criterionBlocks: [],
+			extras: "",
+		};
+	}
+
+	const firstHeadingLength = acHeadingLength(lines, headingIndex);
+	const fenced = markdownFenceMask(lines);
+	for (let i = headingIndex + firstHeadingLength; i < lines.length; i++) {
+		const duplicateLength = acHeadingLength(lines, i);
+		if (!fenced[i] && duplicateLength > 0) {
+			throw new ParseError(
+				`Duplicate Acceptance Criteria heading at line ${i + 1}; a story may contain only one`,
+			);
+		}
 	}
 
 	const narrative = lines.slice(0, headingIndex).join("\n").trim();
-
-	const criteria: AcceptanceCriterion[] = [];
+	const criterionBlocks: CriterionBlock[] = [];
+	const extras: string[] = [];
+	let currentBlock: CriterionBlock | null = null;
 	let suffixStart = lines.length;
-	for (let i = headingIndex + 1; i < lines.length; i++) {
+	for (let i = headingIndex + firstHeadingLength; i < lines.length; i++) {
 		const line = lines[i] as string;
 		if (ANY_HEADING.test(line.trim())) {
-			suffixStart = i; // the criteria section ends where the next section begins
+			suffixStart = i;
 			break;
 		}
-		const match = line.match(CHECKBOX_LINE);
-		if (match) {
-			criteria.push({ checked: match[2]?.toLowerCase() === "x", text: (match[3] ?? "").trim() });
+
+		const checkbox = line.match(CHECKBOX_LINE);
+		if (checkbox) {
+			const block: CriterionBlock = {
+				criterion: {
+					checked: checkbox[2]?.toLowerCase() === "x",
+					text: (checkbox[3] ?? "").trim(),
+				},
+				nestedLines: [],
+			};
+			criterionBlocks.push(block);
+			currentBlock = block;
+			continue;
 		}
+
+		const indentedCheckbox = line.match(INDENTED_CHECKBOX_LINE);
+		if (indentedCheckbox && !fenced[i]) {
+			throw new ParseError(
+				`Acceptance Criteria nested checkbox "${(indentedCheckbox[1] ?? "").trim()}" ` +
+					"cannot round-trip without flattening; use an ordinary nested bullet or a top-level criterion",
+			);
+		}
+
+		if (currentBlock && (line.trim() === "" || /^[\t ]+\S/.test(line))) {
+			currentBlock.nestedLines.push(line);
+			continue;
+		}
+
+		// Unindented prose/directives in an AC section are not criteria. Preserve
+		// them separately rather than guessing which checkbox owns them.
+		currentBlock = null;
+		extras.push(line);
 	}
 
-	const suffix = lines.slice(suffixStart).join("\n").trim();
-	return { narrative, criteria, hasHeading: true, suffix };
+	return {
+		narrative,
+		criteria: criterionBlocks.map((block) => block.criterion),
+		hasHeading: true,
+		suffix: trimBoundaryBlankLines(lines.slice(suffixStart)),
+		criterionBlocks,
+		extras: trimBoundaryBlankLines(extras),
+	};
+}
+
+/**
+ * Split a story body into its narrative and its acceptance-criteria checklist.
+ *
+ * An acceptance-criteria section starts at an Acceptance-Criteria heading (ATX
+ * or Setext; see `acHeadingIndex`) and runs until the next heading or end of file.
+ * A second such heading is malformed and refused: several other readers expose
+ * only one AC section, so accepting duplicates here would make them disagree.
+ * Only top-level checkbox lines are criteria. Indented detail bullets stay with
+ * their parent during a splice; nested checkboxes are refused because the Plane
+ * HTML conversion cannot preserve their hierarchy.
+ */
+export function splitBody(body: string): SplitBody {
+	const { criterionBlocks: _criterionBlocks, extras: _extras, ...split } = parseBody(body);
+	return split;
 }
 
 /**
@@ -111,50 +231,78 @@ export function splitBody(body: string): SplitBody {
  * …). When the body has no acceptance-criteria heading, the block is appended.
  * Passing an empty `criteria` removes the criteria block while keeping prefix and
  * suffix. Non-checkbox free text interleaved among the checkboxes inside the AC
- * block itself is not separately retained — our AC blocks are checkbox-only by
- * authoring via `CHECKBOX_LINE`.
+ * block is retained as suffix content. Indented detail lines remain with the
+ * criterion whose text they qualify; nested checkboxes are refused. If replacing
+ * the checklist removes or renames a criterion that owns nested content, the splice
+ * refuses rather than silently dropping or attaching that content to a guess.
  */
 export function spliceAcceptanceCriteria(body: string, criteria: AcceptanceCriterion[]): string {
-	const lines = body.split("\n");
-	const headingIndex = acHeadingIndex(lines);
-	const block = buildAcceptanceCriteria(criteria);
-
-	if (headingIndex === -1) {
+	const parsed = parseBody(body);
+	if (!parsed.hasHeading) {
 		// No acceptance-criteria section: append the new block after the whole body.
-		return [body.trim(), block]
-			.map((p) => p.trim())
-			.filter((p) => p.length > 0)
-			.join("\n\n");
+		return joinBodyParts([body, buildAcceptanceCriteria(criteria)]);
 	}
 
-	const prefix = lines.slice(0, headingIndex).join("\n").trim();
-	// acHeadingIndex points at the heading TEXT line; for a Setext heading skip its
-	// underline (the line after) too.
-	const isAtx = AC_HEADING.test((lines[headingIndex] ?? "").trim());
-	let i = headingIndex + 1 + (isAtx ? 0 : 1);
+	const nestedLines = matchNestedLines(parsed.criterionBlocks, criteria);
+	const block = buildAcceptanceCriteriaWithNestedLines(criteria, nestedLines);
+	return joinBodyParts([parsed.narrative, block, parsed.extras, parsed.suffix]);
+}
 
-	// Within the AC section, checkbox lines are the (replaced) criteria; any OTHER
-	// non-blank line (e.g. `**Effort:**` / `**Depends on:**` placed right after the
-	// checklist with no intervening heading) must be PRESERVED, not dropped
-	// (Grok #4 — a real data-loss path the next-ATX-heading suffix alone missed).
-	const extras: string[] = [];
-	let suffixStart = lines.length;
-	for (; i < lines.length; i++) {
-		const line = lines[i] as string;
-		if (ANY_HEADING.test(line.trim())) {
-			suffixStart = i;
-			break;
-		}
-		if (CHECKBOX_LINE.test(line) || line.trim() === "") {
-			continue;
-		}
-		extras.push(line);
+function matchNestedLines(
+	oldBlocks: CriterionBlock[],
+	criteria: AcceptanceCriterion[],
+): string[][] {
+	const blocksByText = new Map<string, CriterionBlock[]>();
+	for (const block of oldBlocks) {
+		const matches = blocksByText.get(block.criterion.text) ?? [];
+		matches.push(block);
+		blocksByText.set(block.criterion.text, matches);
 	}
-	const suffix = lines.slice(suffixStart).join("\n").trim();
 
-	return [prefix, block, extras.join("\n").trim(), suffix]
-		.map((p) => p.trim())
-		.filter((p) => p.length > 0)
+	const used = new Set<CriterionBlock>();
+	const nestedLines = criteria.map((criterion) => {
+		const match = blocksByText.get(criterion.text)?.find((block) => !used.has(block));
+		if (!match) {
+			return [];
+		}
+		used.add(match);
+		return match.nestedLines;
+	});
+
+	const orphaned = oldBlocks.find(
+		(block) => !used.has(block) && block.nestedLines.some((line) => line.trim() !== ""),
+	);
+	if (orphaned) {
+		throw new ParseError(
+			`Cannot replace acceptance criterion "${orphaned.criterion.text}": its nested content ` +
+				"has no matching criterion",
+		);
+	}
+
+	return nestedLines;
+}
+
+function buildAcceptanceCriteriaWithNestedLines(
+	criteria: AcceptanceCriterion[],
+	nestedLines: string[][],
+): string {
+	if (criteria.length === 0) {
+		return "";
+	}
+
+	const lines = ["### Acceptance Criteria", ""];
+	for (let i = 0; i < criteria.length; i++) {
+		const criterion = criteria[i] as AcceptanceCriterion;
+		lines.push(`- [${criterion.checked ? "x" : " "}] ${criterion.text}`);
+		lines.push(...(nestedLines[i] ?? []));
+	}
+	return trimBoundaryBlankLines(lines);
+}
+
+function joinBodyParts(parts: string[]): string {
+	return parts
+		.map((part) => trimBoundaryBlankLines(part.split("\n")))
+		.filter((part) => part.length > 0)
 		.join("\n\n");
 }
 
