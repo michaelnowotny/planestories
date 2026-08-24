@@ -32,9 +32,50 @@ function normalizeKind(value: unknown): StoryKind | null {
  * - After each H2, an optional fenced YAML block (```yaml ... ```) contains per-story metadata
  * - Everything between the YAML block (or H2 if no YAML) and the next H2/EOF is the story body
  */
+/**
+ * Split on story headings, ignoring anything inside a fenced code block.
+ *
+ * A story documenting the markdown format contains "## " inside a ```fence```.
+ * Splitting on the raw regex made a PHANTOM story out of it and truncated the
+ * real one at the fence — and `--strict`'s non-story-heading check did not fire,
+ * because the fenced block contains a checkbox. This repo's own README has three
+ * lines of that shape.
+ *
+ * An UNTERMINATED fence is malformed input: everything after it stays with the
+ * story that opened it, rather than the remaining stories vanishing.
+ */
+function splitOnStoryHeadings(content: string): string[] {
+	const lines = content.split("\n");
+	const sections: string[] = [];
+	let current: string[] = [];
+	let fence: string | null = null;
+
+	for (const line of lines) {
+		const opener = /^\s*(`{3,}|~{3,})/.exec(line);
+		if (fence === null && opener) {
+			fence = (opener[1] as string)[0] as string;
+		} else if (fence !== null && opener && (opener[1] as string).startsWith(fence)) {
+			fence = null;
+		} else if (fence === null && line.startsWith("## ")) {
+			if (current.length > 0) sections.push(current.join("\n"));
+			current = [];
+		}
+		current.push(line);
+	}
+	if (current.length > 0) sections.push(current.join("\n"));
+	return sections;
+}
+
 export function parseMarkdownFile(content: string, filePath: string): ParsedFile {
+	// CRLF is a LINE ENDING, not content. The yaml-block regex was `/```yaml\n/`
+	// with no `\r?`, so a CRLF file lost its whole metadata block: `plane_id`
+	// parsed as null and an already-linked story re-imported as a CREATE — a
+	// duplicate work item on a real board. (`relink.ts` had `\r?` and the parser
+	// did not; normalizing once here beats auditing every regex downstream.)
+	const normalized = content.replace(/\r\n/g, "\n");
+
 	// 1. Extract file-level frontmatter using gray-matter
-	const { data: rawFrontmatter, content: bodyContent } = matter(content);
+	const { data: rawFrontmatter, content: bodyContent } = matter(normalized);
 
 	const frontmatter: FileFrontmatter = {};
 	if (rawFrontmatter.project) {
@@ -51,7 +92,7 @@ export function parseMarkdownFile(content: string, filePath: string): ParsedFile
 	}
 
 	// Split the content into sections. The first element before the first H2 is preamble (ignored).
-	const sections = bodyContent.split(/^(?=## )/m);
+	const sections = splitOnStoryHeadings(bodyContent);
 
 	const stories: UserStory[] = [];
 
@@ -128,19 +169,19 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 	}
 
 	// Extract metadata fields with proper null handling
-	const planeId = extractStringOrNull(metadata.plane_id);
-	const planeIdentifier = extractStringOrNull(metadata.plane_identifier);
-	const planeUrl = extractStringOrNull(metadata.plane_url);
-	const planeHash = extractStringOrNull(metadata.plane_hash);
+	const planeId = extractStringOrNull(metadata.plane_id, "plane_id");
+	const planeIdentifier = extractStringOrNull(metadata.plane_identifier, "plane_identifier");
+	const planeUrl = extractStringOrNull(metadata.plane_url, "plane_url");
+	const planeHash = extractStringOrNull(metadata.plane_hash, "plane_hash");
 	const priority = normalizePriority(metadata.priority);
 	const labels = extractLabels(metadata.labels);
-	const estimate = extractNumberOrNull(metadata.estimate);
-	const assignee = extractStringOrNull(metadata.assignee);
-	const status = extractStringOrNull(metadata.status);
+	const estimate = extractNumberOrNull(metadata.estimate, "estimate");
+	const assignee = extractStringOrNull(metadata.assignee, "assignee");
+	const status = extractStringOrNull(metadata.status, "status");
 
 	// Per-story `project:` overrides the file frontmatter; falls back to it.
-	const project = extractStringOrNull(metadata.project) ?? frontmatter.project ?? null;
-	const parent = extractStringOrNull(metadata.parent);
+	const project = extractStringOrNull(metadata.project, "project") ?? frontmatter.project ?? null;
+	const parent = extractStringOrNull(metadata.parent, "parent");
 	const dependencyDirectives = extractDependencyDirectives(body);
 	body = dependencyDirectives.body;
 	let blockedBy = normalizeRelationIdentifiers([
@@ -169,7 +210,7 @@ function parseStorySection(section: string, frontmatter: FileFrontmatter): UserS
 		relatesTo = relatesTo.filter((identifier) => identifier !== ownIdentifier);
 	}
 	const kind = normalizeKind(metadata.kind);
-	const comment = extractStringOrNull(metadata.comment);
+	const comment = extractStringOrNull(metadata.comment, "comment");
 
 	// Developer-day effort. The `**Effort:** N dev-days` narrative line is the source
 	// of truth (it round-trips through the description). A YAML `effort_days:` is input
@@ -263,20 +304,48 @@ export function normalizePriority(value: unknown): PlanePriority | null {
 	return null;
 }
 
-function extractStringOrNull(value: unknown): string | null {
+/**
+ * The null-ban at the file boundary: absence stays absent, and a wrong TYPE is a
+ * malformed file rather than a value to coerce.
+ *
+ * `String({})` is `"[object Object]"` and `Number([])` is **0** — so
+ * `estimate: []` used to reach the wire as an authoritative estimate of zero,
+ * hashing identically to a genuine `estimate: 0` so skip-unchanged never
+ * revisited it. `estimate: true` became 1. `.inf` became null locally while the
+ * hash was computed from Infinity, leaving the story permanently "synced".
+ *
+ * `field` is named so the refusal says which line to fix.
+ */
+function extractStringOrNull(value: unknown, field: string): string | null {
 	if (value === undefined || value === null || value === "") {
 		return null;
+	}
+	if (typeof value === "object") {
+		throw new ParseError(
+			`\`${field}\` must be a single value, not a list or map. Coercing it would store "[object Object]" on the board.`,
+		);
+	}
+	if (typeof value === "boolean") {
+		throw new ParseError(`\`${field}\` must be text, not a boolean.`);
 	}
 	return String(value);
 }
 
-function extractNumberOrNull(value: unknown): number | null {
+function extractNumberOrNull(value: unknown, field: string): number | null {
 	if (value === undefined || value === null || value === "") {
 		return null;
+	}
+	if (typeof value !== "number" && typeof value !== "string") {
+		throw new ParseError(
+			`\`${field}\` must be a number. A ${Array.isArray(value) ? "list" : typeof value} would silently become ${JSON.stringify(Number(value as never))}.`,
+		);
 	}
 	const num = Number(value);
 	if (Number.isNaN(num)) {
 		return null;
+	}
+	if (!Number.isFinite(num)) {
+		throw new ParseError(`\`${field}\` must be a finite number; got ${String(value)}.`);
 	}
 	return num;
 }

@@ -185,6 +185,13 @@ export function htmlToMarkdown(html: string | undefined | null): string {
 	return (
 		turndown
 			.turndown(html)
+			// A story's BODY may never contain a top-level ATX heading: the parser
+			// splits files on `^## `, so an <h2> someone picked in the Plane editor
+			// used to re-import as a SECOND work item while the real ticket lost its
+			// body. Demote `#`/`##` to `###`; deeper levels are already safe.
+			// One-time shift on first export, stable forever after — and never a
+			// phantom ticket.
+			.replace(/^(#{1,2})(?!#)(\s)/gm, "###$2")
 			// Turndown pads list markers ("-   [ ]  text"); normalize legacy GFM
 			// task-list items back to canonical "- [ ] text" / "- [x] text". (The
 			// TipTap rule already emits the canonical form.)
