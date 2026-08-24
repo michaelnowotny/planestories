@@ -113,6 +113,13 @@ describe("graph diff", () => {
 		expect(d.removedStories).toEqual([]);
 	});
 
+	test("a self-referential children structure is refused by node name", () => {
+		const epic = story("e", "DATA-1", { kind: "epic" });
+		epic.children = [epic];
+
+		expect(() => diffGraphs(graph([epic]), graph([]), META)).toThrow(/DATA-1/);
+	});
+
 	test("comparing DIFFERENT instances says so, loudly", () => {
 		// Same numbers, different meaning: two snapshots of one board show change
 		// over time; two boards show divergence. Since the cutover the operator has

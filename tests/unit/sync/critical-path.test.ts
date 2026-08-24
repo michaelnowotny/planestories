@@ -125,6 +125,24 @@ describe("critical path", () => {
 		expect(noEstimate.isLowerBound).toBe(false);
 	});
 
+	test("a zero-duration blocker remains in the reported critical chain", () => {
+		const cases = [
+			story("done", "P-1", 5, { statusGroup: "completed", status: "Done" }),
+			story("zero", "P-1", 0),
+		];
+		for (const blocker of cases) {
+			const result = computed(
+				graph(
+					[blocker, story("target", "P-2", 3)],
+					[{ source: blocker.id, target: "target", type: "blocks" }],
+				),
+			);
+			// The duration is still 3, but the chain must name the declared blocker.
+			expect(result.totalDays).toBe(3);
+			expect(result.chain.map((node) => node.identifier)).toEqual(["P-1", "P-2"]);
+		}
+	});
+
 	test("a CYCLE refuses to produce a number", () => {
 		// Exactly the shape the relation defect wrote onto the live board.
 		const result = computeCriticalPath(
@@ -146,6 +164,15 @@ describe("critical path", () => {
 		expect(result).not.toHaveProperty("totalDays");
 		expect(result).not.toHaveProperty("chain");
 		expect(result).not.toHaveProperty("isLowerBound");
+	});
+
+	test("a self-blocking story is reported as a dependency cycle", () => {
+		const result = computeCriticalPath(
+			graph([story("a", "DATA-1", 2)], [{ source: "a", target: "a", type: "blocks" }]),
+		);
+		if (result.ok) throw new Error("expected a refusal");
+		expect(result.cycles).toEqual([["DATA-1", "DATA-1"]]);
+		expect(result).not.toHaveProperty("totalDays");
 	});
 
 	test("`relates` edges carry no ordering and must not constrain", () => {
@@ -294,6 +321,30 @@ describe("critical path", () => {
 		// a(5) must finish before either leaf starts: 5 + 4 = 9.
 		expect(result.totalDays).toBe(9);
 		expect(result.expandedEdges).toBe(1);
+	});
+
+	test("an epic blocking its own descendant does not invent sibling constraints", () => {
+		const target = story("m2", "P-2", 3);
+		const epic: AtlasNode = {
+			...story("e", "P-E", null),
+			kind: "epic",
+			children: [story("m1", "P-1", 2), target, story("m3", "P-3", 4)],
+		} as AtlasNode;
+		const result = computed(
+			graph([epic], [{ source: epic.id, target: target.id, type: "blocks" }]),
+		);
+
+		// E -> P-2 does not declare P-1 -> P-2 or P-3 -> P-2.
+		expect(result.connectedLeaves).toBe(0);
+		expect(result.expandedEdges).toBe(0);
+		expect(result.chain).toEqual([]);
+	});
+
+	test("a self-referential children structure is refused by node name", () => {
+		const epic = { ...story("e", "P-1", null), kind: "epic" as const };
+		epic.children = [epic];
+
+		expect(() => computeCriticalPath(graph([epic], []))).toThrow(/P-1/);
 	});
 
 	test("an unconnected board yields an empty result, distinguishable from a cycle", () => {

@@ -78,9 +78,16 @@ function flatten(graph: AtlasGraph): Flat {
 	const byIdentifier = new Map<string, AtlasNode>();
 	const idToIdentifier = new Map<string, string>();
 	const epicOf = new Map<string, string>();
+	const visited = new Set<string>();
 
 	const walk = (nodes: AtlasNode[], epic: AtlasNode | null): void => {
 		for (const n of nodes) {
+			if (visited.has(n.id)) {
+				throw new Error(
+					`Malformed graph hierarchy: node ${n.identifier ?? n.title} is visited more than once.`,
+				);
+			}
+			visited.add(n.id);
 			// Unlinked nodes have no identifier and therefore no stable identity
 			// across snapshots — including them would manufacture add/remove pairs.
 			if (n.identifier) {
