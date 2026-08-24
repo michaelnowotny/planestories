@@ -137,8 +137,17 @@ export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjec
 	const leaves = new Map<string, ProjectedLeaf>();
 	const leavesUnder = new Map<string, string[]>();
 	const nodesByIdentifier = new Map<string, AtlasNode>();
+	const ancestorIdsByNode = new Map<string, Set<string>>();
+	const visited = new Set<string>();
 
-	const collect = (node: AtlasNode, ancestors: AtlasNode[]): string[] => {
+	const collect = (node: AtlasNode, ancestors: AtlasNode[], ancestorIds: string[]): string[] => {
+		if (visited.has(node.id)) {
+			throw new Error(
+				`Malformed graph hierarchy: node ${node.identifier ?? node.title} is visited more than once.`,
+			);
+		}
+		visited.add(node.id);
+		ancestorIdsByNode.set(node.id, new Set(ancestorIds));
 		if (node.identifier) {
 			nodesByIdentifier.set(node.identifier.trim().toUpperCase(), node);
 		}
@@ -158,11 +167,13 @@ export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjec
 
 		const childAncestors = node.kind === "epic" ? [...ancestors, node] : ancestors;
 		const out: string[] = [];
-		for (const child of node.children ?? []) out.push(...collect(child, childAncestors));
+		for (const child of node.children ?? []) {
+			out.push(...collect(child, childAncestors, [...ancestorIds, node.id]));
+		}
 		leavesUnder.set(node.id, out);
 		return out;
 	};
-	for (const node of graph.nodes) collect(node, []);
+	for (const node of graph.nodes) collect(node, [], []);
 
 	const endpoints = (id: string): string[] => (leaves.has(id) ? [id] : (leavesUnder.get(id) ?? []));
 	const successors = new Map<string, string[]>();
@@ -173,20 +184,30 @@ export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjec
 		// "blocks" only: `relates` carries no ordering, so using it would invent a
 		// constraint that nobody declared.
 		if (edge.type !== "blocks") continue;
+		// Expand only across structurally disjoint subtrees. A container-to-member
+		// edge is not a cross-subtree constraint: expanding `epic -> own child`
+		// would turn every other leaf in that epic into an undeclared sibling
+		// blocker (and the reverse direction has the same problem). Exact self-edges
+		// deliberately survive this check so cycle detection can refuse them.
+		const endpointsShareAncestry =
+			ancestorIdsByNode.get(edge.target)?.has(edge.source) === true ||
+			ancestorIdsByNode.get(edge.source)?.has(edge.target) === true;
+		if (endpointsShareAncestry) continue;
 		const sources = endpoints(edge.source);
 		const targets = endpoints(edge.target);
 		if (sources.length === 0 || targets.length === 0) continue;
-		if (sources.length > 1 || targets.length > 1) {
-			expandedEdges += sources.length * targets.length - 1;
-		}
+		let projectedEdges = 0;
 		for (const source of sources) {
 			for (const target of targets) {
-				if (source === target) continue;
 				successors.set(source, [...(successors.get(source) ?? []), target]);
 				predecessors.set(target, [...(predecessors.get(target) ?? []), source]);
 				connected.add(source);
 				connected.add(target);
+				projectedEdges += 1;
 			}
+		}
+		if (sources.length > 1 || targets.length > 1) {
+			expandedEdges += Math.max(0, projectedEdges - 1);
 		}
 	}
 
@@ -292,18 +313,19 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 		const ef = new Map<string, number>();
 		const from = new Map<string, string | null>();
 		for (const id of order) {
-			let start = 0;
+			let start: number | undefined;
 			let via: string | null = null;
 			for (const pred of predecessors.get(id) ?? []) {
 				const finish = ef.get(pred) ?? 0;
-				if (finish > start) {
+				if (start === undefined || finish > start) {
 					start = finish;
 					via = pred;
 				}
 			}
+			const earliestStart = start ?? 0;
 			const duration = id === zeroed ? 0 : (leaves.get(id)?.duration ?? 0);
-			es.set(id, start);
-			ef.set(id, start + duration);
+			es.set(id, earliestStart);
+			ef.set(id, earliestStart + duration);
 			from.set(id, via);
 		}
 		// Connected nodes only: CPM assumes unlimited parallelism, so an item with
