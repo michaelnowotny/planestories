@@ -65,6 +65,51 @@ about each item, and what you are least sure of. It does not argue for a verdict
 — *"closing it would hide a useful filter on a still-legible map"* — that is judgment, and
 overriding it to be thorough is how the loop restarts.
 
+## A BUILD BRIEF is a specification. Review it before dispatch, like a ticket.
+
+**The incident (2026-08-24).** Four units were dispatched to an external builder from briefs written
+in one pass and sent without review. One brief said:
+
+> *"treat flag disagreement as a hard error naming the endpoint. It is not a state a correct server
+> produces."*
+
+It **is** a state a correct server produces — Plane CE sends a leftover `next_cursor` on every
+terminal page. `board fetch` failed on its first call against a real board, with **1033 tests
+green**.
+
+**Why a bad brief is worse than bad code.** Code gets reviewed. A brief's claims become the code
+*and* the test that defends the code — so the false premise arrives pre-laundered as evidence. The
+builder cannot catch it either: it has no credentials and no live system, so anything the brief
+asserts about an external service is unfalsifiable from where it sits. A confident sentence is
+therefore the most dangerous thing a brief can contain, and it costs one command to check.
+
+Two smaller versions in the same batch: a cited file path that did not exist (`src/sync/rules.ts`
+for a function in `src/lint/rules.ts`), and an instruction to "consider and justify" a clock-skew
+tolerance that came back as zero — which would have discarded any cache written two seconds ahead
+and forced a full 885-request refetch.
+
+**The rule.** Before dispatching a build brief:
+
+1. **Mark every sentence that asserts what an EXTERNAL system does**, then verify each one. These
+   are the claims the builder cannot check and the tests will enshrine. One `curl` against the real
+   API is usually the whole cost. *"It is not a state a correct server produces"* was one such
+   sentence and was never checked.
+2. **Verify every file path and symbol you cite.** `git grep` it. A wrong path either sends the
+   builder somewhere harmless or invents a module — and you will not notice which until you read the
+   diff.
+3. **Pair-review the brief** the way tickets and plans are pair-reviewed, for anything above a
+   trivial change. This is the same "review the REASONING before the artifacts" discipline applied
+   one step earlier: a brief IS the reasoning, and it is the cheapest place to kill a wrong premise.
+4. **State uncertainty as uncertainty.** *"I believe X; verify before relying on it"* costs nothing
+   and gives the builder permission to check. A flat assertion removes that permission.
+5. **Then verify the result against reality**, not against the report — the orchestrator's whole
+   value is the live smoke test the builder structurally cannot run.
+
+**The generalisation.** This repo already holds that an assertion which cannot fail is not a test,
+and that a criterion satisfiable however you build it is not a gate. This is the same defect one
+level further upstream: **a brief that cannot be wrong in the builder's hands has moved the risk to
+you, and only you can discharge it.**
+
 ## An assertion that would still pass with the feature DELETED is not a test
 
 `--no-estimate` shipped doing **nothing** — commander stores a `--no-x` boolean under the
