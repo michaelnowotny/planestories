@@ -3,6 +3,9 @@ import { dirname, join } from "node:path";
 import type { AtlasGraph, AtlasNode, DependencyCoverage } from "../atlas/model.ts";
 import { findRepoRoot } from "./output_path.ts";
 
+/** Allowance for writer/reader clock difference; see validateBoardCache. */
+const CLOCK_SKEW_TOLERANCE_MS = 120_000;
+
 export const BOARD_CACHE_SCHEMA_VERSION = 2 as const;
 export const BOARD_CACHE_MAX_AGE_MS = 60 * 60 * 1_000;
 
@@ -223,8 +226,20 @@ function validateBoardCache(value: unknown): BoardCache {
 		);
 	}
 	const fetchedAt = instant(cache.fetchedAt, "fetchedAt");
-	if (Date.parse(fetchedAt) > Date.now()) {
-		throw new Error(`fetchedAt ${JSON.stringify(fetchedAt)} is in the future`);
+	// A future `fetchedAt` used to be CLAMPED to age 0, which made such a cache
+	// permanently fresh and defeated BOARD_CACHE_MAX_AGE_MS, StaleBoardCacheError
+	// and --stale-ok in one line. It is corrupt, not fresh — so reject it.
+	//
+	// But a small tolerance is required, not optional: the writer and the reader
+	// are different processes and may be on different clocks (a container, a VM,
+	// an NTP step between write and read). With ZERO tolerance a cache written two
+	// seconds ago on a marginally-fast clock is discarded as corrupt, forcing a
+	// full 885-request refetch — measured. Two minutes is far beyond realistic
+	// skew and far below any interval that could hide a genuinely stale cache.
+	if (Date.parse(fetchedAt) > Date.now() + CLOCK_SKEW_TOLERANCE_MS) {
+		throw new Error(
+			`fetchedAt ${JSON.stringify(fetchedAt)} is more than ${CLOCK_SKEW_TOLERANCE_MS / 60_000} minutes in the future`,
+		);
 	}
 	const instance = record(cache.instance, "instance");
 	const baseUrl = nonEmptyString(instance.baseUrl, "instance.baseUrl");

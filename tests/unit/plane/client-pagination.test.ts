@@ -27,7 +27,7 @@ function jsonPages(pages: unknown[]): { urls: string[] } {
 			throw new Error("pagination test made an unexpected fetch");
 		}
 		return Response.json(page);
-	}) as typeof fetch;
+	}) as unknown as typeof fetch;
 	return { urls };
 }
 
@@ -60,21 +60,34 @@ describe("PlaneClient.listAll pagination integrity", () => {
 		expect(stub.urls).toHaveLength(1);
 	});
 
-	test("rejects next-page=false with a cursor as contradictory metadata", async () => {
-		const stub = jsonPages([
-			{
-				results: [{ id: "item-1" }],
-				next_page_results: false,
-				next_cursor: "unexpected-cursor",
-			},
-		]);
-
-		const error = await rejectedBy(makeClient().listWorkItems("project-1"));
-
-		expect(error).toBeInstanceOf(PlaneApiError);
-		expect((error as Error).message).toContain("next_page_results=false");
-		expect((error as Error).message).toContain("next_cursor");
-		expect(stub.urls).toHaveLength(1);
+	test("accepts a leftover cursor on a TERMINAL page, because real Plane sends one", async () => {
+		// Measured against Plane CE 1.4.1: every terminal page carries a
+		// `next_cursor` alongside `next_page_results: false`. It means "where you
+		// would be if you continued", not "there is more". An earlier version of
+		// this file asserted the opposite — it encoded a confident claim that no
+		// correct server produces this state — and `board fetch` failed on its
+		// FIRST call against a real board while the whole suite stayed green.
+		//
+		// The flag is authoritative for "should I continue"; the cursor is not.
+		const pages = [{ results: [{ id: "a" }], next_page_results: false, next_cursor: "20:100:0" }];
+		let calls = 0;
+		const restore = globalThis.fetch;
+		globalThis.fetch = (async () => {
+			const body = pages[calls++] ?? { results: [], next_page_results: false };
+			return new Response(JSON.stringify(body), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+		try {
+			const client = makeClient();
+			const all = await client.listWorkItems<{ id: string }>("p");
+			expect(all).toEqual([{ id: "a" }]);
+			// It STOPPED: one request, not a second one chasing the leftover cursor.
+			expect(calls).toBe(1);
+		} finally {
+			globalThis.fetch = restore;
+		}
 	});
 
 	test("deduplicates stable ids across pages in first-seen order", async () => {

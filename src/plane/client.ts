@@ -818,11 +818,16 @@ function continuationCursor<T>(page: PlanePage<T>, path: string): string | undef
 			`Plane API list endpoint ${path} returned contradictory pagination metadata: next_page_results=true but next_cursor is absent`,
 		);
 	}
-	if (page.next_page_results === false && cursor !== undefined) {
-		throw new PlaneApiError(
-			`Plane API list endpoint ${path} returned contradictory pagination metadata: next_page_results=false but next_cursor is present`,
-		);
-	}
+	// `next_page_results === false` WITH a cursor is NORMAL, not contradictory.
+	// Measured against Plane CE 1.4.1: every terminal page carries a leftover
+	// `next_cursor` — it is "where you would be if you continued", not a promise
+	// that continuing yields anything. Treating it as an error broke `board fetch`
+	// on its FIRST call against a real board while 1026 tests stayed green.
+	//
+	// The asymmetry is the point: the FLAG is authoritative for "should I
+	// continue". A cursor without the flag is harmless; the flag without a cursor
+	// (below) is the genuine truncation case, because the server says more exists
+	// and gives no way to reach it.
 	if (!hasFlag && cursor !== undefined) {
 		throw new PlaneApiError(
 			`Plane API list endpoint ${path} returned contradictory pagination metadata: next_page_results is absent but next_cursor is present`,
