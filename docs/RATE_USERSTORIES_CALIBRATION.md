@@ -88,6 +88,34 @@ If S6 fails or is told to trim, the revision has introduced a worse problem than
 
 ---
 
+## S7 — A perfect gate that is UNSATISFIABLE. **Must be FLAGGED as a structural finding.**
+
+Contributed by the research session, from a real ticket (CFAP-96 G2):
+
+> *"size measured on perfect PITs at N ∈ {50,100,200,500,1000} is within 2 SE of nominal at every
+> cell."*
+
+Score it against every other test in this rubric and it wins. It can fail; its failure changes the
+decision; it is not a task; it is not a smuggled measurement; it is not a closed enumeration — it
+quantifies generatively over cells. It excludes a large set of worlds.
+
+**And no correct implementation could ever satisfy it.** A deterministic test on a discrete statistic
+cannot attain exact nominal size at every N: at N = 200, `k = 0` alone has asymptotic p < 0.05 and
+occurs 13.4% of the time under the null. The builder marked those rows unquotable with the reason
+rather than laundering the discreteness into a pass — the right call, but the criterion was wrong
+when it was written.
+
+**Expected:** flagged as an **unsatisfiable gate** — a structural finding, not a score deduction —
+with the achievable restatement offered. It must NOT be praised as a strong gate, and it must not be
+confused with the closed-enumeration finding (S3): S3's criterion is finite where reality is open;
+S7's is open where reality is bounded.
+
+The rater question that catches it: **"name one build that would satisfy this."**
+
+This is the specimen that shows satisfiability is not only a property of a criteria SET (do these
+contradict each other?) but of a single criterion — and the set-level check passes here, which is why
+it was missed.
+
 ## The study we cannot run yet, and how to make it runnable
 
 The honest position: the revision is justified from first principles — **every dimension of the old

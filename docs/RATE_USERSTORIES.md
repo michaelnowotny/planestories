@@ -90,6 +90,15 @@ A user story must state **what is true after it lands that is not true now**. Mi
 caps it at **75%** — below the pass threshold — the same way a missing `### Why is this needed?`
 caps an epic at 70%. If that sentence needs an "and", it is two stories.
 
+#### And a second question, after gate-or-task
+
+> **Name one build that would satisfy this.**
+
+A criterion can be a perfect gate and still be **unsatisfiable** — met by no correct implementation,
+because the mathematics or the platform forbids it. Such a criterion is not demanding; it is broken,
+and a builder will either fail against it forever or quietly launder the impossibility into a pass.
+Flagged as a **structural finding**, not a score deduction. Specimen S7 in the calibration corpus.
+
 #### Why this changed (2026-08-23)
 
 The previous rubric was **Specificity 30 / Testability 35 / Completeness 25 / Description 10**, and

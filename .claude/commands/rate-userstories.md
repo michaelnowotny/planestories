@@ -88,6 +88,43 @@ Classify every criterion **gate** or **task** and show the classification, so a 
 you. This judgement needs domain understanding and you will sometimes get it wrong; a visible
 wrong classification is correctable, a hidden one is not.
 
+## The second question: is this gate SATISFIABLE?
+
+A criterion can pass every test above and still be broken — because **no correct implementation
+could ever meet it.** Ask, for each gate:
+
+> **Name one build that would satisfy this.**
+
+If the answer requires a property the mathematics, the protocol, or the platform forbids, the
+criterion is not demanding. It is **broken**, and it will be met by a builder either failing forever
+or quietly laundering the impossibility into a pass.
+
+The case (relayed 2026-08-23):
+
+> *"size measured on perfect PITs at N ∈ {50,100,200,500,1000} is within 2 SE of nominal at every
+> cell."*
+
+It can fail. Its failure changes the decision. It is not a task, not a smuggled measurement, not a
+closed enumeration — it quantifies generatively over cells and excludes a large set of worlds. It
+passes every other test in this rubric. **And no implementation can satisfy it**, because a
+deterministic test on a discrete statistic cannot attain exact nominal size at every N: at N = 200,
+`k = 0` alone has asymptotic p < 0.05 and occurs 13.4% of the time under the null.
+
+The builder did the right thing — marked those rows unquotable with the reason rather than laundering
+the discreteness into a pass. But the gate was **wrong at authoring time**, and no rater question
+then existing would have caught it.
+
+Flag an unsatisfiable gate as a **structural finding**, not a score deduction: it is a defect in the
+specification, and the fix is to restate the criterion as the achievable property the author actually
+meant (here: *within 2 SE where the discrete null permits, and every cell where it does not is
+reported as such*). Where the impossibility is not obvious, say you could not construct a satisfying
+build and ask the author for one — an honest "I could not name one" is a useful finding; a confident
+false claim of impossibility is not.
+
+**Note the shape.** Satisfiability is usually checked across a criteria SET — do these contradict
+each other? This is the same failure ONE LEVEL DOWN, in a single criterion, and it is easy to miss
+precisely because set-level review passes.
+
 ## User Story Rubric
 
 Score user stories from 0-100%:
