@@ -73,6 +73,14 @@ once and answers locally, at depths a row filter could not reach.
   derived from each command's actual registration.
 - **An activity whose `actor` is not a string** was read as "not mine" rather than as an
   unrecognised response — which would have published a confident empty `audit`. It refuses now.
+- **`capabilities` inferred the relation surface instead of measuring it** — a successful list GET
+  was read as "create works", and the endpoint dialect alone decided whether removal exists. It is
+  measured now, read-only, via OPTIONS: Plane returns `Allow: GET, POST` even while rejecting the
+  method, and the removal routes 404. An endpoint that states no `Allow` is indeterminate, never a
+  negative.
+- **`atlas` artifacts carried no provenance.** The HTML and JSON now record which board they came
+  from and when that state was observed — an absolute instant, because a relative age frozen into a
+  file still reads as fresh weeks later. Two renders of the same input remain byte-identical.
 - **A parent cycle silently deleted work.** Every member of a cycle has a resolvable parent, so none
   became a root and the whole group vanished from the tree: a two-story file whose stories named
   each other produced `0 of 0 stories`. It now refuses and names the items involved.

@@ -363,13 +363,12 @@ lists the rest.
 
 ### Then, in order
 
-1. **The remaining P2s**, listed in `PLAN_local-query-build.md`. Three are worth
-   more than their rank: `capabilities` infers relation create/remove from a dialect heuristic
-   rather than measuring it (in the one command whose purpose is not making confident claims from
-   indirect evidence); `atlas` artifacts carry no `fetchedAt` (the whole argument for the age
-   stamp is that an artifact outlives the stderr beside it); and the graph verbs have **no
-   `--json`**, so scripting `ready` means parsing `Ready: 361 of 389` — the flagship number, in the
-   one form most likely to be quoted without its denominator.
+1. **The remaining P2s**, listed in `PLAN_local-query-build.md`. The two biggest were closed in
+   `97d4550` — `capabilities` now MEASURES the relation surface via read-only OPTIONS instead of
+   inferring it from the dialect, and `atlas` artifacts carry their own provenance stamp. The one
+   left that matters: the graph verbs have **no `--json`**, so scripting `ready` means parsing
+   `Ready: 361 of 389` — the flagship number, in the form most likely to be quoted without its
+   denominator.
 2. **Publish.** `npm publish` is interactive (WebAuthn) — the operator must be at the keyboard.
    Before tagging, resolve the tag trap: `v1.0.0`/`v1.1.0` are inherited from upstream linearstories
    and ARE ancestors of `main`; `v1.2.0`–`v1.4.0` are not on `main` at all. Either way `v1.4.0`
@@ -430,6 +429,15 @@ exists. **Relation REMOVAL is also absent on CE**, so `blocked_by` edits are one
   report carefully; that is where the real information is.
 - **A warning is not nothing.** A biome warning survived a commit that claimed the gate was green,
   because warnings do not change the exit code. Zero findings is the bar.
+
+### Two constraints found closing those P2s — know them before touching either file
+
+- **A wall-clock timestamp in an atlas artifact breaks a tested guarantee.** `renderedAt` made two
+  renders of one input differ, so every atlas would differ from every other and a diff would stop
+  meaning "the board changed". `observedAt` answers how old the STATE is; the file's mtime answers
+  when the file was written. Pinned by a test so it cannot come back.
+- **A durable artifact must print an ABSOLUTE instant, never a relative age.** `CACHED 1H AGO`
+  frozen into a file still reads as fresh a week later — the exact confusion the stamp removes.
 
 ### Known-open, smaller
 
