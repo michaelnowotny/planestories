@@ -228,6 +228,23 @@ describe("resolveGraph — board cache source", () => {
 		expect(messages.warn).toEqual([]);
 	});
 
+	test("a future fetchedAt is corrupt and falls back to a live read", async () => {
+		mkdirSync(join(directory, ".planestories"), { recursive: true });
+		writeFileSync(
+			cachePath,
+			`${JSON.stringify(cache({ fetchedAt: "2099-01-01T00:00:00.000Z" }), null, "\t")}\n`,
+		);
+		const fake = fakeLive();
+		const messages = { log: [] as string[], warn: [] as string[] };
+
+		const source = await resolveCached(fake, messages);
+
+		expect(source.provenance.kind).toBe("live");
+		expect(fake.calls.some((call) => call.method === "listWorkItems")).toBe(true);
+		expect(messages.warn.join("\n")).toMatch(/fetchedAt.*future/i);
+		expect(messages.log.join("\n")).not.toContain("cached board state");
+	});
+
 	test("a required-cache read never falls through to a live whole-board fetch", async () => {
 		const fake = fakeLive();
 		const messages = { log: [] as string[], warn: [] as string[] };

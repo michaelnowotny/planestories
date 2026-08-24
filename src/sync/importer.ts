@@ -26,6 +26,7 @@ import {
 	type RelationSyncStory,
 	reconcileProjectRelations,
 } from "./relations.ts";
+import { assertUniquePlaneIds } from "./rules.ts";
 import { diffStoryAgainstBoard } from "./story-diff.ts";
 import { hashStoryPayload } from "./story-hash.ts";
 
@@ -77,17 +78,29 @@ export interface ImportOptions {
  *
  * Algorithm:
  * 1. Read each file and parse with parseMarkdownFile
- * 2. For each story, resolve names to UUIDs (project, labels, assignee, state)
- * 3. If plane_id present -> update; else look up by external_id; else create
- * 4. If not dry-run: make API calls
- * 5. If not no-write-back: write back plane_id / plane_identifier / plane_url
- * 6. Continue on failure per story
- * 7. Return ImportSummary
+ * 2. Refuse duplicate plane_id declarations across the complete fileset
+ * 3. For each story, resolve names to UUIDs (project, labels, assignee, state)
+ * 4. If plane_id present -> update; else look up by external_id; else create
+ * 5. If not dry-run: make API calls
+ * 6. If not no-write-back: write back plane_id / plane_identifier / plane_url
+ * 7. Continue on failure per story
+ * 8. Return ImportSummary
  */
 export async function importStories(
 	client: PlaneClient,
 	options: ImportOptions,
 ): Promise<ImportSummary> {
+	// Parse the COMPLETE fileset before constructing any write plan. Processing a
+	// file as soon as it was read let a duplicate plane_id in a later file arrive
+	// only after the first file had already mutated that shared work item.
+	const parsedFiles = await Promise.all(
+		options.files.map(async (filePath) => {
+			const fileContent = await Bun.file(filePath).text();
+			return { filePath, fileContent, parsed: parseMarkdownFile(fileContent, filePath) };
+		}),
+	);
+	assertUniquePlaneIds(parsedFiles.map(({ parsed }) => parsed));
+
 	const resolver = new Resolver(client);
 	const results: ImportResult[] = [];
 	const structureWarnings: string[] = [];
@@ -113,10 +126,7 @@ export async function importStories(
 		return pending;
 	};
 
-	for (const filePath of options.files) {
-		const fileContent = await Bun.file(filePath).text();
-		const parsed = parseMarkdownFile(fileContent, filePath);
-
+	for (const { filePath, fileContent, parsed } of parsedFiles) {
 		const writeBackEntries: Array<{ story: UserStory; result: ImportResult }> = [];
 		const suspicious = new Set(findNonStoryHeadings(fileContent));
 
