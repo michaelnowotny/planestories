@@ -18,6 +18,45 @@ The format is loosely [Keep a Changelog](https://keepachangelog.com/); versions 
 
 ---
 
+## [Unreleased]
+
+### Changed — `/rate-userstories` scores DISCRIMINATION, not volume
+
+**This changes verdicts.** A story that passed before may fail now, with no change on your side.
+Read this before your next rating run.
+
+The old rubric — Specificity 30 / Testability 35 / Completeness 25 / Description 10 — was
+**monotonic in writing effort**: adding a criterion, a concrete value, or a paragraph could only
+ever raise the score. A rubric with that property cannot distinguish *writing the right things*
+from *writing more things*, so length was free and dilution was invisible. The case that surfaced
+it: a spec with twenty acceptance criteria produced two defects, and neither was in any of the
+twenty — while scoring close to exemplary.
+
+- **New weights** — Discrimination 30 / Risk Coverage 20 / Testability 20 / Specificity 20 /
+  Description 10.
+- **Every criterion is classified `gate` or `task`** by one question: *describe a build that
+  satisfies every OTHER criterion but fails this one — is that build wrong, or merely unfinished?*
+  Discrimination is `gates/total` and is **non-monotonic: adding a task lowers your score.**
+- **Stories now need an outcome delta** — one sentence saying what is true after this lands that is
+  not true now. Missing or circular caps the story at **75%**, below the pass threshold, mirroring
+  the epic's missing-rationale cap. `templates/user-story.md` and
+  `docs/USER_STORY_FORMAT.md` model it. planestories does not parse the line; the rater and your
+  reviewers enforce it.
+- **`Completeness` is renamed `Risk Coverage`**, because the name was driving the behaviour: the
+  old one asks *have I listed everything*, the new one asks *what could go wrong*.
+- **Three anti-patterns added**, all written in precise confident prose: closed enumeration as
+  coverage, measurement smuggling, restated title.
+
+**What to do about existing stories.** Nothing urgent — this is a rating change, not a format
+change, and every existing file still imports and exports unchanged. When a story next fails, the
+fix is usually to delete tasks rather than add anything. **Never delete a gate to raise a score**;
+if most of your criteria are gates and there are many, the story is too big and wants splitting.
+
+Rationale and the calibration corpus: `docs/RATE_USERSTORIES.md`,
+`docs/RATE_USERSTORIES_CALIBRATION.md`.
+
+---
+
 ## [0.6.0] — 2026-08-23
 
 **Neither 0.5.0 nor 0.6.0 has been published to npm** (publishing is interactive — WebAuthn). If you

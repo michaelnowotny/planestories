@@ -86,6 +86,62 @@ cleanly through Plane's HTML storage; see [KNOWN_LIMITATIONS.md](./KNOWN_LIMITAT
 - [ ] Criterion two
 ```
 
+## Outcome delta — one sentence, and `/rate-userstories` requires it
+
+State **what is true after this lands that is not true now**. Any phrasing naming a checkable
+post-condition works; a `**Outcome:**` bold-label line is the greppable way to write it:
+
+```markdown
+**Outcome:** after this lands, a captured reset link is worthless after 24 hours — today it is
+valid indefinitely.
+```
+
+This is not decoration. Three things fall out of it:
+
+- **If it joins two INDEPENDENT outcomes, it is two stories.** That is the cheapest split test
+  there is. (The test is about independent outcomes, not the word "and" — the criteria that follow
+  are all ways to get the ONE outcome wrong, and they may be conjoined freely.)
+- **If it cannot be written at all**, the story is not yet understood well enough to hand to anyone.
+- It gives every acceptance criterion something to be judged against — a criterion that does not
+  serve the stated outcome is usually a task that wandered in.
+
+`/rate-userstories` caps a story with no outcome delta (or a circular one that restates the title)
+at **75%**, below the pass threshold — the same shape as the epic's missing-`### Why is this
+needed?` cap. planestories itself does **not** parse this line: it is a convention the rater and
+your reviewers enforce, not a field the tool extracts.
+
+## Acceptance criteria: prefer GATES over tasks
+
+`/rate-userstories` classifies every criterion by one question:
+
+> Describe a build that satisfies every OTHER criterion but fails this one. Is that build **wrong**,
+> or merely **unfinished**?
+
+Wrong → a **gate**: it excludes a way the work could be wrong while looking right. Unfinished → a
+**task**: it describes work, and cannot fail in a way that changes a decision.
+
+```markdown
+- [ ] Dead branches removed, with "no consumer found" recorded per branch    ← task
+- [ ] A link older than 24 hours is refused, and the refusal does not say
+      whether the token existed                                             ← gate
+```
+
+Both have a clean pass/fail. Only the second can catch a build that looks finished and is wrong.
+**Adding a task now LOWERS a story's score**, because it dilutes the reviewer's attention across the
+gates that matter. Delete tasks; keep gates. If you have many criteria and most are gates, the story
+is not badly written — it is too big, and should be split.
+
+Two shapes that read as rigorous and exclude nothing:
+
+- **Closed enumeration** — *"the row contains columns A, B, C, D, E"* passes the moment those five
+  exist and encodes no way to discover a sixth was needed. Write it generatively instead: *"for
+  every way X can fail, the row identifies which failure occurred."*
+- **Smuggled measurement** — *"baseline p95 is 812ms as measured on 2026-08-19"* is true, precise,
+  and cannot fail: it is a fact about the past. It belongs in the body as justification; the
+  criterion is the line it argues for.
+
+Full rubric and rationale: [RATE_USERSTORIES.md](./RATE_USERSTORIES.md).
+
 ## Body-line conventions
 
 Some structured metadata is written as a **bold-label body line** rather than in the YAML block —

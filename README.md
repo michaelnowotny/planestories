@@ -639,6 +639,8 @@ planestories ships a Claude Code skill that reviews a story file *before* you im
 
 It classifies each issue (epic / user story), validates structure and epic→child hierarchy, scores each with a type-specific rubric (epics get their own goal-clarity / scope / rationale rubric), and — critically for agentic coding — detects contradictions within and across issues, emitting corrected replacement markdown you can review. Vague, unfalsifiable, or self-contradicting acceptance criteria fail with concrete rewrites. It reads both inline `### Acceptance Criteria` and exported `kind: criterion` sub-items. Full reference: [docs/RATE_USERSTORIES.md](./docs/RATE_USERSTORIES.md).
 
+**The rubric scores discrimination, not volume.** Every criterion is classified a **gate** (its failure means the build is *wrong*) or a **task** (its failure means it is merely *unfinished*), by asking what a build that satisfied every other criterion but this one would look like. The largest dimension is the `gates/total` ratio, so **adding a task lowers your score** — the one thing the previous rubric, which rewarded length with no counterweight, could not express. Stories also need a one-sentence **outcome delta** (*what is true after this lands that is not true now*); a missing one caps the story below the pass threshold. [`templates/user-story.md`](./templates/user-story.md) models both.
+
 > Adapted from linearstories' `/rate-userstories` skill; the epic-aware upgrade follows an enhancement by Ijonas Kisselbach.
 
 ## Reliability
