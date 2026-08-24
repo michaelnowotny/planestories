@@ -84,36 +84,10 @@ const key = (row: SurfaceOption): string => `${row.command} ${row.long}`;
  * quietly unexercised.
  */
 const UNEXERCISED_BACKLOG: Record<string, string> = {
-	"planestories export --output":
-		"output path is covered by resolveOutputPath in output-path.test.ts",
-	"planestories atlas --output":
-		"output path is covered by resolveOutputPath in output-path.test.ts",
-	"planestories packet --output":
-		"output path is covered by resolveOutputPath in output-path.test.ts",
-	"planestories replicate --journal":
-		"journal path exercised through the journal module's own tests",
-	"planestories replicate apply --journal": "as above",
-	"planestories replicate verify --journal": "as above",
-	"planestories replicate relink --journal": "as above",
-	"planestories replicate verify --export-file":
-		"covered at function level in replicate/verify.test.ts",
-	"planestories replicate freshness --quick":
-		"covered at function level in replicate/quick-freshness.test.ts",
-	"planestories groom --write-back": "board→file checkbox sync; needs a file fixture harness",
-	"planestories delete --archive-label": "destructive path; needs a fake-client delete harness",
-	// The five below are ACTION-SUPPRESSING flags, which is why they were the
-	// first thing checked when this file was written. Driving them end-to-end
-	// needs a live board (import writes, delete deletes, doctor reads a project,
-	// replicate migrates), so what stands in for that is structural: the
-	// attribute-is-read invariant plus the no-default invariant plus the
-	// commander-mapping test below together prove `!options.writeBack` inverts
-	// correctly in both directions. That is a real proof of the link that broke
-	// on `--no-estimate`, not a substitute for an integration test of the effect.
-	"planestories import --no-write-back": "suppresses writes; end-to-end needs a live board",
-	"planestories delete --no-write-back": "suppresses writes; end-to-end needs a live board",
-	"planestories doctor --no-fail-on-findings": "exit-code gate; end-to-end needs a live board",
-	"planestories replicate --no-exact-identifiers": "migration semantics; needs two deployments",
-	"planestories replicate apply --no-exact-identifiers": "as above",
+	// EMPTY — every one of the 251 options is now driven by a test, either through
+	// argv or into an action-level entry point. It started at eleven declared plus
+	// five undeclared. Keep it empty: an entry here is a promise to come back, and
+	// the both-ways check below means a stale promise fails the suite too.
 };
 
 /**
@@ -124,15 +98,8 @@ const UNEXERCISED_BACKLOG: Record<string, string> = {
  * an entry is a visible act.
  */
 const UNINVOKED_COMMAND_BACKLOG: Record<string, string> = {
-	"planestories export": "exporter covered in sync/exporter tests; action wiring untested",
-	"planestories set": "set-status/evidence covered at function level",
-	"planestories projects": "thin listing wrapper over listProjects",
-	"planestories groom": "groom logic covered in sync/groom tests",
-	"planestories replicate backup": "covered in replicate/backup tests",
-	"planestories replicate apply": "covered in replicate/apply tests",
-	"planestories replicate verify": "covered in replicate/verify tests",
-	"planestories replicate relink": "covered in replicate/relink tests",
-	"planestories replicate freshness": "covered in replicate/quick-freshness tests",
+	// Empty, and it should stay that way: `action-wiring.test.ts` covers every
+	// command's argv -> options mapping through the real registered program.
 };
 
 describe("CLI surface — every option is connected to behaviour", () => {
@@ -177,11 +144,13 @@ describe("CLI surface — every option is connected to behaviour", () => {
 		// neither; that is exactly the assertion that let the no-op ship.
 		const unexercised: string[] = [];
 		for (const row of SURFACE) {
-			const argv = new RegExp(`\\[[^\\]]*["']${row.long}["']`, "s");
+			// Short form counts: `-o exports/board.md` exercises `--output`.
+			const forms = [row.long, row.option.short].filter((form): form is string => Boolean(form));
+			const argv = new RegExp(`\\[[^\\]]*["'](?:${forms.join("|")})["']`, "s");
 			const asObjectKey = new RegExp(`\\b${row.attribute}\\s*:`);
 			const covered = TESTS.some(
 				(file) =>
-					(file.text.includes(`"${row.long}"`) && argv.test(file.text)) ||
+					(forms.some((form) => file.text.includes(`"${form}"`)) && argv.test(file.text)) ||
 					asObjectKey.test(file.text),
 			);
 			if (!covered) unexercised.push(key(row));
