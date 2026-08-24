@@ -309,9 +309,7 @@ export async function fetchProjectIndex(
 		byId.set(item.id, item);
 		byIdentifier.set(`${projectIdentifier}-${item.sequenceId}`, item);
 
-		// Defensive: a work item always has a name in Plane, but tolerate a missing
-		// one rather than throwing while building the index.
-		const titleKey = normalizeTitle(item.name ?? "");
+		const titleKey = normalizeTitle(item.name);
 		const titled = byNormalizedTitle.get(titleKey);
 		if (titled) {
 			titled.push(item);
@@ -346,6 +344,12 @@ export async function fetchWorkItems(
 }
 
 function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
+	if (typeof item.name !== "string") {
+		const itemId = typeof item.id === "string" ? item.id : "<unknown id>";
+		throw new PlaneApiError(
+			`Plane work item ${itemId} returned an invalid name; expected a string`,
+		);
+	}
 	const state = item.state as { name?: string; group?: string } | string | undefined;
 	const stateName = state && typeof state === "object" ? state.name : undefined;
 	const stateGroup = state && typeof state === "object" ? state.group : undefined;
@@ -373,7 +377,7 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 	return {
 		id: item.id as string,
 		sequenceId: item.sequence_id as number,
-		name: item.name as string,
+		name: item.name,
 		createdAt: normalizeInstant(item.created_at),
 		updatedAt: normalizeInstant(item.updated_at),
 		description: htmlToMarkdown(item.description_html as string | undefined) || undefined,

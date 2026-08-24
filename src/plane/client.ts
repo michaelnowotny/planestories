@@ -34,6 +34,8 @@ export const DEFAULT_MAX_RETRIES = 5;
 export const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 /** Upper bound on any single backoff delay, so a large Retry-After or high attempt can't stall forever. */
 export const DEFAULT_MAX_RETRY_DELAY_MS = 30_000;
+/** 100 items/page permits 10,000 items, well above the measured ~2,700-item board. */
+const MAX_LIST_PAGES = 100;
 
 export interface PlaneClientOptions {
 	apiKey: string;
@@ -128,6 +130,7 @@ interface RequestOptions {
 /** A single page of a cursor-paginated Plane list response. */
 interface PlanePage<T> {
 	results: T[];
+	total_count?: number;
 	next_cursor?: string | null;
 	next_page_results?: boolean;
 }
@@ -350,22 +353,76 @@ export class PlaneClient {
 	async listAll<T>(suffix: string, query: RequestOptions["query"] = {}): Promise<T[]> {
 		const path = this.workspacePath(suffix);
 		const all: T[] = [];
+		const byId = new Map<string, T>();
 		let cursor: string | undefined;
+		let expectedTotalCount: number | undefined;
+		let pageCount = 0;
+
+		const appendUnique = (items: T[]): void => {
+			for (const item of items) {
+				const id = responseItemId(item);
+				if (id === undefined) {
+					all.push(item);
+					continue;
+				}
+				if (!byId.has(id)) {
+					byId.set(id, item);
+					all.push(item);
+					continue;
+				}
+				if (!sameJsonContent(byId.get(id), item)) {
+					throw new PlaneApiError(
+						`Plane API list endpoint ${path} returned duplicate id "${id}" with changed content`,
+					);
+				}
+			}
+		};
 
 		do {
+			pageCount++;
 			const page = await this.request<PlanePage<T> | T[]>("GET", path, {
 				query: { per_page: 100, cursor, ...query },
 			});
 
 			// Some endpoints return a bare array, others a paginated envelope.
 			if (Array.isArray(page)) {
-				all.push(...page);
+				appendUnique(page);
 				cursor = undefined;
 			} else {
-				all.push(...(page.results ?? []));
-				cursor = page.next_page_results ? (page.next_cursor ?? undefined) : undefined;
+				if (page === null || typeof page !== "object" || !Array.isArray(page.results)) {
+					throw new PlaneApiError(
+						`Plane API list endpoint ${path} returned an invalid response envelope`,
+					);
+				}
+				if (page.total_count !== undefined) {
+					if (!Number.isSafeInteger(page.total_count) || page.total_count < 0) {
+						throw new PlaneApiError(
+							`Plane API list endpoint ${path} returned invalid total_count=${String(page.total_count)}`,
+						);
+					}
+					if (expectedTotalCount !== undefined && expectedTotalCount !== page.total_count) {
+						throw new PlaneApiError(
+							`Plane API list endpoint ${path} changed total_count from ${expectedTotalCount} to ${page.total_count} during pagination`,
+						);
+					}
+					expectedTotalCount = page.total_count;
+				}
+				appendUnique(page.results);
+				cursor = continuationCursor(page, path);
+			}
+
+			if (cursor !== undefined && pageCount >= MAX_LIST_PAGES) {
+				throw new PlaneApiError(
+					`Plane API list endpoint ${path} exceeded the maximum of ${MAX_LIST_PAGES} pages`,
+				);
 			}
 		} while (cursor);
+
+		if (expectedTotalCount !== undefined && all.length !== expectedTotalCount) {
+			throw new PlaneApiError(
+				`Plane API list endpoint ${path} returned ${all.length} unique items after pagination, but total_count=${expectedTotalCount}`,
+			);
+		}
 
 		return all;
 	}
@@ -741,6 +798,70 @@ export class PlaneClient {
 
 export function createPlaneClient(options: PlaneClientOptions): PlaneClient {
 	return new PlaneClient(options);
+}
+
+function continuationCursor<T>(page: PlanePage<T>, path: string): string | undefined {
+	const hasFlag = page.next_page_results !== undefined;
+	if (hasFlag && typeof page.next_page_results !== "boolean") {
+		throw new PlaneApiError(
+			`Plane API list endpoint ${path} returned invalid next_page_results=${String(page.next_page_results)}`,
+		);
+	}
+	const hasCursorValue = page.next_cursor !== undefined && page.next_cursor !== null;
+	if (hasCursorValue && (typeof page.next_cursor !== "string" || page.next_cursor.length === 0)) {
+		throw new PlaneApiError(`Plane API list endpoint ${path} returned an invalid next_cursor`);
+	}
+	const cursor = hasCursorValue ? (page.next_cursor as string) : undefined;
+
+	if (page.next_page_results === true && cursor === undefined) {
+		throw new PlaneApiError(
+			`Plane API list endpoint ${path} returned contradictory pagination metadata: next_page_results=true but next_cursor is absent`,
+		);
+	}
+	if (page.next_page_results === false && cursor !== undefined) {
+		throw new PlaneApiError(
+			`Plane API list endpoint ${path} returned contradictory pagination metadata: next_page_results=false but next_cursor is present`,
+		);
+	}
+	if (!hasFlag && cursor !== undefined) {
+		throw new PlaneApiError(
+			`Plane API list endpoint ${path} returned contradictory pagination metadata: next_page_results is absent but next_cursor is present`,
+		);
+	}
+	return page.next_page_results === true ? cursor : undefined;
+}
+
+function responseItemId(item: unknown): string | undefined {
+	if (item === null || typeof item !== "object") return undefined;
+	const id = (item as Record<string, unknown>).id;
+	return typeof id === "string" ? id : undefined;
+}
+
+/** Structural equality for JSON response values; object key order is not content. */
+function sameJsonContent(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		return (
+			Array.isArray(left) &&
+			Array.isArray(right) &&
+			left.length === right.length &&
+			left.every((value, index) => sameJsonContent(value, right[index]))
+		);
+	}
+	if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
+		return false;
+	}
+	const leftRecord = left as Record<string, unknown>;
+	const rightRecord = right as Record<string, unknown>;
+	const leftKeys = Object.keys(leftRecord);
+	const rightKeys = Object.keys(rightRecord);
+	return (
+		leftKeys.length === rightKeys.length &&
+		leftKeys.every(
+			(key) =>
+				Object.hasOwn(rightRecord, key) && sameJsonContent(leftRecord[key], rightRecord[key]),
+		)
+	);
 }
 
 function formatDuration(totalSeconds: number): string {
