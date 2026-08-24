@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AtlasEdge, AtlasGraph, AtlasNode } from "../../../src/atlas/model.ts";
-import { computeCriticalPath } from "../../../src/sync/critical_path.ts";
+import { computeCriticalPath, NestedDependencyError } from "../../../src/sync/critical_path.ts";
 
 function story(
 	id: string,
@@ -323,21 +323,30 @@ describe("critical path", () => {
 		expect(result.expandedEdges).toBe(1);
 	});
 
-	test("an epic blocking its own descendant does not invent sibling constraints", () => {
-		const target = story("m2", "P-2", 3);
-		const epic: AtlasNode = {
-			...story("e", "P-E", null),
+	test("an epic blocking its own descendant REFUSES rather than dropping the edge", () => {
+		// Not inventing `M1 -> M2` and `M3 -> M2` was right; erasing the declared
+		// edge was not. Measured by review at the query layer: M1, M2 AND M3 all
+		// reported ready and nothing reported blocked, while Plane still carried
+		// `E blocks M2`. A wrong answer with no trace of why.
+		//
+		// The edge is real, its meaning as a schedule constraint is undefined, and
+		// the board is what needs fixing — so say so and name both ends.
+		const epic = story("E", "E", null, {
 			kind: "epic",
-			children: [story("m1", "P-1", 2), target, story("m3", "P-3", 4)],
-		} as AtlasNode;
-		const result = computed(
-			graph([epic], [{ source: epic.id, target: target.id, type: "blocks" }]),
-		);
+			children: [story("M1", "M1", 1), story("M2", "M2", 1), story("M3", "M3", 1)],
+		});
+		const g = graph([epic], [{ source: "E", target: "M2", type: "blocks" }]);
 
-		// E -> P-2 does not declare P-1 -> P-2 or P-3 -> P-2.
-		expect(result.connectedLeaves).toBe(0);
-		expect(result.expandedEdges).toBe(0);
-		expect(result.chain).toEqual([]);
+		expect(() => computeCriticalPath(g)).toThrow(NestedDependencyError);
+		try {
+			computeCriticalPath(g);
+		} catch (error) {
+			const message = (error as Error).message;
+			expect(message).toContain("E");
+			expect(message).toContain("M2");
+			// Names the repair, per the refusal rule.
+			expect(message).toMatch(/remove the relation|re-parent/i);
+		}
 	});
 
 	test("a self-referential children structure is refused by node name", () => {

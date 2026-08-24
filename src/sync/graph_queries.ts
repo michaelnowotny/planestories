@@ -3,6 +3,7 @@ import { ConfigError } from "../errors.ts";
 import { shellQuote } from "../utils/shell.ts";
 import {
 	type LeafDependencyProjection,
+	NestedDependencyError,
 	type ProjectedLeaf,
 	projectLeafDependencies,
 } from "./critical_path.ts";
@@ -106,6 +107,17 @@ interface QueryScope {
 	scope: GraphQueryRef | null;
 }
 
+/**
+ * A declared ancestor/descendant edge makes every dependency answer here
+ * unsound: it cannot be expanded without inventing sibling blockers, and
+ * ignoring it silently changes the answer (measured: `ready` reported all three
+ * siblings ready and `blocked` reported nothing, with the edge still on the
+ * board). Refuse rather than answer.
+ */
+function refuseNestedEdges(projection: LeafDependencyProjection): void {
+	if (projection.nestedEdges.length > 0) throw new NestedDependencyError(projection.nestedEdges);
+}
+
 function ref(node: AtlasNode): GraphQueryRef {
 	return {
 		identifier: node.identifier,
@@ -145,6 +157,7 @@ function queryScope(
 	routes?: GraphQueryAnswerRoutes,
 ): QueryScope {
 	const projection = projectLeafDependencies(graph);
+	refuseNestedEdges(projection);
 	if (options.epic === undefined) {
 		return { projection, candidates: [...projection.leaves.values()], scope: null };
 	}
@@ -317,6 +330,7 @@ export function queryBlocked(
 
 export function queryOrphans(graph: AtlasGraph): OrphansQueryReport {
 	const projection = projectLeafDependencies(graph);
+	refuseNestedEdges(projection);
 	const items = [...projection.leaves.values()]
 		.filter((leaf) => !projection.connected.has(leaf.node.id))
 		.map((leaf) => ({ item: ref(leaf.node) }));
@@ -325,6 +339,7 @@ export function queryOrphans(graph: AtlasGraph): OrphansQueryReport {
 
 export function queryAbandoned(graph: AtlasGraph): AbandonedQueryReport {
 	const projection = projectLeafDependencies(graph);
+	refuseNestedEdges(projection);
 	const leaves = [...projection.leaves.values()];
 	const open = leaves.filter(isOpen);
 	const items: AbandonedQueryItem[] = [];

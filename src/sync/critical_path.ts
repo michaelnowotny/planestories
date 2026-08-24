@@ -131,6 +131,40 @@ export interface LeafDependencyProjection {
 	predecessors: Map<string, string[]>;
 	connected: Set<string>;
 	expandedEdges: number;
+	/**
+	 * Declared `blocks` edges whose endpoints are structurally nested — an epic
+	 * blocking its own descendant, or the reverse.
+	 *
+	 * These CANNOT be expanded: `E blocks M2` where E parents M1,M2,M3 would
+	 * project `M1 -> M2` and `M3 -> M2`, sibling constraints nobody declared. But
+	 * dropping them silently is worse than fabricating: the review measured
+	 * `ready` reporting M1, M2 AND M3 all ready and `blocked` reporting nothing,
+	 * while Plane still carried the edge. A wrong answer with no trace of why.
+	 *
+	 * So they are collected and REFUSED by anything that answers a dependency
+	 * question. The edge is real; what it means is undefined; the board is what
+	 * needs fixing.
+	 */
+	nestedEdges: NestedDependencyEdge[];
+}
+
+/** A declared edge between an ancestor and its own descendant. */
+export interface NestedDependencyEdge {
+	sourceLabel: string;
+	targetLabel: string;
+}
+
+/** Thrown by any dependency answer computed over a graph containing nested edges. */
+export class NestedDependencyError extends Error {
+	constructor(readonly edges: readonly NestedDependencyEdge[]) {
+		const list = edges.map((e) => `${e.sourceLabel} blocks ${e.targetLabel}`).join("; ");
+		super(
+			`Refusing to answer a dependency question: ${edges.length} declared relation(s) connect an item to its own ancestor or descendant — ${list}. ` +
+				"Such an edge has no meaning as a schedule constraint (expanding it would invent sibling blockers that nobody declared), and ignoring it would silently change the answer. " +
+				"Remove the relation in Plane, or re-parent one of the two items, then re-run.",
+		);
+		this.name = "NestedDependencyError";
+	}
 }
 
 export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjection {
@@ -138,6 +172,8 @@ export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjec
 	const leavesUnder = new Map<string, string[]>();
 	const nodesByIdentifier = new Map<string, AtlasNode>();
 	const ancestorIdsByNode = new Map<string, Set<string>>();
+	// id -> node, so a refused edge can be named by identifier rather than UUID.
+	const nodesById = new Map<string, AtlasNode>();
 	const visited = new Set<string>();
 
 	const collect = (node: AtlasNode, ancestors: AtlasNode[], ancestorIds: string[]): string[] => {
@@ -151,6 +187,7 @@ export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjec
 		if (node.identifier) {
 			nodesByIdentifier.set(node.identifier.trim().toUpperCase(), node);
 		}
+		nodesById.set(node.id, node);
 
 		if (node.kind !== "epic" && (node.children?.length ?? 0) === 0) {
 			const done = node.statusGroup === "completed" || node.statusGroup === "cancelled";
@@ -180,6 +217,11 @@ export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjec
 	const predecessors = new Map<string, string[]>();
 	const connected = new Set<string>();
 	let expandedEdges = 0;
+	const nestedEdges: NestedDependencyEdge[] = [];
+	const label = (id: string): string => {
+		const node = nodesById.get(id);
+		return node?.identifier ?? node?.title ?? id;
+	};
 	for (const edge of graph.edges) {
 		// "blocks" only: `relates` carries no ordering, so using it would invent a
 		// constraint that nobody declared.
@@ -192,7 +234,14 @@ export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjec
 		const endpointsShareAncestry =
 			ancestorIdsByNode.get(edge.target)?.has(edge.source) === true ||
 			ancestorIdsByNode.get(edge.source)?.has(edge.target) === true;
-		if (endpointsShareAncestry) continue;
+		if (endpointsShareAncestry) {
+			// Recorded, NOT dropped — see NestedDependencyEdge.
+			nestedEdges.push({
+				sourceLabel: label(edge.source),
+				targetLabel: label(edge.target),
+			});
+			continue;
+		}
 		const sources = endpoints(edge.source);
 		const targets = endpoints(edge.target);
 		if (sources.length === 0 || targets.length === 0) continue;
@@ -218,6 +267,7 @@ export function projectLeafDependencies(graph: AtlasGraph): LeafDependencyProjec
 		predecessors,
 		connected,
 		expandedEdges,
+		nestedEdges,
 	};
 }
 
@@ -271,8 +321,9 @@ function findCycles(
  * without a second data path.
  */
 export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
-	const { leaves, successors, predecessors, connected, expandedEdges } =
-		projectLeafDependencies(graph);
+	const projected = projectLeafDependencies(graph);
+	if (projected.nestedEdges.length > 0) throw new NestedDependencyError(projected.nestedEdges);
+	const { leaves, successors, predecessors, connected, expandedEdges } = projected;
 
 	const doneLeaves = [...leaves.values()].filter((l) => l.done).length;
 

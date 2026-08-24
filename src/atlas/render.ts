@@ -1,4 +1,4 @@
-import { computeCriticalPath } from "../sync/critical_path.ts";
+import { computeCriticalPath, NestedDependencyError } from "../sync/critical_path.ts";
 import { escapeHtml } from "../utils/html.ts";
 import { PHYSICS, settleLayout } from "./layout.ts";
 import type { AtlasGraph, DependencyCoverage } from "./model.ts";
@@ -119,7 +119,21 @@ export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): stri
 	// critical-path command uses. Embedding the result rather than re-deriving it
 	// in the browser means the gauge and the CLI cannot disagree — a second copy
 	// of this arithmetic is how a headline number starts drifting from its source.
-	const cp = computeCriticalPath(graph);
+	// A nested ancestor/descendant edge makes a FLOOR unsound for the same reason a
+	// cycle does — but the MAP is still worth drawing, and `atlas` explicitly
+	// accepts a partial graph. So the refusal lands on the gauge, not on the
+	// render: the CLI dependency commands refuse outright, the picture says why it
+	// has no number. Letting it propagate here killed the whole page.
+	let cp: ReturnType<typeof computeCriticalPath>;
+	try {
+		cp = computeCriticalPath(graph);
+	} catch (error) {
+		if (!(error instanceof NestedDependencyError)) throw error;
+		cp = {
+			ok: false,
+			cycles: [error.edges.map((e) => `${e.sourceLabel} ⇄ ${e.targetLabel}`)],
+		} as never;
+	}
 	// FIVE states. Each removed one way the panel could read as a measurement it
 	// is not:
 	//   incomplete — the sweep ran and dropped edges, so a floor may be too short
