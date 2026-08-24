@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { PlaneApiError } from "../../../src/errors.ts";
 import {
 	createWorkItem,
 	fetchWorkItems,
@@ -125,5 +126,22 @@ describe("fetchWorkItems", () => {
 
 		const items = await fetchWorkItems(client, PROJECT_ID);
 		expect(items[0]!.priority).toBeUndefined();
+	});
+
+	test("rejects a null name at the API boundary and names the work item", async () => {
+		const { client } = makeFakeClient({
+			workItems: {
+				[PROJECT_ID]: [{ id: "wi-null-name", sequence_id: 10, name: null }],
+			},
+		});
+
+		try {
+			await fetchWorkItems(client, PROJECT_ID);
+			throw new Error("expected fetchWorkItems to reject");
+		} catch (error) {
+			expect(error).toBeInstanceOf(PlaneApiError);
+			expect((error as Error).message).toContain("wi-null-name");
+			expect((error as Error).message).toContain("name");
+		}
 	});
 });
