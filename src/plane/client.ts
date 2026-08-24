@@ -2,6 +2,30 @@ import { PlaneApiError } from "../errors.ts";
 import { Pacer, type PacerOptions } from "./pacer.ts";
 import { normalizeRelations } from "./relation_refs.ts";
 
+/** What one endpoint answered to a read-only OPTIONS: its status and `Allow` set. */
+export interface AllowedMethods {
+	status: number;
+	allow: string[];
+}
+
+/**
+ * The relation surface, MEASURED rather than inferred.
+ *
+ * Plane answers OPTIONS with `405 Method "OPTIONS" not allowed` — but the
+ * response still carries `Allow: GET, POST`, which is a real statement about
+ * the collection. The removal routes answer 404 with no `Allow` at all, which
+ * is a real statement that they do not exist. Neither probe writes anything,
+ * so removal can be established without attempting a removal.
+ */
+export interface RelationMethodProbe {
+	collection: AllowedMethods;
+	/** Every known removal route, probed. Empty means none could be reached. */
+	removal: AllowedMethods[];
+}
+
+/** All-zero UUID: a syntactically valid id that cannot name a real relation. */
+const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
+
 export const DEFAULT_PLANE_BASE_URL = "https://api.plane.so";
 
 /** Default number of retry attempts for transient failures (on top of the initial try). */
@@ -459,6 +483,55 @@ export class PlaneClient {
 			this.workspacePath(`/projects/${projectId}/${this.itemsSegment}/`),
 			{ query: { per_page: 1, pql: "stateGroup IN openStates()" } },
 		);
+	}
+
+	/**
+	 * Read-only OPTIONS probe of the relation surface.
+	 *
+	 * Plane rejects OPTIONS with `405 Method "OPTIONS" not allowed` and still
+	 * returns `Allow: GET, POST` — a real statement about the collection. The two
+	 * known removal routes answer 404 with no `Allow`, which is a real statement
+	 * that they do not exist. So relation create/list/remove can all be MEASURED
+	 * without writing anything, which is the point: attempting a removal to find
+	 * out whether removal works would remove something.
+	 *
+	 * Deliberately bypasses `request()`: this must not throw on 4xx (a 404 IS the
+	 * answer), and it is not a write, so it must not trip the write guard.
+	 */
+	async probeRelationMethods(projectId: string, workItemId: string): Promise<RelationMethodProbe> {
+		const base = this.workspacePath(
+			`/projects/${projectId}/${this.itemsSegment}/${workItemId}/relations`,
+		);
+		const [collection, ...removal] = await Promise.all(
+			[`${base}/`, `${base}/remove/`, `${base}/${ZERO_UUID}/`].map((path) =>
+				this.optionsProbe(path),
+			),
+		);
+		return { collection: collection ?? { status: 0, allow: [] }, removal };
+	}
+
+	private async optionsProbe(path: string): Promise<AllowedMethods> {
+		await this.pacer?.acquire();
+		try {
+			this.requestCount++;
+			const response = await fetch(`${this.baseUrl}${path}`, {
+				method: "OPTIONS",
+				headers: { "X-API-Key": this.apiKey, Accept: "application/json" },
+			});
+			const allow = response.headers.get("allow");
+			return {
+				status: response.status,
+				allow: allow
+					? allow
+							.split(",")
+							.map((method) => method.trim().toUpperCase())
+							.filter((method) => method.length > 0)
+					: [],
+			};
+		} catch {
+			// Status 0 means "we never got an answer" — never a negative capability.
+			return { status: 0, allow: [] };
+		}
 	}
 
 	/** Read-only workspace count-endpoint availability probe. */

@@ -45,6 +45,26 @@ export interface RenderOptions {
 	 * whose `blocks:` lines are complete by construction) says so explicitly.
 	 */
 	coverage: DependencyCoverage;
+	/**
+	 * Where this artifact's board state came from, and when it was observed.
+	 *
+	 * An `atlas.html` sitting in a downloads folder outlives by weeks the stderr
+	 * line that announced its age — which was the entire argument for printing
+	 * the age at all. Null means the artifact does not record it, which is
+	 * honest; a fabricated "now" would not be.
+	 */
+	provenance?: AtlasSourceStamp | null;
+}
+
+/** Board identity + observation time, carried INSIDE the artifact. */
+export interface AtlasSourceStamp {
+	/** file | live | snapshot | cache — how the board state was obtained. */
+	kind: string;
+	project: string;
+	/** ISO instant the state was observed; null for a stories file, which IS the state. */
+	observedAt: string | null;
+	/** The same sentence the command prints to stderr. */
+	description: string;
 }
 
 /**
@@ -58,8 +78,10 @@ export interface RenderOptions {
 export function atlasJsonPayload(
 	graph: AtlasGraph,
 	coverage: DependencyCoverage,
-): AtlasGraph & { dependencyCoverage: DependencyCoverage } {
-	return { ...graph, dependencyCoverage: coverage };
+	provenance: AtlasSourceStamp | null = null,
+): AtlasGraph & { dependencyCoverage: DependencyCoverage; provenance: AtlasSourceStamp | null } {
+	// NOT keyed `source`: AtlasGraph already uses that for "file | board".
+	return { ...graph, dependencyCoverage: coverage, provenance };
 }
 
 export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): string {
@@ -73,8 +95,21 @@ export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): stri
 	// `--json` contract test caught it. The browser ignores this key (it reads
 	// coverage from `CP`), but an embedded graph that documents its own
 	// completeness is the more honest artifact anyway.
-	const data = JSON.stringify(atlasJsonPayload(graph, options.coverage)).replace(/</g, "\\u003c");
+	const data = JSON.stringify(
+		atlasJsonPayload(graph, options.coverage, options.provenance ?? null),
+	).replace(/</g, "\\u003c");
 	const title = `${graph.project} — Project Atlas`; // escaped once, at insertion
+	// Static markup, deliberately: the embedded script is the one part of this
+	// file that no test executes, and a round-3 P0 was a blank page caused by
+	// editing it. A provenance line the reader can SEE does not need JavaScript.
+	const sourceLine = options.provenance
+		? `SOURCE: ${options.provenance.kind.toUpperCase()} · ${options.provenance.project.toUpperCase()} · ${
+				// The ABSOLUTE instant, never "1H AGO": a relative age frozen into a
+				// durable file still reads as fresh a week later, which is the exact
+				// confusion this stamp exists to remove.
+				options.provenance.observedAt ?? "STATE IS THE FILE ITSELF"
+			}`
+		: "SOURCE: NOT RECORDED IN THIS ARTIFACT";
 	// Settle the layout HERE so the page opens on an arranged board. The browser
 	// used to run 325 simulation ticks at ONE PER ANIMATION FRAME — 5.4s at a
 	// perfect 60fps, 10-16s at the rate those frames actually cost — and the whole
@@ -173,7 +208,8 @@ export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): stri
     <div class="hint"><b>CLICK</b> PLANET = LOCK TARGET &#183; <b>CLICK</b> RING = LOCK EPIC &#183;
       <b>DRAG</b> PAN / MOVE NODE &#183; <b>WHEEL</b> ZOOM<br /><b>SCAN</b>: TYPE &#8593;&#8595; &#9166; &#183;
       <b>ESC</b> END SCAN &#183; <b>NEEDLE</b>: DRAG TO ZOOM &#183; LOD: NEBULA &#8594; WORLDS &#183; SIZE = EFFORT (LOG)<br />
-      <span class="credit">PLANESTORIES ATLAS &#183; AFTER PROJECT ATLAS (LINEARSTORIES)</span></div>
+      <span class="credit">PLANESTORIES ATLAS &#183; AFTER PROJECT ATLAS (LINEARSTORIES)</span><br />
+      <span class="credit">${escapeHtml(sourceLine)}</span></div>
     <div class="settling" id="settling" hidden><span class="spin"></span> ARRANGING&#8230;</div>
     <div class="empty" id="empty" hidden>NO CONTACTS MATCH THE ACTIVE FILTERS</div>
   </div>

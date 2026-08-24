@@ -1,6 +1,8 @@
 import { PlaneApiError } from "../errors.ts";
 import type { PlaneDialectSource } from "../types.ts";
-import type { PlaneEndpointDialect, PlaneIssueRelations } from "./client.ts";
+import type { AllowedMethods, PlaneEndpointDialect, RelationMethodProbe } from "./client.ts";
+
+export type { AllowedMethods, RelationMethodProbe } from "./client.ts";
 
 export type CapabilityStatus = "supported" | "not-supported" | "could-not-determine";
 
@@ -27,7 +29,7 @@ export interface CapabilityProbeClient {
 	getInstance<T>(): Promise<T>;
 	listProjects<T>(): Promise<T[]>;
 	sampleWorkItem<T>(projectId: string): Promise<T | null>;
-	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
+	probeRelationMethods(projectId: string, workItemId: string): Promise<RelationMethodProbe>;
 	probePql(projectId: string): Promise<void>;
 	probeWorkspaceCount(): Promise<void>;
 }
@@ -139,16 +141,9 @@ async function probeRelations(
 	relationList: CapabilityStatus;
 	relationRemove: CapabilityStatus;
 }> {
+	let probe: RelationMethodProbe;
 	try {
-		await client.getRelations(projectId, itemId);
-		// The collection GET is the measured evidence. PLANE_CAPABILITIES.md records
-		// that POST to this same collection creates on both dialects, while relation
-		// removal is absent on the measured work-items/CE surface.
-		return {
-			relationCreate: "supported",
-			relationList: "supported",
-			relationRemove: client.dialect === "work-items" ? "not-supported" : "supported",
-		};
+		probe = await client.probeRelationMethods(projectId, itemId);
 	} catch {
 		return {
 			relationCreate: indeterminate(),
@@ -156,6 +151,34 @@ async function probeRelations(
 			relationRemove: indeterminate(),
 		};
 	}
+
+	// An empty Allow set is not "no methods" — it is "this endpoint did not say".
+	// The one command whose job is to avoid confident claims from indirect
+	// evidence must not turn silence into a negative.
+	const allow = new Set(probe.collection.allow.map((method) => method.toUpperCase()));
+	const fromAllow = (method: string): CapabilityStatus =>
+		allow.size === 0 ? indeterminate() : allow.has(method) ? "supported" : "not-supported";
+
+	return {
+		relationCreate: fromAllow("POST"),
+		relationList: fromAllow("GET"),
+		relationRemove: removalStatus(probe.removal),
+	};
+}
+
+/**
+ * Removal is established from the ROUTES, not from the dialect.
+ *
+ * The previous version read `client.dialect === "work-items"` and printed a
+ * confident NOT SUPPORTED — so a Cloud deployment with an explicitly configured
+ * work-items dialect would have been told, in the command that exists to
+ * measure things, something nobody measured.
+ */
+function removalStatus(routes: readonly AllowedMethods[]): CapabilityStatus {
+	if (routes.length === 0) return indeterminate();
+	if (routes.every((route) => route.status === 404)) return "not-supported";
+	const reachable = routes.filter((route) => route.status !== 404);
+	return reachable.some((route) => route.allow.length > 0) ? "supported" : indeterminate();
 }
 
 async function probePql(

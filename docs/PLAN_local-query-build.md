@@ -268,15 +268,23 @@ it cannot drift from the surface. The round independently recorded the `<file>` 
 0c. **`ls --blocked` completeness is implemented but not CLI-tested.** The graph verbs have an
    incomplete-sweep CLI test; `ls`/`count` do not. (Round B; the behaviour itself was checked and is
    correct on every path.)
-1. **Relation create/remove capability is a dialect heuristic after a list GET**, not an independent
-   measurement. Cloud + an explicitly configured `work-items` dialect would wrongly print
-   "relation removal: NOT SUPPORTED". Not a path in use here, but the command's whole purpose is
-   not making confident claims from indirect evidence — so this is the first P2 to close.
+1. ~~**Relation create/remove capability is a dialect heuristic after a list GET.**~~ **CLOSED
+   (`97d4550`).** Measured now, read-only, via OPTIONS: Plane rejects OPTIONS with
+   `405 Method "OPTIONS" not allowed` and still returns `Allow: GET, POST`, while both removal
+   routes answer 404 with no `Allow`. Both are real statements, and neither writes — which matters,
+   because the obvious way to learn whether removal works is to remove something. An empty `Allow`
+   set is indeterminate, never a negative.
 2. **Cache identity keys on the project SELECTOR, not a UUID.** A rename plus reuse of the old name
    within the staleness window is the one hole; a cross-host cutover does not hit it.
-3. **`atlas` artifacts carry no `fetchedAt`.** The command prints the age on stderr, but the HTML/JSON
-   file does not, so someone opening `exports/atlas.html` tomorrow cannot see how old it is. Given
-   the whole point is that an artifact outlives its stderr, this one matters more than its rank.
+3. ~~**`atlas` artifacts carry no `fetchedAt`.**~~ **CLOSED (`97d4550`).** Both artifacts carry a
+   `provenance` stamp (kind, project, `observedAt`, description); the HTML shows it in STATIC
+   markup, because the embedded script is the one part of that file no test executes.
+   **Two constraints found while building it, both now pinned by tests:** a `renderedAt` field
+   broke the tested guarantee that two renders of one input are byte-identical, so it was dropped —
+   `observedAt` answers how old the STATE is and the file's mtime answers when the file was
+   written; and the artifact prints the ABSOLUTE instant rather than `1H AGO`, because a relative
+   age frozen into a durable file still reads as fresh a week later. The key is `provenance`, not
+   `source` — `AtlasGraph.source` already means `"file" | "board"`.
 4. **`packet` / `epic` / `doctor` / `critical-path` do not read the cache** — they stay live, which is
    honest but means Unit 5's benefit is wired only for `show` and `atlas`.
 5. Cache-hit `show` on a missing identifier names the board but not host/workspace.

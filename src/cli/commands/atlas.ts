@@ -3,6 +3,7 @@ import chalk from "chalk";
 import type { Command } from "commander";
 import { atlasJsonPayload, renderAtlasHtml } from "../../atlas/render.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
+import { graphSourceStamp } from "../graph_provenance.ts";
 import { resolveGraph } from "../graph_source.ts";
 import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
@@ -107,7 +108,13 @@ export function registerAtlasCommand(program: Command) {
 				// WHOLE: `--no-dependencies` used to arrive here as `failures === 0` and
 				// render as "nothing blocks anything else" — a claim about the board
 				// derived from a sweep nobody ran.
-				const html = options.json ? "" : renderAtlasHtml(graph, { coverage: source.coverage });
+				// Stamp the artifact with WHERE its board state came from and WHEN it was
+				// observed. Someone opening exports/atlas.html next week has only the file;
+				// the stderr line that announced its age is long gone.
+				const stamp = graphSourceStamp(source.provenance);
+				const html = options.json
+					? ""
+					: renderAtlasHtml(graph, { coverage: source.coverage, provenance: stamp });
 				const outPath = resolveOutputPath(
 					options.output,
 					options.json ? "atlas.json" : "atlas.html",
@@ -120,7 +127,7 @@ export function registerAtlasCommand(program: Command) {
 				// The SAME payload the HTML embeds — one function, so the two artifacts
 				// cannot drift (docs/ATLAS.md's "the HTML and the JSON can never
 				// disagree" is then true by construction, not by review).
-				const json = atlasJsonPayload(graph, source.coverage);
+				const json = atlasJsonPayload(graph, source.coverage, stamp);
 				await Bun.write(abs, options.json ? `${JSON.stringify(json, null, "\t")}\n` : html);
 
 				const flagged = graph.counts.flagged ? `, ${graph.counts.flagged} flagged` : "";
