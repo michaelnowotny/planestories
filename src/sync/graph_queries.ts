@@ -1,5 +1,6 @@
 import type { AtlasGraph, AtlasNode, StatusGroup } from "../atlas/model.ts";
 import { ConfigError } from "../errors.ts";
+import { shellQuote } from "../utils/shell.ts";
 import {
 	type LeafDependencyProjection,
 	type ProjectedLeaf,
@@ -128,10 +129,6 @@ function compareRefs(a: GraphQueryRef, b: GraphQueryRef): number {
 
 function sortByItem<T extends { item: GraphQueryRef }>(items: T[]): T[] {
 	return items.sort((a, b) => compareRefs(a.item, b.item));
-}
-
-function shellQuote(value: string): string {
-	return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function defaultRoutes(graph: AtlasGraph): GraphQueryAnswerRoutes {

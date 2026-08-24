@@ -1,6 +1,7 @@
 import type { AtlasGraph, AtlasNode, StatusGroup } from "../atlas/model.ts";
 import { ConfigError } from "../errors.ts";
 import { formatDevDays } from "../markdown/directives.ts";
+import { shellQuote } from "../utils/shell.ts";
 import { type ProjectedLeaf, projectLeafDependencies } from "./critical_path.ts";
 
 export interface QueryPredicates {
@@ -70,10 +71,6 @@ function nearestEpic(leaf: ProjectedLeaf): AtlasNode | null {
 
 function epicRef(node: AtlasNode | null): QueryEpicRef | null {
 	return node ? { identifier: node.identifier, title: node.title } : null;
-}
-
-function shellQuote(value: string): string {
-	return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function queryItem(leaf: ProjectedLeaf): QueryItem {

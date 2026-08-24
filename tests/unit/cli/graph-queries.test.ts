@@ -277,3 +277,104 @@ test("a cached answer's provenance footer includes its measured age", async () =
 	expect(out.join("\n")).toMatch(/cached 1[34]m ago/);
 	expect(out.join("\n")).toContain(`fetched ${fetchedAt}`);
 });
+
+/**
+ * `--json` on the five graph verbs.
+ *
+ * `ls`, `count`, `show` and `audit` all emit JSON; these five did not, so
+ * scripting `ready` meant parsing `Ready: 361 of 389` — the flagship number, in
+ * the form most likely to be quoted without its denominator. An inconsistent
+ * surface is worse than a missing feature: a user has no way to predict which
+ * half of it they are in.
+ */
+function completeSource(): GraphSourceResult {
+	const value = emptyGraph();
+	return {
+		provenance: {
+			kind: "cache",
+			project: "JSON Board",
+			projectId: "project-id",
+			baseUrl: "https://plane.example.test",
+			workspaceSlug: "workspace",
+			fetchedAt: new Date().toISOString(),
+			itemCount: 0,
+		},
+		coverage: { kind: "complete" },
+		relationRecovered: 0,
+		requireCompleteGraph: (): AtlasGraph => value,
+		acceptPartialGraph: (): AtlasGraph => value,
+		requireCachedWorkItems: (): readonly never[] => [],
+	};
+}
+
+test("--json emits one parseable document carrying its own provenance", async () => {
+	const out: string[] = [];
+	const ok = await runGraphQueryCommand(
+		"ready",
+		{ json: true },
+		{ resolveGraph: async () => completeSource(), stdout: (m) => out.push(m) },
+	);
+
+	expect(ok).toBe(true);
+	expect(out).toHaveLength(1);
+	const payload = JSON.parse(out[0] as string);
+	expect(payload.kind).toBe("ready");
+	// Provenance INSIDE the payload: the answer cannot be quoted without knowing
+	// which board it came from and how old that state is.
+	expect(payload.provenance).toMatchObject({ project: "JSON Board", kind: "cache" });
+	// The human footer must not leak into a machine document.
+	expect(out[0]).not.toContain("Source:");
+	// The denominators survive, so a script sees them too.
+	expect(payload).toHaveProperty("matched");
+	expect(payload).toHaveProperty("openConsidered");
+});
+
+test("--json on an incomplete sweep writes NOTHING to stdout and fails", async () => {
+	// `| jq` must see an empty document and a non-zero exit, never a partial
+	// answer that happens to parse. The refusal rule, at the machine boundary.
+	const source: GraphSourceResult = {
+		...completeSource(),
+		coverage: { kind: "partial", failures: 2 },
+		requireCompleteGraph(purpose: string): AtlasGraph {
+			throw new IncompleteGraphError({ kind: "partial", failures: 2 }, purpose);
+		},
+	};
+	const out: string[] = [];
+	const err: string[] = [];
+
+	const ok = await runGraphQueryCommand(
+		"ready",
+		{ json: true },
+		{ resolveGraph: async () => source, stdout: (m) => out.push(m), stderr: (m) => err.push(m) },
+	);
+
+	expect(ok).toBe(false);
+	expect(out).toEqual([]);
+	expect(err.join("\n")).toMatch(/incomplete|not fetched/i);
+});
+
+test("every graph verb honours --json, not just ready", async () => {
+	for (const kind of ["ready", "inconsistent", "blocked", "orphans", "abandoned"] as const) {
+		const out: string[] = [];
+		await runGraphQueryCommand(
+			kind,
+			{ json: true },
+			{ resolveGraph: async () => completeSource(), stdout: (m) => out.push(m) },
+		);
+		expect(JSON.parse(out[0] as string).kind).toBe(kind);
+	}
+});
+
+test("without --json the human form is unchanged", async () => {
+	const out: string[] = [];
+	await runGraphQueryCommand(
+		"ready",
+		{},
+		{ resolveGraph: async () => completeSource(), stdout: (m) => out.push(m) },
+	);
+	// Prose plus the human provenance footer — and emphatically not JSON, so a
+	// reader piping without --json cannot mistake one mode for the other.
+	expect(out[0]).toContain("ready items");
+	expect(out[0]).toContain("Source:");
+	expect(() => JSON.parse(out[0] as string)).toThrow();
+});

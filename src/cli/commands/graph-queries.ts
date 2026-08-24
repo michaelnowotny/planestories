@@ -34,6 +34,7 @@ export interface GraphQueryCommandOptions {
 	staleOk?: boolean;
 	epic?: string;
 	limit?: string | number;
+	json?: boolean;
 	/** Refusal text composed from this command's own registered routes. */
 	selectProjectHelp?: string;
 }
@@ -291,6 +292,7 @@ export async function runGraphQueryCommand(
 					staleOk: options.staleOk === true,
 				},
 		dependencies: true,
+		json: options.json === true,
 		selectProjectHelp: options.selectProjectHelp,
 	});
 
@@ -314,7 +316,16 @@ export async function runGraphQueryCommand(
 	}
 
 	const report = buildReport(kind, graph, options);
-	stdout(`${renderGraphQuery(report)}\nSource: ${formatGraphSourceProvenance(source.provenance)}`);
+	// Provenance travels INSIDE the payload in --json mode: stdout stays a single
+	// parseable document, and the answer still cannot be quoted without knowing
+	// which board and how old. The refusal path above prints nothing to stdout in
+	// either mode, so `| jq` sees an empty document and a non-zero exit rather
+	// than a half-answer.
+	stdout(
+		options.json
+			? JSON.stringify({ ...report, provenance: source.provenance }, null, "\t")
+			: `${renderGraphQuery(report)}\nSource: ${formatGraphSourceProvenance(source.provenance)}`,
+	);
 	if (source.client) reportPacing(source.client);
 	return true;
 }
@@ -329,6 +340,7 @@ function addSourceOptions(command: Command): Command {
 		.option("-p, --project <name>", "Project to query (defaults to defaultProject)")
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.option("--refresh", "Re-fetch live and replace the complete local board cache", false)
+		.option("--json", "Emit the same answer as machine-readable JSON", false)
 		.option(
 			"--stale-ok",
 			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
@@ -345,6 +357,7 @@ function action(
 			// take a stories-file argument.
 			const withHelp = {
 				...options,
+				json: options.json === true,
 				selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
 			};
 			if (!(await runGraphQueryCommand(kind, withHelp))) process.exitCode = 1;

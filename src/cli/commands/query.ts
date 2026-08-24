@@ -10,6 +10,7 @@ import {
 	renderListText,
 	validateQueryPredicates,
 } from "../../sync/query.ts";
+import { shellQuote } from "../../utils/shell.ts";
 import { formatGraphSourceProvenance } from "../graph_provenance.ts";
 import { IncompleteGraphError, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
@@ -122,10 +123,6 @@ async function resolveQuery(options: QueryCommandOptions) {
 				"status, metadata, effort, quality, and hierarchy predicates do not depend on relations",
 			);
 	return { source, result: queryStories(graph, queryPredicates, answerRoutes(options)) };
-}
-
-function shellQuote(value: string): string {
-	return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function sourceArguments(options: QueryCommandOptions): string {

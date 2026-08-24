@@ -74,11 +74,15 @@ planestories inconsistent --epic DATA-100           # Done with open blockers; r
 planestories blocked --epic DATA-100                # open work + titled unfinished blockers
 planestories orphans                                # leaf stories outside the dependency graph
 planestories abandoned                              # open leaf work under a cancelled/abandoned epic
+planestories ready --json | jq '.items[0].item'     # every graph verb takes --json
 ```
 
 `ls` / `count` predicates are exactly `--open`, `--status`, `--label`, `--assignee`, `--epic`,
 `--flagged`, `--no-estimate`, and `--blocked`; there is no query grammar. Use `atlas --json` + `jq`
 for anything outside that surface. Both prefer a matching fresh cache and print its age.
+The graph verbs' `--json` carries its own `provenance`; on an incomplete relation sweep they write
+**nothing** to stdout and exit non-zero, so a pipeline sees an empty document, never half an answer.
+
 `audit` requires a fresh matching board cache for its bounded item list; run `board fetch` first.
 It fetches live activity only for cached items whose `updatedAt` is inside the window. The actor is
 the API key's owner (not a distinguishable tool), and comment/relation-only writes may not bump

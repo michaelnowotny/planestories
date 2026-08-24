@@ -18,45 +18,6 @@ The format is loosely [Keep a Changelog](https://keepachangelog.com/); versions 
 
 ---
 
-## [Unreleased]
-
-### Changed — `/rate-userstories` scores DISCRIMINATION, not volume
-
-**This changes verdicts.** A story that passed before may fail now, with no change on your side.
-Read this before your next rating run.
-
-The old rubric — Specificity 30 / Testability 35 / Completeness 25 / Description 10 — was
-**monotonic in writing effort**: adding a criterion, a concrete value, or a paragraph could only
-ever raise the score. A rubric with that property cannot distinguish *writing the right things*
-from *writing more things*, so length was free and dilution was invisible. The case that surfaced
-it: a spec with twenty acceptance criteria produced two defects, and neither was in any of the
-twenty — while scoring close to exemplary.
-
-- **New weights** — Discrimination 30 / Risk Coverage 20 / Testability 20 / Specificity 20 /
-  Description 10.
-- **Every criterion is classified `gate` or `task`** by one question: *describe a build that
-  satisfies every OTHER criterion but fails this one — is that build wrong, or merely unfinished?*
-  Discrimination is `gates/total` and is **non-monotonic: adding a task lowers your score.**
-- **Stories now need an outcome delta** — one sentence saying what is true after this lands that is
-  not true now. Missing or circular caps the story at **75%**, below the pass threshold, mirroring
-  the epic's missing-rationale cap. `templates/user-story.md` and
-  `docs/USER_STORY_FORMAT.md` model it. planestories does not parse the line; the rater and your
-  reviewers enforce it.
-- **`Completeness` is renamed `Risk Coverage`**, because the name was driving the behaviour: the
-  old one asks *have I listed everything*, the new one asks *what could go wrong*.
-- **Three anti-patterns added**, all written in precise confident prose: closed enumeration as
-  coverage, measurement smuggling, restated title.
-
-**What to do about existing stories.** Nothing urgent — this is a rating change, not a format
-change, and every existing file still imports and exports unchanged. When a story next fails, the
-fix is usually to delete tasks rather than add anything. **Never delete a gate to raise a score**;
-if most of your criteria are gates and there are many, the story is too big and wants splitting.
-
-Rationale and the calibration corpus: `docs/RATE_USERSTORIES.md`,
-`docs/RATE_USERSTORIES_CALIBRATION.md`.
-
----
-
 ## [0.6.0] — 2026-08-23
 
 **Neither 0.5.0 nor 0.6.0 has been published to npm** (publishing is interactive — WebAuthn). If you
@@ -82,6 +43,10 @@ once and answers locally, at depths a row filter could not reach.
   `show` went from **2m34s / 885 requests to 0.103s**.
 - **`ls` / `count`** — fixed predicates, AND-composed, no query grammar. A count always prints its
   denominator (`57 open of 69`), because a bare number gets quoted without one.
+- **`--json` on every read command.** The five graph verbs emit the same answer as a single
+  parseable document carrying its own provenance; an incomplete relation sweep writes **nothing** to
+  stdout and exits non-zero, so `| jq` sees an empty document rather than a partial answer that
+  happens to parse.
 - **`ready`** — open items whose blockers are all done, ranked by what each unblocks.
 - **`inconsistent`** — Done items with a non-Done blocker, plus the flip side. The verb that finds a
   *wrong* board rather than a slow one; it found a real one on its first live run.
@@ -123,6 +88,53 @@ once and answers locally, at depths a row filter could not reach.
 - **A parent cycle silently deleted work.** Every member of a cycle has a resolvable parent, so none
   became a root and the whole group vanished from the tree: a two-story file whose stories named
   each other produced `0 of 0 stories`. It now refuses and names the items involved.
+
+
+### Changed — `/rate-userstories` scores DISCRIMINATION, not volume
+
+**This changes verdicts.** A story that passed before may fail now, with no change on your side.
+Read this before your next rating run.
+
+The old rubric — Specificity 30 / Testability 35 / Completeness 25 / Description 10 — was
+**monotonic in writing effort**: adding a criterion, a concrete value, or a paragraph could only
+ever raise the score. A rubric with that property cannot distinguish *writing the right things*
+from *writing more things*, so length was free and dilution was invisible. The case that surfaced
+it: a spec with twenty acceptance criteria produced two defects, and neither was in any of the
+twenty — while scoring close to exemplary.
+
+- **New weights** — Discrimination 30 / Risk Coverage 20 / Testability 20 / Specificity 20 /
+  Description 10.
+- **Every criterion is classified `gate` or `task`** by one question: *describe a build that
+  satisfies every OTHER criterion but fails this one — is that build wrong, or merely unfinished?*
+  Discrimination is `gates/total` and is **non-monotonic: adding a task lowers your score.**
+- **Stories now need an outcome delta** — one sentence saying what is true after this lands that is
+  not true now. Missing or circular caps the story at **75%**, below the pass threshold, mirroring
+  the epic's missing-rationale cap. `templates/user-story.md` and
+  `docs/USER_STORY_FORMAT.md` model it. planestories does not parse the line; the rater and your
+  reviewers enforce it.
+- **`Completeness` is renamed `Risk Coverage`**, because the name was driving the behaviour: the
+  old one asks *have I listed everything*, the new one asks *what could go wrong*.
+- **Three anti-patterns added**, all written in precise confident prose: closed enumeration as
+  coverage, measurement smuggling, restated title.
+
+**What to do about existing stories.** Nothing urgent — this is a rating change, not a format
+change, and every existing file still imports and exports unchanged. When a story next fails, the
+fix is usually to delete tasks rather than add anything. **Never delete a gate to raise a score**;
+if most of your criteria are gates and there are many, the story is too big and wants splitting.
+
+Rationale and the calibration corpus: `docs/RATE_USERSTORIES.md`,
+`docs/RATE_USERSTORIES_CALIBRATION.md`.
+
+### Reliability
+
+- **Every CLI option is now covered by a test that would fail if the option did nothing.** All 251
+  options across every command were audited after `--no-estimate` shipped as a no-op; six structural
+  invariants now run in CI against the real registered program (the stored attribute must be read;
+  no `--no-x` may carry a default; commander's `--no-x` mapping is what every consumer assumes;
+  every option and command exercised). Each invariant was sabotaged and watched fail.
+- `shellQuote` — which builds the commands refusals tell you to run — had three byte-identical
+  private copies and no test. Now one helper, verified by round-tripping values through a real
+  shell.
 
 ### Known limits
 
