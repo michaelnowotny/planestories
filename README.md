@@ -105,14 +105,16 @@ stuck where your data is.
 
 ```bash
 # 1. One paced read -> a versioned, digest-bound snapshot (doubles as a board backup)
-planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json
+planestories replicate snapshot --from cloud -p "Data Platform" \
+  -o ~/plane-replication/data.snapshot.json
 
 # 2. Replay onto any target -- zero source reads, dry-run by default, resumable
-planestories replicate apply --to ce --snapshot data.snapshot.json --yes
+planestories replicate apply --to ce --snapshot ~/plane-replication/data.snapshot.json --yes
 
 # 3. Prove it, field by field
-planestories replicate verify --to ce --snapshot data.snapshot.json
-planestories replicate freshness --from cloud --snapshot data.snapshot.json --deep
+planestories replicate verify --to ce --snapshot ~/plane-replication/data.snapshot.json
+planestories replicate freshness --from cloud \
+  --snapshot ~/plane-replication/data.snapshot.json --deep
 ```
 
 - **Exact ticket numbers.** `PROJECT-123` stays `PROJECT-123` on the target — sequence
@@ -147,18 +149,21 @@ explicit context override is present. See
 
 ### 1. Install
 
-Run directly with `bunx` (no install required):
+The repository describes v0.6.0. Until that version has been published to npm, run it from a
+source checkout:
+
+```bash
+bun install
+bun run src/cli/index.ts import stories/*.md
+```
+
+Once the npm badge above shows `0.6.0`, run it directly or install it globally. You can also build
+a standalone binary from a source checkout:
 
 ```bash
 bunx planestories import stories/*.md
-```
-
-Or install globally / build a binary:
-
-```bash
 bun install -g planestories
-# or build from source:
-bun install
+# from the source checkout:
 bun build src/cli/index.ts --compile --outfile planestories
 ```
 
@@ -174,7 +179,10 @@ PLANE_WORKSPACE_SLUG=your-workspace-slug          # the app.plane.so/<slug>/... 
 
 ### 3. Add non-secret defaults (optional)
 
-Create `.planestoriesrc.json` in your project root for **non-secret** defaults. **Do not put `apiKey` here** — it comes from `.env`.
+Create `.planestoriesrc.json` in your project root for **non-secret local** defaults. Keep it
+gitignored—this repository already does, and other repositories should add it to their `.gitignore`.
+Do not commit it, and **do not put `apiKey` here** — the key comes from `.env`. Committed repository
+lint conventions belong in the separate `.planestories.yml` file.
 
 ```json
 {
@@ -211,12 +219,16 @@ plane_identifier:
 plane_url:
 priority: high
 labels: [Feature, Auth]
-estimate: 3
 assignee: jane@company.com
 status: Backlog
 ```
 
-User should be able to log in with their email and password.
+**Outcome:** after this lands, a returning user with valid credentials reaches the dashboard.
+Today there is no way to authenticate at all.
+
+**Effort:** 3 dev-days
+
+Login uses email and password against the existing identity store.
 
 ### Acceptance Criteria
 
@@ -246,10 +258,14 @@ After a successful import, `plane_id` (the work item UUID), `plane_identifier` (
 | `status` | work item **state** (resolved by name within the project) |
 | `labels` | label UUIDs (resolved by name within the project) |
 | `assignee` | member UUID (resolved by email or display name) |
-| `estimate` | story `point` |
+| `estimate` | Plane's integer story `point` (separate from developer-day effort) |
+| `effort_days` or `**Effort:** N dev-days` | developer-day effort; the body line is authoritative and supports decimals |
 | `plane_id` | work item UUID (used to update) |
 | `plane_hash` | content hash of the last sync (auto-managed) — powers skip-unchanged |
 | `parent` | nests this item under an existing one (`parent: DATA-12`; resolved by identifier) |
+| `blocked_by` / `**Depends on:**` | identifiers of work that must finish first |
+| `blocks` / `**Blocks:**` | identifiers of work this story blocks |
+| `relates_to` | symmetric, non-blocking related-work identifiers |
 | `kind` | `story` / `criterion` / `epic` — informational; emitted by export, read on import |
 | `comment` | optional evidence note posted once (idempotently) on create/update/status change |
 
@@ -291,7 +307,7 @@ Use `--dry-run --check` to validate routing before importing.
 
 On create, planestories stamps each work item with `external_id` (derived from the story title) and `external_source: "planestories"`, then writes `plane_id` back into the file. Re-running the import updates that item **by its `plane_id`** — never duplicating. A story that has **no** `plane_id` but whose title matches an existing item is treated as a duplicate (see below), so a second file can't silently overwrite the first file's work item — link it explicitly with `--adopt-duplicates` (or add the `plane_id`) when that's what you intend.
 
-- **Skip-unchanged.** Each synced story stores a `plane_hash` (a hash of the rendered payload). On re-import, a linked story whose content is unchanged is reported `unchanged` and makes **zero API writes** — so re-importing a large, mostly-static board is cheap. Cosmetic markdown reflow that renders to the same HTML doesn't count as a change. `--force` re-imports regardless. (An edit made in the Plane UI while the file is untouched is intentionally not pulled back by import — use `groom --write-back` to pull acceptance-criteria checkbox state back into files; other board-side edits surface via `export`.)
+- **Skip-unchanged.** Each synced story stores a `plane_hash` (a hash of the rendered payload). On re-import, a linked story whose content is unchanged is reported `unchanged` and makes **zero API writes** — so re-importing a large, mostly-static board is cheap. Cosmetic markdown reflow that renders to the same HTML doesn't count as a change. `--force` re-imports regardless. (An edit made in the Plane UI while the file is untouched is intentionally not pulled back by import. Use `export` to recover current description task-list state; `groom --write-back` is only for legacy `::ac<n>` children.)
 - **Warm export → import.** `export` writes `plane_hash` too, so re-importing an unedited exported file is all-`unchanged` (no blind description rewrites). For files that carry a `plane_id` but no `plane_hash` (legacy or hand-authored), import reconstructs the board item from a single project listing and adopts the hash if the content already matches — one list call, never a per-item fetch.
 - **Duplicate guard.** Before creating a brand-new story, planestories checks whether an item with the **exact same title** already exists in the project (created by anyone). By default it **skips with a warning** (`duplicate of ENG-42 (Backlog)`), so you never get accidental twins. Pass `--adopt-duplicates` to link a single exact match instead (multiple matches are a hard error — set `plane_id` manually), or `--force-create` to create anyway.
 
@@ -309,9 +325,16 @@ needed), so humans can see and filter "what came from planestories" in the Plane
 
 By default, labels that don't exist in the project are **skipped with a warning** (deduped, one line per label). Pass `--create-labels` to create them instead.
 
-### Acceptance criteria as sub-items (`--sync-criteria`)
+### Acceptance criteria: task lists by default
 
-By default a story's `### Acceptance Criteria` checklist is stored in the work item's description. Pass `--sync-criteria` to instead sync **each criterion to a Plane sub-item** (a child work item). A `- [x]` maps to a completed-group state and `- [ ]` to an open state, so ticking a box in markdown moves the sub-item — and `export --sync-criteria` reconstructs the checklist from the sub-items' states. The mapping is idempotent (keyed per criterion), so re-imports update in place.
+By default a story's `### Acceptance Criteria` checklist becomes an interactive task list in the
+parent work item's description. This is the current model: criteria are content, not separate work.
+Plane checkbox state comes back through `export`.
+
+**Deprecated:** `--sync-criteria` retains the legacy model that creates one Plane child work item per
+criterion. It remains only for existing boards that still use those `::ac<n>` children. Do not start
+a new board with it. Use `planestories migrate-criteria --project <name>` to preview folding legacy
+children into their parents; add `--yes` only after reviewing the report.
 
 ## Commands
 
@@ -328,7 +351,7 @@ planestories import <files...> [options]
   -p, --project <name>    Force all stories into this project (overrides frontmatter)
   --create-labels         Create labels that don't exist instead of skipping
   --source-label <name>   Tag every created item with this label (auto-created)
-  --sync-criteria         Sync each acceptance criterion to a Plane sub-item
+  --sync-criteria         DEPRECATED: create one legacy sub-item per criterion
   --status-only           Update ONLY the state of already-linked items (skip unlinked)
   --force                 Re-import even when content is unchanged (bypass skip-unchanged)
   --adopt-duplicates      Link a single exact-title match instead of skipping it
@@ -354,8 +377,10 @@ planestories export [options]
   -a, --assignee <email>    Filter by assignee email
   -l, --label <name>        Filter by label name
   --external-source [src]   Only export items planestories created (default: planestories)
-  --sync-criteria           Reconstruct acceptance criteria from sub-items
+  --sync-criteria           Legacy: reconstruct acceptance criteria from sub-items
   --include-archived        Include items carrying the 'archived' label (excluded by default)
+  --orphans-only            Emit the parentless-story worksheet plus an epic directory
+  --from-snapshot <file>    Export from a snapshot with zero API calls
 ```
 
 Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order. It also emits `parent`/`kind` structure and writes `plane_hash`, so re-importing an unedited exported file is all-`unchanged` (see [Idempotency, skip-unchanged & duplicates](#idempotency-skip-unchanged--duplicates)).
@@ -389,6 +414,7 @@ planestories set <identifiers...> [options]   # e.g. set ENG-12 ENG-13 --status 
   -s, --status <state>    Set the state by name
   --priority <level>      urgent | high | medium | low | none
   -a, --assignee <email>  Set the assignee by email
+  -e, --evidence <note>   Append an idempotent evidence comment (works without a field change)
 ```
 
 ### `delete`
@@ -420,14 +446,27 @@ planestories groom --project <name> [--yes]
 planestories groom --project <name> --write-back stories/*.md [--yes]
 ```
 
-`--write-back <files…>` is a separate, file-only mode: INSTEAD of board grooming, it
-pulls board-side acceptance-criteria checkbox state back into the given story files.
+`--write-back <files…>` is a separate, file-only legacy mode: INSTEAD of board grooming, it
+pulls `::ac<n>` child completion state back into matching checkboxes in the given story files.
 
 - **Closes orphaned criterion sub-items** — an open `--sync-criteria` sub-item whose parent
   is Done/Cancelled is moved to a completed state, with an idempotent "auto-closed with parent"
   comment. **Only planestories criterion sub-items are ever closed** — a real child *story* of
   a done epic is never touched.
 - **Reports** duplicate-title work items and criterion sub-items whose parent no longer exists.
+
+### `migrate-criteria`
+
+Fold legacy `::ac<n>` criterion children into native task-list checkboxes in each parent's
+description. It is board-only, idempotent, and dry-run by default:
+
+```
+planestories migrate-criteria --project <name>             # preview the full migration
+planestories migrate-criteria --project <name> --only DATA-12,DATA-19 --yes
+```
+
+Use `--only` for a deliberate canary, then export the affected corpus so files receive the
+description-owned checkbox state. The legacy children are closed, not deleted.
 
 ### `doctor`
 
@@ -436,15 +475,17 @@ findings** (pass `--no-fail-on-findings` to just report):
 
 ```
 planestories doctor --project <name> [--house-rules]
-planestories doctor --from-snapshot backups/data.ce-archimedes.20260817-052043Z.snapshot.json -p <name>
+planestories doctor --from-snapshot ~/plane-replication/data.snapshot.json -p <name>
 ```
 
 `--house-rules` flags open non-epic stories without a valid `**Effort:** N dev-days` line,
 and open work whose board-authored `Depends on:` / `Blocks:` prose lacks the matching relation.
 
-`--from-snapshot` (also on `atlas`, `export`, `show`, `packet`, `epic`) analyses a snapshot file instead of the live board — **and needs no credentials at all**, so it genuinely works on a laptop with no `.env`: **zero API calls, works
-offline, and possible when the instance is rate-limiting you**. On a 2,558-item board a live
-`doctor` needs ~800 requests and can take many minutes (or fail outright against a throttled
+`--from-snapshot` is also available on `atlas`, `export`, `show`, `packet`, `epic`,
+`critical-path`, `ls`, `count`, and all five graph-query commands. It analyses a snapshot file
+instead of the live board — **and needs no credentials at all**, so it genuinely works on a laptop with no `.env`: **zero API calls, works
+offline, and possible when the instance is rate-limiting you**. On a large board, live `doctor`
+can need hundreds of relation requests and take many minutes (or fail outright against a throttled
 instance); from a snapshot the same analysis takes under a second. The report always states the
 snapshot's age, so a stale answer is never mistaken for a live one — and it makes the nightly
 backups useful for something other than disaster.
@@ -464,7 +505,9 @@ house conventions across the passed fileset (cross-file aware): every non-epic s
 acceptance criteria (inline or a criterion child) **and** an effort value; every epic has a
 `### Why is this needed?` section and no acceptance criteria; dependencies are well-formed (no cycles, no
 self-references; identifiers not in the fileset are flagged as *warnings* since they may live on the
-board); Plane identifiers are unique; no criteria are orphaned; and `parent:` targets resolve to an epic.
+board); nested dependency edges are refused; Plane identifiers are unique; no criteria are
+orphaned; and `parent:` targets resolve to an epic. A repo-local `.planestories.yml` can change
+strictness or explicitly disable named rules; present-but-invalid configuration fails at startup.
 It complements — does not duplicate — `doctor` (board-side) and the `/rate-userstories` skill (LLM
 grading).
 
@@ -477,7 +520,7 @@ it at a stories file *or* a live Plane project:
 ```
 planestories atlas stories/q1-2026.md                       # from a file (offline) -> exports/atlas.html
 planestories atlas --project "Data Platform"                # from the live board -> exports/atlas.html
-planestories atlas --project "Data Platform" --json -o g.json # the same graph as data
+planestories atlas --project "Data Platform" --json -o exports/atlas.json # same graph as data
 ```
 
 Epics are ringed star systems (the ring counts stories and the hub grows with them); stories
@@ -491,8 +534,27 @@ flagged-only. `--json` emits the identical graph (nodes, dependency edges, effor
 status, criteria, and board `createdAt`/`updatedAt` timestamps) for tooling. See
 [docs/ATLAS.md](./docs/ATLAS.md).
 
+Live Atlas reads prefer a fresh matching board cache. `--refresh` bypasses and atomically replaces
+it; `--stale-ok` explicitly accepts a cache older than one hour. `--no-dependencies` skips the
+relation sweep for a faster hierarchy-only picture, but marks dependency coverage as skipped and
+does not publish a numeric dependency floor. `--open` launches the generated artifact in a browser.
+
 > Inspired by Ijonas Kisselbach's Project Atlas in linearstories, rethought for Plane as
 > the cockpit design and shipped as a zero-dependency offline artifact.
+
+### `board fetch`
+
+Populate the identity-bound shared cache explicitly:
+
+```
+planestories board fetch --project "Data Platform"
+```
+
+The cache lives at `.planestories/board.json`, is bound to host + workspace + project, contains a
+complete board and relation sweep, and is published only by atomic replacement. Cached answers
+print their age and refuse after one hour unless `--stale-ok` is given. Any command's `--refresh`
+performs the same complete publication—even `abandoned --refresh`, although ordinary `abandoned`
+does not need relations for its own answer.
 
 ### `show`
 
@@ -503,12 +565,29 @@ description body; use `packet` when you need the full implementable brief.
 ```
 planestories show DATA-123
 planestories show DATA-123 --json
-planestories show DATA-123 --from-snapshot data.snapshot.json
+planestories show DATA-123 --from-snapshot ~/plane-replication/data.snapshot.json
 ```
 
 An unknown identifier exits non-zero and names the board searched, so `show` is safe to use as
 an existence guard in a script. Every answer states its board provenance; snapshot JSON also
 embeds the snapshot timestamp.
+
+### `packet` and `epic`
+
+`packet` emits the implementable artifact to hand a coding agent: description, acceptance criteria
+with board state, dependencies and counterpart status, effort, parent, and planning references. An
+epic target includes every descendant, including nested epics. `epic` is the compact management
+rollup over those descendants.
+
+```
+planestories packet DATA-123
+planestories packet DATA-100 -o exports/DATA-100-packet.md
+planestories epic DATA-100
+```
+
+Both accept `--from-snapshot` for a credential-free offline answer. `packet` writes to stdout unless
+`-o` is supplied; `epic` reports status breakdown, completion percentage, total effort with the
+unestimated count, and blocked/blocking leaves.
 
 ### `ls` and `count`
 
@@ -528,6 +607,25 @@ Available predicates are `--open`, `--status`, `--label`, `--assignee`, `--epic`
 selected set as theirs. A missing `--epic` identifier exits non-zero. Both commands print board
 provenance and cache age, and `--blocked` refuses unless dependency coverage is complete. For a
 predicate outside this intentionally small surface, use `atlas --json` with `jq`.
+
+### `ready`, `inconsistent`, `blocked`, `orphans`, and `abandoned`
+
+These are complete-graph board questions. They prefer the shared cache, accept `--from-snapshot`,
+`--refresh`, `--stale-ok`, and `--json`, and refuse rather than answer from partial dependency
+coverage when their verdict depends on relations.
+
+```
+planestories ready --epic DATA-100 --limit 10       # unblocked open work, leverage-ranked
+planestories inconsistent --epic DATA-100           # Done with open blockers; ready but not started
+planestories blocked --epic DATA-100                # open work plus unfinished blockers
+planestories orphans                                # leaves outside the blocking graph
+planestories abandoned                              # open leaves under abandoned/cancelled epics
+```
+
+`ready`, `inconsistent`, and `blocked` need complete relations. `orphans` also needs relations to
+prove isolation. `abandoned` needs only hierarchy for an ordinary answer, while its `--refresh`
+still fetches relations because refresh publishes the shared cache used by every other command.
+
 ### `audit`
 
 Answer “where did my writes land?” from a bounded cache-plus-live read. The cache supplies the
@@ -556,7 +654,7 @@ one number a dependency graph exists to reveal.
 ```
 planestories critical-path stories/q1-2026.md            # offline, from a file
 planestories critical-path --project "Data Platform"     # from the live board
-planestories critical-path --from-snapshot data.snapshot.json --json
+planestories critical-path --from-snapshot ~/plane-replication/data.snapshot.json --json
 ```
 
 It prints the chain in order, each item's effort, per-item **slack** (how long something off the
@@ -583,8 +681,9 @@ total remaining effort and not a delivery date.
 Board health over time, from a directory of snapshots — offline, no API calls:
 
 ```
-planestories trend --dir backups            # every *.snapshot.json in there
-planestories trend a.snapshot.json b.snapshot.json --json
+planestories trend --dir ~/plane-replication/backups # every *.snapshot.json in there
+planestories trend ~/plane-replication/a.snapshot.json \
+  ~/plane-replication/b.snapshot.json --json
 ```
 
 Stories, done/open split, flagged count, dependency edges and unestimated work, one row per
@@ -597,7 +696,8 @@ What structurally changed between two snapshots — dependencies appearing and v
 moving between epics, status and effort changes:
 
 ```
-planestories diff before.snapshot.json after.snapshot.json
+planestories diff ~/plane-replication/before.snapshot.json \
+  ~/plane-replication/after.snapshot.json
 ```
 
 Identity is the **human identifier**, never the internal UUID: replication mints new UUIDs for
@@ -612,13 +712,17 @@ direction, and no notion of one side being right.
 Migrate a whole project between Plane instances with exact `PROJECT-N` preservation:
 
 ```
-planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json
-planestories replicate backup --from cloud -p "Data Platform" --dir backups --retain 14
-planestories replicate apply --to ce --snapshot data.snapshot.json          # dry-run
-planestories replicate apply --to ce --snapshot data.snapshot.json --yes    # real, journaled, resumable
-planestories replicate verify --to ce --snapshot data.snapshot.json         # field-complete gate
-planestories replicate freshness --from cloud --snapshot data.snapshot.json --deep
-planestories replicate relink --to ce --snapshot data.snapshot.json --yes stories/
+planestories replicate snapshot --from cloud -p "Data Platform" \
+  -o ~/plane-replication/data.snapshot.json
+planestories replicate backup --from cloud -p "Data Platform" \
+  --dir ~/plane-replication/backups --retain 14
+planestories replicate apply --to ce --snapshot ~/plane-replication/data.snapshot.json       # dry-run
+planestories replicate apply --to ce --snapshot ~/plane-replication/data.snapshot.json --yes # apply
+planestories replicate verify --to ce --snapshot ~/plane-replication/data.snapshot.json
+planestories replicate freshness --from cloud \
+  --snapshot ~/plane-replication/data.snapshot.json --deep
+planestories replicate relink --to ce --snapshot ~/plane-replication/data.snapshot.json \
+  --yes stories/
 planestories rename-project --context ce --project OLDID --identifier NEWID --yes
 ```
 
@@ -631,7 +735,8 @@ scheduled-backup recipe in [`docs/REPLICATE.md`](docs/REPLICATE.md).
 
 ## Rating story quality — `/rate-userstories`
 
-planestories ships a Claude Code skill that reviews a story file *before* you import it. Run it in any Claude Code session:
+A source checkout includes a project-local Claude Code command that reviews a story file *before*
+you import it. Open Claude Code in this repository and run:
 
 ```
 /rate-userstories stories/q1-2026.md
@@ -643,9 +748,18 @@ It classifies each issue (epic / user story), validates structure and epic→chi
 
 > Adapted from linearstories' `/rate-userstories` skill; the epic-aware upgrade follows an enhancement by Ijonas Kisselbach.
 
+The npm CLI package does not install project-local Claude commands into other repositories. Copy or
+adapt [`.claude/commands/rate-userstories.md`](./.claude/commands/rate-userstories.md) when you want
+the command elsewhere; the CLI itself does not require Claude Code.
+
 ## Reliability
 
-Every Plane API call retries transient failures automatically — HTTP 429 (honoring `Retry-After`), 5xx, and network blips — with exponential backoff plus jitter (capped at 30s). So a large bulk import or close won't fall over on a rate limit. Tune the retry budget with `PLANE_MAX_RETRIES` (default `5`; `0` disables). After the retries are exhausted the error surfaces, and per-story failures never abort the run — the summary lists the failed items.
+Ordinary Plane API reads and idempotent writes retry classified transient failures automatically —
+HTTP 429 (honoring `Retry-After`), 5xx, and network blips — with exponential backoff plus jitter
+(capped at 30s). Tune the retry budget with `PLANE_MAX_RETRIES` (default `5`; `0` disables). Import
+reports per-story failures in its summary instead of hiding earlier successes. Replication creates
+are deliberately stricter: blind retry is disabled after an ambiguous write, and durable state is
+reconciled before any replay that could duplicate an item or consume the wrong ticket number.
 
 ## Self-hosting
 

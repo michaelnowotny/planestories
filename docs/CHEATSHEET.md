@@ -19,31 +19,37 @@ Examples use the installed binary. From a checkout, substitute
 | **`import`** | pushes content file → board, and only what actually changed (content hash) |
 | **`export` / `groom --write-back`** | bring completion state board → file |
 
-A story is an `##` heading, an optional ```yaml``` block, a body, and `### Acceptance Criteria`
-checkboxes. **Every `##` heading is a work item** — never mix design notes into a stories file.
+A story is a structural `##` heading outside code, an optional ```yaml``` block, a body, and
+`### Acceptance Criteria` checkboxes. **Every such H2 heading is a work item** — never mix design
+notes into a stories file.
 
 ---
 
 ## Everyday
 
 ```bash
-planestories import stories/q1.md                  # create/update; unchanged stories cost 0 writes
+planestories import stories/q1.md                  # create/update; task-list AC; unchanged = 0 writes
 planestories import stories/q1.md --dry-run        # field-level diff of what WOULD change
 planestories import stories/q1.md --dry-run --check # + validation findings, no board reads beyond one index
 planestories import stories/q1.md --status-only    # bulk state transitions only
-planestories import stories/q1.md --sync-criteria  # criteria as task-list items in the description
+planestories import stories/q1.md --sync-criteria  # DEPRECATED: one legacy child per criterion
 
 planestories export --project "Data Platform" -o exports/board.md
 planestories export --open-only                   # skip completed/cancelled
 planestories export --status "In Progress" --status Todo
+planestories export --orphans-only -o exports/orphan-worksheet.md
 
 planestories set DATA-12 --status "In Progress"
 planestories set DATA-12 --evidence "abc123; p95 200ms -> 80ms"   # idempotent, append-only
 planestories projects                              # identifier + name for --project
+planestories delete stories/q1.md                  # scoped plan only; no deletion yet
+planestories delete stories/q1.md --yes            # apply and clear plane_* from the files
 ```
 
 `import` writes `plane_id` / `plane_identifier` / `plane_url` / `plane_hash` back into the file.
 `plane_hash` is what makes a re-import nearly free — `--force` overrides it.
+The default criteria task list is the current model. Use `migrate-criteria` to fold old `::ac<n>`
+children; do not start a new board with `--sync-criteria`.
 
 ## Read the board
 
@@ -51,7 +57,7 @@ planestories projects                              # identifier + name for --pro
 planestories board fetch --project "Data Platform" # one sweep -> .planestories/board.json
 planestories atlas --project "Data Platform"       # -> exports/atlas.html (offline, self-contained)
 planestories atlas stories/q1.md                   # from a file, no credentials
-planestories atlas --project X --json -o g.json    # the same graph, as data
+planestories atlas --project X --json -o exports/atlas.json # the same graph, as data
 planestories atlas --project X --no-dependencies   # skip the relation sweep (faster; NOT "no deps")
 planestories atlas --project X --refresh           # bypass + atomically replace the matching cache
 planestories atlas --project X --stale-ok          # explicitly accept a cache older than 1h
@@ -82,6 +88,8 @@ planestories ready --json | jq '.items[0].item'     # every graph verb takes --j
 for anything outside that surface. Both prefer a matching fresh cache and print its age.
 The graph verbs' `--json` carries its own `provenance`; on an incomplete relation sweep they write
 **nothing** to stdout and exit non-zero, so a pipeline sees an empty document, never half an answer.
+Ordinary `abandoned` needs hierarchy, not relations. `abandoned --refresh` still performs the full
+relation sweep because refresh publishes the shared cache that dependency commands read next.
 
 `audit` requires a fresh matching board cache for its bounded item list; run `board fetch` first.
 It fetches live activity only for cached items whose `updatedAt` is inside the window. The actor is
@@ -91,14 +99,14 @@ the API key's owner (not a distinguishable tool), and comment/relation-only writ
 ## Health & hygiene
 
 ```bash
-planestories lint stories/*.md                     # offline, 10 mechanical rules; strict by default
+planestories lint stories/*.md                     # offline, 12 mechanical rules; strict by default
 planestories lint stories/*.md --warn-only         # downgrade to warnings, exit 0
 planestories capabilities --context ce             # read-only deployment feature/dialect probe
 planestories capabilities --context ce --json      # the same measured result for scripts
 planestories doctor --project X                    # board rot; non-zero on findings (CI gate)
 planestories doctor --project X --house-rules      # + missing Effort, prose deps with no relation
 planestories groom --project X                     # close orphaned criterion sub-items (dry-run default)
-planestories groom --write-back stories/q1.md      # board → file checkbox sync, in place
+planestories groom --write-back stories/q1.md      # legacy ::ac<n> state → file checkboxes
 planestories migrate-criteria --project X          # fold legacy ::ac<n> children into the description
 ```
 
@@ -108,13 +116,17 @@ a flag.
 ## Replication & backup
 
 ```bash
-planestories replicate snapshot --from cloud -p "Data Platform" -o data.snapshot.json
-planestories replicate backup   --from cloud -p "Data Platform" --dir backups --retain 14
-planestories replicate apply    --to ce --snapshot data.snapshot.json           # dry-run
-planestories replicate apply    --to ce --snapshot data.snapshot.json --yes     # journaled, resumable
-planestories replicate verify   --to ce --snapshot data.snapshot.json           # the cutover gate
-planestories replicate freshness --from cloud --snapshot data.snapshot.json --deep
-planestories replicate relink   --to ce --snapshot data.snapshot.json --yes stories/
+planestories replicate snapshot --from cloud -p "Data Platform" \
+  -o ~/plane-replication/data.snapshot.json
+planestories replicate backup   --from cloud -p "Data Platform" \
+  --dir ~/plane-replication/backups --retain 14
+planestories replicate apply    --to ce --snapshot ~/plane-replication/data.snapshot.json       # dry-run
+planestories replicate apply    --to ce --snapshot ~/plane-replication/data.snapshot.json --yes # apply
+planestories replicate verify   --to ce --snapshot ~/plane-replication/data.snapshot.json
+planestories replicate freshness --from cloud \
+  --snapshot ~/plane-replication/data.snapshot.json --deep
+planestories replicate relink   --to ce --snapshot ~/plane-replication/data.snapshot.json \
+  --yes stories/
 planestories rename-project --context ce --project OLDID --identifier NEWID --yes
 ```
 
@@ -124,17 +136,21 @@ this one refuses, because it writes an entire project into whichever one it pick
 Snapshots are also the input to the offline analysis commands:
 
 ```bash
-planestories trend --dir backups                   # board health over time, zero API calls
-planestories diff before.snapshot.json after.snapshot.json
-planestories critical-path --from-snapshot data.snapshot.json
+planestories trend --dir ~/plane-replication/backups # board health over time, zero API calls
+planestories diff ~/plane-replication/before.snapshot.json \
+  ~/plane-replication/after.snapshot.json
+planestories critical-path --from-snapshot ~/plane-replication/data.snapshot.json
 ```
+
+Keep every snapshot, journal, verification report, and backup directory outside the repository.
+These are board data, not build output.
 
 ---
 
 ## Choosing an installation (contexts)
 
 ```jsonc
-// .planestoriesrc.json — committed, NON-secret defaults only
+// .planestoriesrc.json — add to .gitignore; NON-secret local defaults only
 {
   "defaultContext": "ce",
   "contexts": [
@@ -195,6 +211,8 @@ comment: "deployed abc123"    # idempotent evidence note
 
 **Effort:** 2.5 dev-days
 
+**Outcome:** after this lands, the operator can identify a stalled subsystem during the pass.
+
 Body text — the narrative. This is what gets hashed.
 
 ### Acceptance Criteria
@@ -211,7 +229,7 @@ too — they are not just prose.
 ## Deployment differences
 
 **Community Edition has no server-side work-item filtering** — no PQL, no `count_work_items`. Pull
-the board once (`atlas --json`) and query locally. Relations live under `/work-items/` on CE and
+the board once (`board fetch`) and query locally. Relations live under `/work-items/` on CE and
 `/issues/` on Cloud; planestories detects that relation dialect read-only. Run
 `planestories capabilities` for measured support/absence on the configured deployment. Details and
 reproductions: [`PLANE_CAPABILITIES.md`](./PLANE_CAPABILITIES.md).
@@ -229,7 +247,9 @@ reproductions: [`PLANE_CAPABILITIES.md`](./PLANE_CAPABILITIES.md).
   complete `--from-snapshot <file>`; missing edges never become ready/clean findings.
 - **`exports/` is gitignored, and board content belongs there.** It is data, not build output — a
   `git add -A` after a smoke run once committed 49,258 lines of live board content.
-- **Never commit credentials.** Committed config holds non-secret defaults; keys live in `.env`.
+- **Never commit credentials or local connection context.** Keys live in `.env`, and
+  `.planestoriesrc.json` should be gitignored. Only repo conventions in `.planestories.yml` are
+  committed.
 - **Live-test against a sandbox project**, never a production board.
 
 ## Exit codes
