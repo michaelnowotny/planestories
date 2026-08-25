@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { type Command, Option } from "commander";
+import type { AtlasGraph } from "../../atlas/model.ts";
 import { ParentCycleError } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import {
@@ -13,7 +14,7 @@ import {
 } from "../../sync/query.ts";
 import { shellQuote } from "../../utils/shell.ts";
 import { formatGraphSourceProvenance } from "../graph_provenance.ts";
-import { IncompleteGraphError, resolveGraph } from "../graph_source.ts";
+import { type GraphSourceResult, IncompleteGraphError, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
 import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
@@ -96,6 +97,26 @@ function withSelectProjectHelp(
 	return { ...options, selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)) };
 }
 
+/**
+ * Which completeness contract this predicate SET requires.
+ *
+ * `--blocked` is the only predicate that reads relations; the rest are
+ * answerable from hierarchy and metadata, so demanding a complete sweep for them
+ * would refuse perfectly good questions. Exported as its own seam because the
+ * graph verbs have a test that they refuse a partial sweep and `ls`/`count` did
+ * not — nothing would have noticed if this decision inverted.
+ */
+export function graphForPredicates(
+	source: Pick<GraphSourceResult, "requireCompleteGraph" | "acceptPartialGraph">,
+	predicates: QueryPredicates,
+): AtlasGraph {
+	return predicates.blocked
+		? source.requireCompleteGraph("the --blocked predicate")
+		: source.acceptPartialGraph(
+				"status, metadata, effort, quality, and hierarchy predicates do not depend on relations",
+			);
+}
+
 async function resolveQuery(options: QueryCommandOptions) {
 	const queryPredicates = predicates(options);
 	validateQueryPredicates(queryPredicates);
@@ -118,11 +139,7 @@ async function resolveQuery(options: QueryCommandOptions) {
 		json: options.json === true,
 		selectProjectHelp: options.selectProjectHelp,
 	});
-	const graph = options.blocked
-		? source.requireCompleteGraph("the --blocked predicate")
-		: source.acceptPartialGraph(
-				"status, metadata, effort, quality, and hierarchy predicates do not depend on relations",
-			);
+	const graph = graphForPredicates(source, queryPredicates);
 	return { source, result: queryStories(graph, queryPredicates, answerRoutes(options)) };
 }
 

@@ -1,7 +1,9 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AtlasGraph } from "../../../src/atlas/model.ts";
+import { graphForPredicates } from "../../../src/cli/commands/query.ts";
 import { computeSnapshotDigest, serializeSnapshot } from "../../../src/replicate/snapshot.ts";
 import { sampleSnapshot } from "../replicate/fixtures.ts";
 
@@ -215,5 +217,67 @@ test("ls and count help expose only the fixed predicate surface", () => {
 			}
 			expect(result.out).not.toContain("--query");
 		}
+	});
+});
+
+/**
+ * `--blocked` is the one `ls`/`count` predicate that reads RELATIONS — the rest
+ * are answerable from hierarchy and metadata alone.
+ *
+ * The graph verbs have a test that they refuse a partial sweep; `ls`/`count` did
+ * not, so nothing would have noticed if this decision inverted and `--blocked`
+ * started answering from a graph with missing edges. A dependency answer
+ * computed from edges nobody fetched is worse than none.
+ */
+describe("ls/count completeness contract", () => {
+	const stub = (): {
+		required: string[];
+		accepted: string[];
+		requireCompleteGraph: (p: string) => AtlasGraph;
+		acceptPartialGraph: (r: string) => AtlasGraph;
+	} => {
+		const required: string[] = [];
+		const accepted: string[] = [];
+		return {
+			required,
+			accepted,
+			requireCompleteGraph: (purpose: string) => {
+				required.push(purpose);
+				return {} as AtlasGraph;
+			},
+			acceptPartialGraph: (reason: string) => {
+				accepted.push(reason);
+				return {} as AtlasGraph;
+			},
+		};
+	};
+
+	test("--blocked DEMANDS a complete sweep, and names why", () => {
+		const source = stub();
+		graphForPredicates(source, { blocked: true });
+		expect(source.required).toEqual(["the --blocked predicate"]);
+		expect(source.accepted).toEqual([]);
+	});
+
+	test.each([
+		["open", { open: true }],
+		["status", { status: "Todo" }],
+		["label", { label: "x" }],
+		["epic", { epic: "P-1" }],
+		["no-estimate", { noEstimate: true }],
+		["flagged", { flagged: true }],
+	])("--%s accepts a partial sweep, because it reads no relations", (_name, predicates) => {
+		const source = stub();
+		graphForPredicates(source, predicates);
+		expect(source.required).toEqual([]);
+		expect(source.accepted).toHaveLength(1);
+	});
+
+	test("--blocked combined with a metadata predicate still demands completeness", () => {
+		// The strictest requirement in the set wins; an added filter must not
+		// downgrade it.
+		const source = stub();
+		graphForPredicates(source, { blocked: true, open: true, label: "x" });
+		expect(source.required).toEqual(["the --blocked predicate"]);
 	});
 });

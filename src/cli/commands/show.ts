@@ -72,7 +72,20 @@ export function registerShowCommand(program: Command) {
 				const graph = source.acceptPartialGraph(
 					"a one-item summary remains useful when it labels incomplete relation coverage",
 				);
-				const item = buildShowItem(graph, identifier, source.coverage);
+				// A "not found" that names only the project is ambiguous when the same
+				// project name exists on two instances — which is the exact confusion
+				// the Cloud/CE cutover produced. Name where we looked.
+				let item: ReturnType<typeof buildShowItem>;
+				try {
+					item = buildShowItem(graph, identifier, source.coverage);
+				} catch (error) {
+					if (error instanceof ConfigError) {
+						throw new ConfigError(
+							`${error.message} Searched ${formatGraphSourceProvenance(source.provenance)}.`,
+						);
+					}
+					throw error;
+				}
 
 				if (options.json) {
 					process.stdout.write(

@@ -185,8 +185,20 @@ export function renderGraphQuery(report: GraphQueryReport): string {
 					report.items.length === report.matched
 						? `${report.matched}`
 						: `${report.items.length} of ${report.matched}`;
+				// Split GATED from vacuous. On a sparsely-linked board most open work
+				// is "ready" only because nothing was ever declared to block it, and a
+				// bare `Ready: 361 of 389` gets quoted as though 361 items had been
+				// unblocked by someone's work. Both numbers are true; only together
+				// are they honest.
+				//
+				// Deliberately NOT a narrowing of the set: an item with no
+				// prerequisite genuinely is ready, and excluding it would invent
+				// policy and make `ready ∩ orphans` a matter of taste.
+				const gated = report.items.filter((entry) => entry.blockers.length > 0).length;
+				const vacuous = report.items.length - gated;
 				lines.push(
-					`Ready: ${shown} item(s) from ${report.openConsidered} open${scopeSuffix(report.scope)}`,
+					`Ready: ${shown} item(s) from ${report.openConsidered} open${scopeSuffix(report.scope)}` +
+						` — ${gated} with prerequisites now met, ${vacuous} with none declared`,
 				);
 				for (const entry of report.items) {
 					lines.push(`  ${itemLine(entry.item)} · unblocks ${entry.unblocks.length} item(s)`);
