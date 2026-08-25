@@ -89,7 +89,19 @@ export function peerCheckboxLineIndices(lines: readonly string[]): number[] {
 	for (const [i, line] of lines.entries()) {
 		if (fenced[i]) continue;
 		const marker = /^([\t ]*)([-*+]|\d+[.)])(\s+)/.exec(line);
-		if (!marker) continue;
+		if (!marker) {
+			// A non-list line CLOSES any container it has outdented past — a
+			// paragraph at column 0 ends the list above it. Without this the stack
+			// kept stale containers, so a later legal top-level checklist was read
+			// as nested inside a list that had already ended. Indented continuation
+			// lines pop nothing, which is what keeps a criterion's detail lines
+			// attached to it.
+			if (line.trim() !== "") {
+				const textIndent = indentWidth(line);
+				while (open.length > 0 && (open.at(-1) as number) > textIndent) open.pop();
+			}
+			continue;
+		}
 		const indent = indentWidth(marker[1] ?? "");
 		// Close every container this line has outdented past.
 		while (open.length > 0 && (open.at(-1) as number) > indent) open.pop();
@@ -236,8 +248,20 @@ function parseBody(body: string): ParsedBody {
 	// parser disagreed on a two-level nested list, so a nested task became a
 	// criterion here while write-back numbered around it.
 	const acStart = headingIndex + firstHeadingLength;
+	// Stop at the NEXT heading before classifying. Classifying everything after
+	// the AC heading meant a nested checkbox in a later section — an ordinary
+	// `### Testing Notes` with a sub-list — was read as a nested acceptance
+	// criterion and refused the whole story.
+	const acFence = markdownFenceMask(lines);
+	let acEnd = lines.length;
+	for (let i = acStart; i < lines.length; i++) {
+		if (!acFence[i] && ANY_HEADING.test((lines[i] as string).trim())) {
+			acEnd = i;
+			break;
+		}
+	}
 	const peerLines = new Set(
-		peerCheckboxLineIndices(lines.slice(acStart)).map((rel) => acStart + rel),
+		peerCheckboxLineIndices(lines.slice(acStart, acEnd)).map((rel) => acStart + rel),
 	);
 	let suffixStart = lines.length;
 	for (let i = headingIndex + firstHeadingLength; i < lines.length; i++) {

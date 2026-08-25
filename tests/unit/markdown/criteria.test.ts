@@ -371,3 +371,54 @@ test("splitBody and the classifier are ONE implementation, not two that agree", 
 	expect(() => peerCheckboxLineIndices(lines)).toThrow();
 	expect(() => splitBody(["Body.", "", "### Acceptance Criteria", ...lines].join("\n"))).toThrow();
 });
+
+/**
+ * Two regressions the container stack introduced, both from ordinary markdown.
+ */
+test("a nested checkbox in a LATER section is not an acceptance criterion", () => {
+	// Classification ran over everything after the AC heading, so a sub-list in
+	// `### Testing Notes` refused the whole story — in import preflight, lint,
+	// atlas and hashing alike.
+	const body = [
+		"Body.",
+		"",
+		"### Acceptance Criteria",
+		"- [ ] ship it",
+		"",
+		"### Testing Notes",
+		"- browser cases",
+		"  - [ ] Safari",
+	].join("\n");
+	expect(splitBody(body).criteria.map((c) => c.text)).toEqual(["ship it"]);
+});
+
+test("a paragraph ends the list, so a later checklist is top-level again", () => {
+	// The stack kept containers open across a paragraph, so this legal checklist
+	// was read as nested inside a list that had already terminated.
+	const body = [
+		"Body.",
+		"",
+		"### Acceptance Criteria",
+		"- category",
+		"  - subcategory",
+		"",
+		"Paragraph breaks the list.",
+		"",
+		"  - [ ] criterion",
+	].join("\n");
+	expect(splitBody(body).criteria.map((c) => c.text)).toEqual(["criterion"]);
+});
+
+test("an indented continuation line does NOT end its criterion", () => {
+	// The other side of the same rule: popping on any non-list line would detach
+	// a criterion's own detail lines.
+	const body = [
+		"Body.",
+		"",
+		"### Acceptance Criteria",
+		"- [ ] first",
+		"  a detail belonging to first",
+		"- [ ] second",
+	].join("\n");
+	expect(splitBody(body).criteria.map((c) => c.text)).toEqual(["first", "second"]);
+});

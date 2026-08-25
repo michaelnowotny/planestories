@@ -309,7 +309,14 @@ export async function runGraphQueryCommand(
 		// relations for it is wasted work — and DEMANDING them (below) made an
 		// ordinary failed relation GET refuse an answer the fetched hierarchy
 		// already contained. The pure query was corrected; the CLI still asked.
-		dependencies: kind !== "abandoned",
+		// `abandoned` reads hierarchy and ancestor status only, so it neither
+		// fetches nor requires relations — EXCEPT under --refresh, which publishes
+		// the shared board cache that every other command reads. A cache written
+		// without relations would make the next `ready` refuse. Skipping that
+		// clause made `abandoned --refresh` fail outright, complaining about
+		// --no-dependencies, a flag the user never passed — and the stale-cache
+		// refusal recommends --refresh, so following our own advice hit it.
+		dependencies: kind !== "abandoned" || options.refresh === true,
 		json: options.json === true,
 		selectProjectHelp: options.selectProjectHelp,
 	});

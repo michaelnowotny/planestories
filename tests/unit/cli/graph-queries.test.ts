@@ -413,3 +413,65 @@ test("abandoned ANSWERS from a partial sweep, because it reads no edges", async 
 	expect(ok).toBe(true);
 	expect(out.join("\n")).toContain("Abandoned-parent work");
 });
+
+test("abandoned --refresh publishes a COMPLETE cache rather than failing", async () => {
+	// The P0: `abandoned` was told to skip relations, and --refresh rejects that
+	// combination — so `abandoned --refresh` died complaining about
+	// --no-dependencies, a flag the user never passed. Worse, the stale-cache
+	// refusal RECOMMENDS --refresh, so following our own advice hit it.
+	//
+	// A refresh publishes the cache every other command reads, so it must fetch
+	// relations even for the one verb that does not need them.
+	const seen: Array<{ dependencies?: boolean; refresh?: boolean }> = [];
+	const value = emptyGraph();
+	await runGraphQueryCommand(
+		"abandoned",
+		{ refresh: true },
+		{
+			resolveGraph: async (options) => {
+				seen.push({
+					dependencies: options.dependencies,
+					refresh: options.boardCache?.refresh,
+				});
+				return {
+					provenance: { kind: "live", project: "P", baseUrl: "https://x.test", workspaceSlug: "w" },
+					coverage: { kind: "complete" },
+					relationRecovered: 0,
+					requireCompleteGraph: (): AtlasGraph => value,
+					acceptPartialGraph: (): AtlasGraph => value,
+					requireCachedWorkItems: (): readonly never[] => [],
+				};
+			},
+			stdout: () => {},
+		},
+	);
+
+	expect(seen[0]?.refresh).toBe(true);
+	// Relations ARE fetched under refresh — otherwise the published cache would
+	// make the next `ready` refuse.
+	expect(seen[0]?.dependencies).toBe(true);
+});
+
+test("abandoned WITHOUT --refresh still skips the relation sweep", async () => {
+	const seen: Array<boolean | undefined> = [];
+	const value = emptyGraph();
+	await runGraphQueryCommand(
+		"abandoned",
+		{},
+		{
+			resolveGraph: async (options) => {
+				seen.push(options.dependencies);
+				return {
+					provenance: { kind: "live", project: "P", baseUrl: "https://x.test", workspaceSlug: "w" },
+					coverage: { kind: "complete" },
+					relationRecovered: 0,
+					requireCompleteGraph: (): AtlasGraph => value,
+					acceptPartialGraph: (): AtlasGraph => value,
+					requireCachedWorkItems: (): readonly never[] => [],
+				};
+			},
+			stdout: () => {},
+		},
+	);
+	expect(seen[0]).toBe(false);
+});
