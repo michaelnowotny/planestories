@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	buildAcceptanceCriteria,
 	joinBody,
+	peerCheckboxLineIndices,
 	spliceAcceptanceCriteria,
 	splitBody,
 } from "../../../src/markdown/criteria.ts";
@@ -279,5 +280,50 @@ describe("criteria nesting follows list structure", () => {
 		expect(() =>
 			withCriteria(["### Acceptance Criteria", "1. ordered bullet", "   - [ ] inside it"]),
 		).toThrow(/nested checkbox/i);
+	});
+});
+
+/**
+ * `splitBody` and `groom --write-back` must agree on WHICH checkboxes are
+ * criteria, because `::ac1` means "the second peer criterion" to one of them and
+ * indexes lines for the other.
+ *
+ * They did not. Write-back counted every matching line, so a nested checkbox
+ * shifted the numbering and `::ac1` could tick the wrong box — writing a state
+ * onto someone's board that nobody asked for. Widening CHECKBOX_LINE to accept
+ * legally-indented lists made it worse: indented checkboxes previously did not
+ * match at all, so write-back skipped them by accident.
+ *
+ * One classifier now. This pins that they cannot drift apart again.
+ */
+describe("the peer-checkbox classifier is shared", () => {
+	const cases: Array<[string, string[]]> = [
+		["flat", ["- [ ] one", "- [x] two"]],
+		["indented list", ["  - [ ] one", "  - [ ] two"]],
+		["detail lines", ["- [ ] one", "  a detail", "- [ ] two"]],
+		["nested under a bullet", ["- bullet", "  - [ ] inside", "- [ ] peer"]],
+		["fenced example", ["- [ ] real", "```md", "- [ ] fake", "```", "- [ ] also real"]],
+		["mixed peer indents", ["  - [ ] a", "- [ ] b", " - [ ] c"]],
+	];
+
+	test.each(cases)("%s: the two agree on the criteria set", (_name, lines) => {
+		const peers = peerCheckboxLineIndices(lines);
+		let parsed: ReturnType<typeof splitBody> | null = null;
+		try {
+			parsed = splitBody(["Body.", "", "### Acceptance Criteria", ...lines].join("\n"));
+		} catch {
+			// A refused structure is agreement of a different kind: the classifier
+			// must not silently hand write-back a set that parsing rejects.
+			parsed = null;
+		}
+		if (parsed === null) return;
+		expect(peers).toHaveLength(parsed.criteria.length);
+		for (const [n, index] of peers.entries()) {
+			expect(lines[index]).toContain(parsed.criteria[n]?.text ?? "");
+		}
+	});
+
+	test("a fenced checkbox is never a peer", () => {
+		expect(peerCheckboxLineIndices(["```md", "- [ ] fake", "```"])).toEqual([]);
 	});
 });

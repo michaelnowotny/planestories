@@ -59,6 +59,40 @@ export const AC_HEADING = /^#{1,6}\s+acceptance criteria\s*#*\s*$/i;
  */
 export const CHECKBOX_LINE = /^([\t ]*[-*]\s+)\[([ xX])\](\s+.*)$/;
 
+/**
+ * The indices of lines that are PEER acceptance criteria, within an already
+ * isolated criteria section.
+ *
+ * THE shared classifier. `splitBody` decides peer-vs-nested while parsing;
+ * `groom --write-back` has to make the identical decision when it numbers
+ * checkboxes to tick, and it was making a different one — it counted every
+ * matching line. So `::ac1` could tick a checkbox nested under a bullet instead
+ * of the second real criterion, writing the wrong state onto someone's board.
+ *
+ * Widening CHECKBOX_LINE to accept legally-indented lists made that worse:
+ * indented checkboxes previously did not match at all, so write-back skipped
+ * them by accident. Two callers deciding the same thing separately is what this
+ * exists to stop.
+ */
+export function peerCheckboxLineIndices(lines: readonly string[]): number[] {
+	const fenced = markdownFenceMask([...lines]);
+	const peers: number[] = [];
+	let enclosing: number | null = null;
+	for (const [i, line] of lines.entries()) {
+		if (fenced[i]) continue;
+		const marker = /^([\t ]*)([-*+]|\d+[.)])(\s+)/.exec(line);
+		const checkbox = line.match(CHECKBOX_LINE);
+		if (checkbox) {
+			if (enclosing !== null && indentWidth(line) >= enclosing) continue;
+			peers.push(i);
+			enclosing = contentColumn(marker);
+			continue;
+		}
+		if (marker) enclosing = contentColumn(marker);
+	}
+	return peers;
+}
+
 /** CommonMark content column of a list item: marker indent + marker + following spaces. */
 function contentColumn(marker: RegExpExecArray | null): number | null {
 	if (!marker) return null;

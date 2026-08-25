@@ -269,16 +269,25 @@ describe("lint filesets and modes", () => {
 			"epic.md",
 			story("Shared epic", ["kind: epic", "plane_identifier: APP-1"], WHY),
 		);
+		// The blocker is a SIBLING, not the parent. This fixture used to declare
+		// `blocked_by: [APP-1]` alongside `parent: APP-1` — which is the nested
+		// dependency the graph commands now refuse to project, so the test would
+		// have been defending a state the tool rejects. The intent here is
+		// cross-FILE resolution; the nesting was incidental to it.
+		const sibling = writeMarkdown(
+			"sibling.md",
+			story("Cross-file sibling", ["plane_identifier: APP-3"], `${EFFORT}\n\n${CRITERIA}`),
+		);
 		const child = writeMarkdown(
 			"child.md",
 			story(
 				"Cross-file child",
-				["plane_identifier: APP-2", "parent: APP-1", "blocked_by: [APP-1]"],
+				["plane_identifier: APP-2", "parent: APP-1", "blocked_by: [APP-3]"],
 				`${EFFORT}\n\n${CRITERIA}`,
 			),
 		);
 
-		const report = await lintFiles([child, epic]);
+		const report = await lintFiles([child, epic, sibling]);
 
 		expect(report.findings).toEqual([]);
 	});
@@ -427,5 +436,65 @@ describe("unparseable files", () => {
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
+	});
+});
+
+/**
+ * We refuse to READ a nested dependency edge; we must also refuse to WRITE one.
+ *
+ * The dependency verbs decline to answer once such an edge exists, but
+ * planestories would happily create it: `parent: EPIC-1` plus
+ * `blocked_by: [EPIC-1]` passed lint, and Plane's API accepts it (verified —
+ * HTTP 201 on a sandbox). A tool that declines to read a state it will write is
+ * incoherent. This is the other half.
+ */
+describe("dependency-nested", () => {
+	test("a child blocked by its own parent is a finding", async () => {
+		const epic = writeMarkdown("e.md", story("Epic", ["kind: epic", "plane_identifier: N-1"], WHY));
+		const child = writeMarkdown(
+			"c.md",
+			story(
+				"Child",
+				["plane_identifier: N-2", "parent: N-1", "blocked_by: [N-1]"],
+				`${EFFORT}\n\n${CRITERIA}`,
+			),
+		);
+		const report = await lintFiles([child, epic]);
+		const nested = report.findings.filter((f) => f.rule === "dependency-nested");
+		expect(nested).toHaveLength(1);
+		expect(nested[0]?.message).toContain("N-1");
+		expect(nested[0]?.message).toMatch(/remove the relation|re-parent/i);
+	});
+
+	test("a GRANDparent counts too — the whole chain, not just one hop", async () => {
+		const root = writeMarkdown("r.md", story("Root", ["kind: epic", "plane_identifier: N-1"], WHY));
+		const mid = writeMarkdown(
+			"m.md",
+			story("Mid", ["kind: epic", "plane_identifier: N-2", "parent: N-1"], WHY),
+		);
+		const leaf = writeMarkdown(
+			"l.md",
+			story(
+				"Leaf",
+				["plane_identifier: N-3", "parent: N-2", "blocks: [N-1]"],
+				`${EFFORT}\n\n${CRITERIA}`,
+			),
+		);
+		const report = await lintFiles([leaf, mid, root]);
+		expect(report.findings.filter((f) => f.rule === "dependency-nested")).toHaveLength(1);
+	});
+
+	test("an ordinary sibling dependency is NOT a finding", async () => {
+		// The rule must not spread to the relations people actually want.
+		const a = writeMarkdown(
+			"a.md",
+			story("A", ["plane_identifier: N-9"], `${EFFORT}\n\n${CRITERIA}`),
+		);
+		const b = writeMarkdown(
+			"b.md",
+			story("B", ["plane_identifier: N-8", "blocked_by: [N-9]"], `${EFFORT}\n\n${CRITERIA}`),
+		);
+		const report = await lintFiles([a, b]);
+		expect(report.findings.filter((f) => f.rule === "dependency-nested")).toEqual([]);
 	});
 });

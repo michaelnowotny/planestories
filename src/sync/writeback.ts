@@ -5,6 +5,7 @@ import {
 	checkboxState,
 	checkboxText,
 	isHeadingLine,
+	peerCheckboxLineIndices,
 	setCheckboxMark,
 } from "../markdown/criteria.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
@@ -127,15 +128,28 @@ export function applyCheckboxStates(
 		const acIdx = bodyLine + acRel;
 		const title = (lines[start] as string).replace(/^## /, "").trim();
 
-		let pos = 0;
+		// Numbering must agree with `splitBody` EXACTLY — `::ac1` means the second
+		// peer criterion, and counting every checkbox line would tick a nested one
+		// instead. One shared classifier, not two implementations of the same idea.
+		let acEnd = sectionLines.length;
 		for (let j = acIdx + 1; j < sectionLines.length; j++) {
+			if (isHeadingLine(sectionLines[j] as string)) {
+				acEnd = j;
+				break;
+			}
+		}
+		const acBody = sectionLines.slice(acIdx + 1, acEnd);
+		const peers = new Set(peerCheckboxLineIndices(acBody).map((rel) => acIdx + 1 + rel));
+
+		let pos = 0;
+		for (let j = acIdx + 1; j < acEnd; j++) {
 			const rel = sectionLines[j] as string;
-			if (isHeadingLine(rel)) {
-				break; // next section — criteria numbering ends here (matches splitBody)
+			if (!peers.has(j)) {
+				continue; // nested content, or not a checkbox at all
 			}
 			const current = checkboxState(rel);
 			if (current === null) {
-				continue; // non-checkbox line inside the AC block
+				continue;
 			}
 			if (desired.has(pos)) {
 				const want = desired.get(pos) as boolean;

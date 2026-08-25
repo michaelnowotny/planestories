@@ -17,7 +17,9 @@ export type LintRule =
 	| "orphan-criterion"
 	| "bad-parent"
 	/** The file could not be parsed at all — reported rather than crashing the run. */
-	| "unparseable-file";
+	| "unparseable-file"
+	/** A `blocked_by`/`blocks` between an item and its own parent chain. */
+	| "dependency-nested";
 
 export interface LintStory {
 	filePath: string;
@@ -150,6 +152,59 @@ export function checkDependencySelfReference(context: RuleContext): LintFinding[
 				entry.story.relationValidationErrors?.join("; ") ?? "A work item cannot reference itself.",
 			),
 		);
+}
+
+/**
+ * A dependency between an item and its own ancestor or descendant, caught at
+ * AUTHORING time.
+ *
+ * The dependency verbs already refuse to answer once such an edge exists,
+ * because it cannot be projected onto leaves without inventing constraints
+ * nobody declared. But planestories would happily CREATE one from a story file:
+ * `parent: EPIC-1` plus `blocked_by: [EPIC-1]` passed lint, and Plane's API
+ * accepts it (verified — HTTP 201). A tool that declines to read a state it will
+ * write is incoherent; this closes the other half.
+ */
+export function checkDependencyNested(context: RuleContext): LintFinding[] {
+	const parentOf = new Map<string, string>();
+	for (const entry of context.stories) {
+		const id = entry.story.planeIdentifier?.trim().toUpperCase();
+		const parent = entry.story.parent?.trim().toUpperCase();
+		if (id && parent) parentOf.set(id, parent);
+	}
+	const ancestors = (id: string): Set<string> => {
+		const seen = new Set<string>();
+		let cursor = parentOf.get(id);
+		while (cursor && !seen.has(cursor)) {
+			seen.add(cursor);
+			cursor = parentOf.get(cursor);
+		}
+		return seen;
+	};
+
+	const findings: LintFinding[] = [];
+	for (const entry of context.stories) {
+		const id = entry.story.planeIdentifier?.trim().toUpperCase();
+		if (!id) continue;
+		const up = ancestors(id);
+		const related = [...(entry.story.blockedBy ?? []), ...(entry.story.blocks ?? [])].map((value) =>
+			value.trim().toUpperCase(),
+		);
+		for (const other of related) {
+			const nested = up.has(other) || ancestors(other).has(id);
+			if (!nested) continue;
+			findings.push(
+				error(
+					entry,
+					"dependency-nested",
+					`${id} declares a dependency on ${other}, which is in its own parent chain. ` +
+						"Such a relation cannot be read as a schedule constraint — expanding it would invent constraints between siblings — so the dependency commands refuse to answer once it exists. " +
+						"Remove the relation, or re-parent one of the two.",
+				),
+			);
+		}
+	}
+	return findings;
 }
 
 interface DependencyGraph {
@@ -419,6 +474,7 @@ export function runLintRules(stories: readonly LintStory[]): LintFinding[] {
 		...checkEpicMissingWhy(context),
 		...checkEpicHasAcceptanceCriteria(context),
 		...checkDependencySelfReference(context),
+		...checkDependencyNested(context),
 		...checkDependencyCycles(context),
 		...checkDuplicateIdentifiers(context),
 		...checkDanglingReferences(context),
