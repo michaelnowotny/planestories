@@ -363,3 +363,53 @@ describe("critical path", () => {
 		expect(result.consideredLeaves).toBe(1);
 	});
 });
+
+/**
+ * The other expansion cases. The rule was argued and one case pinned; review's
+ * point is that "argued" is not "tested", and the cases most likely to be wrong
+ * are the ones neither of us listed.
+ */
+describe("epic edge expansion — the cases nobody listed", () => {
+	const kid = (id: string) => story(id, id, 1);
+
+	test("sibling epics sharing an ancestor expand across DISJOINT leaf sets", () => {
+		const a = story("A", "A", null, { kind: "epic", children: [kid("A1"), kid("A2")] });
+		const b = story("B", "B", null, { kind: "epic", children: [kid("B1")] });
+		const root = story("R", "R", null, { kind: "epic", children: [a, b] });
+		const result = computeCriticalPath(
+			graph([root], [{ source: "A", target: "B", type: "blocks" }]),
+		);
+		// Neither endpoint contains the other, so this is a real cross-subtree
+		// constraint and must expand.
+		// `ok` must be narrowed before the figure can be read — the union exists so
+		// a refusal cannot be mistaken for a zero.
+		if (!result.ok) throw new Error("expected a schedule");
+		expect(result.connectedLeaves).toBeGreaterThan(0);
+	});
+
+	test("a leaf blocking its OWN parent epic is refused, like the reverse", () => {
+		// The mirror image of the case that was pinned. Same defect, opposite
+		// direction, and an implementation could easily handle only one.
+		const epic = story("E", "E", null, { kind: "epic", children: [kid("M1"), kid("M2")] });
+		expect(() =>
+			computeCriticalPath(graph([epic], [{ source: "M1", target: "E", type: "blocks" }])),
+		).toThrow(NestedDependencyError);
+	});
+
+	test("an ordinary diamond keeps correct scheduling", () => {
+		// A -> B, A -> C, B -> D, C -> D. Nothing nested; the floor is the longest
+		// path, not the sum.
+		const nodes = ["A", "B", "C", "D"].map(kid);
+		const result = computeCriticalPath(
+			graph(nodes, [
+				{ source: "A", target: "B", type: "blocks" },
+				{ source: "A", target: "C", type: "blocks" },
+				{ source: "B", target: "D", type: "blocks" },
+				{ source: "C", target: "D", type: "blocks" },
+			]),
+		);
+		if (!result.ok) throw new Error("expected a schedule");
+		// Three hops of 1 dev-day each, not four: B and C run in parallel.
+		expect(result.totalDays).toBe(3);
+	});
+});

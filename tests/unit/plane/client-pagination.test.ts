@@ -227,7 +227,12 @@ describe("PlaneClient.listAll pagination integrity", () => {
 		const error = await rejectedBy(makeClient().listWorkItems("project-1"));
 
 		expect(error).toBeInstanceOf(PlaneApiError);
-		expect((error as Error).message).toContain("maximum of 100 pages");
+		expect((error as Error).message).toContain("exceeded 100 pages");
+		// The cap is a runaway-cursor backstop, but it becomes a product limit for a
+		// big board — so the message must name the size AND the way out, or it reads
+		// like a bug in planestories rather than a boundary.
+		expect((error as Error).message).toContain("10000 items");
+		expect((error as Error).message).toContain("PLANESTORIES_MAX_LIST_PAGES");
 		expect((error as Error).message).toContain("/projects/project-1/issues/");
 		expect(calls).toBe(100);
 	});

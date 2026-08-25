@@ -289,10 +289,13 @@ export async function takeSnapshot(
 
 		// The one failure this feature cannot afford: a sweep that "succeeds" for
 		// every item while parsing nothing, producing a file that LOOKS like a
-		// complete archive and is empty. `listAll` returns `[]` for any envelope it
-		// does not recognize, so a response shape we have not seen degrades to
-		// silence rather than an error — and this runs ONCE, before a source
-		// instance is retired.
+		// complete archive and is empty.
+		//
+		// `listAll` now REFUSES an envelope it does not recognize rather than
+		// returning `[]`, so the original motivation — an unseen response shape
+		// degrading to silence — is gone. This backstop stays anyway: it catches a
+		// well-formed but genuinely empty sweep, and this runs ONCE, before a
+		// source instance is retired.
 		//
 		// Board-wide zero is the tell. A single item with no activity is ordinary;
 		// a whole project of items that have never been created, edited or moved is

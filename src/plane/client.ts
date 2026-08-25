@@ -28,6 +28,12 @@ const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
 /** Full re-walks allowed when the board mutates mid-pagination. */
 const LIST_CONSISTENCY_ATTEMPTS = 3;
+/**
+ * Runaway-cursor backstop, not a product limit — but it becomes one for a board
+ * past this size, so it is overridable and its error says so. A fixed cap whose
+ * message names neither the number nor the way out reads like a bug.
+ */
+const MAX_LIST_PAGES = Number(process.env.PLANESTORIES_MAX_LIST_PAGES ?? 100);
 /** Marker prefix identifying a mid-walk board change (retryable) vs a protocol fault (not). */
 const BOARD_CHURN = "Plane board changed during pagination:";
 function isBoardChurnError(error: PlaneApiError): boolean {
@@ -42,8 +48,6 @@ export const DEFAULT_MAX_RETRIES = 5;
 export const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 /** Upper bound on any single backoff delay, so a large Retry-After or high attempt can't stall forever. */
 export const DEFAULT_MAX_RETRY_DELAY_MS = 30_000;
-/** 100 items/page permits 10,000 items, well above the measured ~2,700-item board. */
-const MAX_LIST_PAGES = 100;
 
 export interface PlaneClientOptions {
 	apiKey: string;
@@ -452,7 +456,9 @@ export class PlaneClient {
 
 			if (cursor !== undefined && pageCount >= MAX_LIST_PAGES) {
 				throw new PlaneApiError(
-					`Plane API list endpoint ${path} exceeded the maximum of ${MAX_LIST_PAGES} pages`,
+					`Plane API list endpoint ${path} exceeded ${MAX_LIST_PAGES} pages (~${MAX_LIST_PAGES * 100} items). ` +
+						"Either this project is larger than planestories currently supports in one sweep, or the server is returning a cursor that never terminates. " +
+						"Both look identical from here, which is why this is a refusal rather than a truncated list: check the project's item count, and raise PLANESTORIES_MAX_LIST_PAGES if it is genuinely that large.",
 				);
 			}
 		} while (cursor);

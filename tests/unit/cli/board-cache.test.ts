@@ -801,3 +801,38 @@ describe("cached read commands — real CLI cache wiring", () => {
 		expect(result.out).toContain("--project");
 	});
 });
+
+/**
+ * The clock-skew allowance on `fetchedAt`, pinned.
+ *
+ * A future `fetchedAt` used to clamp to age 0, making such a cache permanently
+ * fresh and defeating the staleness limit, `StaleBoardCacheError` and
+ * `--stale-ok` in one line. It is rejected now — but with ZERO tolerance a cache
+ * written two seconds ago on a marginally fast clock is discarded as corrupt,
+ * forcing a full 885-request refetch.
+ *
+ * Review's point, and it is the house rule: the existing far-future test would
+ * still pass if the allowance were reverted to zero, so it does not pin the
+ * allowance at all. This does.
+ */
+describe("board cache clock skew", () => {
+	// Reuse the file's own builder rather than hand-rolling a fixture: an
+	// incomplete one fails on a DIFFERENT validation and would have "passed" this
+	// test for the wrong reason.
+	const at = (msFromNow: number) =>
+		serializeBoardCache(cache({ fetchedAt: new Date(Date.now() + msFromNow).toISOString() }));
+
+	test("a cache seconds ahead of this clock is STILL USABLE", () => {
+		// Writer and reader are different processes and may be on different clocks.
+		for (const secondsAhead of [1, 2, 30, 90]) {
+			expect(
+				() => parseBoardCache(at(secondsAhead * 1000)),
+				`${secondsAhead}s ahead`,
+			).not.toThrow();
+		}
+	});
+
+	test("a cache well beyond the allowance is refused as corrupt", () => {
+		expect(() => parseBoardCache(at(10 * 60_000))).toThrow(/future/i);
+	});
+});

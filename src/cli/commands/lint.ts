@@ -22,6 +22,8 @@ function handleError(error: unknown): never {
 }
 
 function storyLabel(finding: LintFinding): string {
+	// A file-level finding (the file would not parse) has no story to name.
+	if (!finding.story) return "(whole file)";
 	return finding.story.planeIdentifier
 		? `${finding.story.title} / ${finding.story.planeIdentifier}`
 		: finding.story.title;

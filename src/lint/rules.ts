@@ -15,7 +15,9 @@ export type LintRule =
 	| "duplicate-identifier"
 	| "dangling-reference"
 	| "orphan-criterion"
-	| "bad-parent";
+	| "bad-parent"
+	/** The file could not be parsed at all — reported rather than crashing the run. */
+	| "unparseable-file";
 
 export interface LintStory {
 	filePath: string;
@@ -24,7 +26,8 @@ export interface LintStory {
 
 export interface LintFinding {
 	filePath: string;
-	story: UserStory;
+	/** Null when the finding is about the FILE, not a story inside it. */
+	story: UserStory | null;
 	severity: LintSeverity;
 	rule: LintRule;
 	message: string;

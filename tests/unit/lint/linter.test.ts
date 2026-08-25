@@ -158,7 +158,7 @@ describe("lint rules", () => {
 		const report = await lintFiles([file]);
 
 		expect(rules(report)).toEqual(["duplicate-identifier", "duplicate-identifier"]);
-		expect(report.findings.map((finding) => finding.story.title)).toEqual(["First", "Second"]);
+		expect(report.findings.map((finding) => finding.story?.title)).toEqual(["First", "Second"]);
 	});
 
 	test("dangling-reference is warning-only under strict defaults", async () => {
@@ -307,7 +307,7 @@ describe("lint filesets and modes", () => {
 		const report = await lintFiles([parent, references]);
 
 		expect(rules(report)).toEqual(["dangling-reference"]);
-		expect(report.findings[0]?.story.title).toBe("Case-mismatched parent");
+		expect(report.findings[0]?.story?.title).toBe("Case-mismatched parent");
 		expect(report.findings[0]?.message).toContain("parent references APP-1");
 	});
 
@@ -378,5 +378,54 @@ describe("lint filesets and modes", () => {
 		});
 
 		expect(runLintRules(stories)).toEqual([]);
+	});
+});
+
+/**
+ * A file that will not parse is a FINDING, not a crash.
+ *
+ * `lint` is the offline structural checker and a CI gate. A raw ParseError gave
+ * a bare message with no file attached, and stopped at the first bad file — so a
+ * run over twenty files reported one of them and exited zero.
+ */
+describe("unparseable files", () => {
+	const nested = [
+		"---",
+		'project: "P"',
+		"---",
+		"",
+		"## As a user, I want a thing, so that I benefit",
+		"",
+		"Body text long enough to be meaningful.",
+		"",
+		"### Acceptance Criteria",
+		"- [ ] parent",
+		"  - [ ] child",
+		"",
+	].join("\n");
+
+	test("reports the file instead of throwing, and keeps linting the others", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "lint-unparseable-"));
+		try {
+			const bad = join(dir, "bad.md");
+			const good = join(dir, "good.md");
+			writeFileSync(bad, nested);
+			writeFileSync(
+				good,
+				["---", 'project: "P"', "---", "", "## Just a heading", "", "x"].join("\n"),
+			);
+
+			const report = await lintFiles([bad, good]);
+
+			const unparseable = report.findings.filter((f) => f.rule === "unparseable-file");
+			expect(unparseable).toHaveLength(1);
+			expect(unparseable[0]?.filePath).toBe(bad);
+			expect(unparseable[0]?.story).toBeNull();
+			// The good file was still linted — the run did not stop at the bad one.
+			expect(report.files).toHaveLength(2);
+			expect(report.errors).toBeGreaterThan(0);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
