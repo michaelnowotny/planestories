@@ -12,6 +12,7 @@ import {
 	renderListText,
 	validateQueryPredicates,
 } from "../../sync/query.ts";
+import { planQueryGraph, requirementForStoryPredicates } from "../../sync/query_requirements.ts";
 import { shellQuote } from "../../utils/shell.ts";
 import { formatGraphSourceProvenance } from "../graph_provenance.ts";
 import { type GraphSourceResult, IncompleteGraphError, resolveGraph } from "../graph_source.ts";
@@ -110,19 +111,18 @@ export function graphForPredicates(
 	source: Pick<GraphSourceResult, "requireCompleteGraph" | "acceptPartialGraph">,
 	predicates: QueryPredicates,
 ): AtlasGraph {
-	return predicates.blocked
-		? source.requireCompleteGraph("the --blocked predicate")
-		: source.acceptPartialGraph(
-				"status, metadata, effort, quality, and hierarchy predicates do not depend on relations",
-			);
+	const plan = planQueryGraph(requirementForStoryPredicates(predicates));
+	return plan.requireComplete
+		? source.requireCompleteGraph(plan.purpose)
+		: source.acceptPartialGraph(plan.partialReason);
 }
 
 async function resolveQuery(options: QueryCommandOptions) {
 	const queryPredicates = predicates(options);
 	validateQueryPredicates(queryPredicates);
-	// A relation sweep is needed only for --blocked, except that --refresh always
-	// publishes a complete cache and therefore must fetch relations too.
-	const dependencies = options.blocked === true || options.refresh === true;
+	const plan = planQueryGraph(requirementForStoryPredicates(queryPredicates), {
+		refresh: options.refresh,
+	});
 	const source = await resolveGraph({
 		config: options.config,
 		context: options.context,
@@ -133,9 +133,9 @@ async function resolveQuery(options: QueryCommandOptions) {
 			: {
 					refresh: options.refresh === true,
 					staleOk: options.staleOk === true,
-					writeRequired: options.refresh === true,
+					writeRequired: plan.writeRequired,
 				},
-		dependencies,
+		dependencies: plan.dependencies,
 		json: options.json === true,
 		selectProjectHelp: options.selectProjectHelp,
 	});

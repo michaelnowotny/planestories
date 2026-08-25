@@ -538,7 +538,9 @@ describe("resolveGraph — board cache source", () => {
 		};
 		const messages = { log: [] as string[], warn: [] as string[] };
 
-		expect(resolveCached(fake, messages, { refresh: true, writeRequired: true })).rejects.toThrow(
+		// The source itself must enforce refresh publication even if a caller
+		// accidentally omits the planner's reinforcing writeRequired assertion.
+		expect(resolveCached(fake, messages, { refresh: true })).rejects.toThrow(
 			/cache.*not.*written|not.*write.*cache/i,
 		);
 		expect(readFileSync(cachePath, "utf8")).toBe(before);

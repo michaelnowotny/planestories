@@ -13,6 +13,11 @@ import {
 	queryOrphans,
 	queryReady,
 } from "../../sync/graph_queries.ts";
+import {
+	type GraphQueryKind,
+	planQueryGraph,
+	requirementForGraphQuery,
+} from "../../sync/query_requirements.ts";
 import { formatGraphSourceProvenance } from "../graph_provenance.ts";
 import {
 	type GraphSourceOptions,
@@ -24,7 +29,7 @@ import { reportPacing } from "../pacing.ts";
 import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
 
-export type GraphQueryKind = "ready" | "inconsistent" | "blocked" | "orphans" | "abandoned";
+export type { GraphQueryKind } from "../../sync/query_requirements.ts";
 
 export interface GraphQueryCommandOptions {
 	config?: string;
@@ -61,21 +66,6 @@ function handleError(error: unknown): void {
 		console.error(chalk.red(`Error: ${String(error)}`));
 	}
 	process.exitCode = 1;
-}
-
-function purpose(kind: GraphQueryKind): string {
-	switch (kind) {
-		case "ready":
-			return "ready work";
-		case "inconsistent":
-			return "board consistency";
-		case "blocked":
-			return "blocked work";
-		case "orphans":
-			return "dependency orphans";
-		case "abandoned":
-			return "abandoned work";
-	}
 }
 
 function parseLimit(value: string | number | undefined): number | undefined {
@@ -294,6 +284,7 @@ export async function runGraphQueryCommand(
 	const resolve = runtime.resolveGraph ?? resolveGraph;
 	const stdout = runtime.stdout ?? ((message: string) => console.log(message));
 	const stderr = runtime.stderr ?? ((message: string) => console.error(message));
+	const plan = planQueryGraph(requirementForGraphQuery(kind), { refresh: options.refresh });
 	const source = await resolve({
 		config: options.config,
 		context: options.context,
@@ -304,29 +295,18 @@ export async function runGraphQueryCommand(
 			: {
 					refresh: options.refresh === true,
 					staleOk: options.staleOk === true,
+					writeRequired: plan.writeRequired,
 				},
-		// `abandoned` reads hierarchy and ancestor status only, so fetching
-		// relations for it is wasted work — and DEMANDING them (below) made an
-		// ordinary failed relation GET refuse an answer the fetched hierarchy
-		// already contained. The pure query was corrected; the CLI still asked.
-		// `abandoned` reads hierarchy and ancestor status only, so it neither
-		// fetches nor requires relations — EXCEPT under --refresh, which publishes
-		// the shared board cache that every other command reads. A cache written
-		// without relations would make the next `ready` refuse. Skipping that
-		// clause made `abandoned --refresh` fail outright, complaining about
-		// --no-dependencies, a flag the user never passed — and the stale-cache
-		// refusal recommends --refresh, so following our own advice hit it.
-		dependencies: kind !== "abandoned" || options.refresh === true,
+		dependencies: plan.dependencies,
 		json: options.json === true,
 		selectProjectHelp: options.selectProjectHelp,
 	});
 
 	let graph: AtlasGraph;
 	try {
-		graph =
-			kind === "abandoned"
-				? source.acceptPartialGraph("abandoned reads hierarchy and ancestor status, not edges")
-				: source.requireCompleteGraph(purpose(kind));
+		graph = plan.requireComplete
+			? source.requireCompleteGraph(plan.purpose)
+			: source.acceptPartialGraph(plan.partialReason);
 	} catch (error) {
 		if (!(error instanceof IncompleteGraphError)) throw error;
 		stderr(chalk.red(error.message));

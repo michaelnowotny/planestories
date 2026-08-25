@@ -1,11 +1,9 @@
 import matter from "gray-matter";
 import { ConfigError } from "../errors.ts";
 import {
-	acHeadingIndex,
 	checkboxState,
 	checkboxText,
-	isHeadingLine,
-	peerCheckboxLineIndices,
+	classifyAcceptanceCriteriaLines,
 	setCheckboxMark,
 } from "../markdown/criteria.ts";
 import { parseMarkdownFile } from "../markdown/parser.ts";
@@ -121,35 +119,25 @@ export function applyCheckboxStates(
 
 		const { start, end, bodyLine } = section;
 		const sectionLines = lines.slice(start, end);
-		const acRel = acHeadingIndex(sectionLines.slice(bodyLine));
-		if (acRel === -1) {
+		const classification = classifyAcceptanceCriteriaLines(sectionLines.slice(bodyLine));
+		if (classification.headingIndex === -1) {
 			continue;
 		}
-		const acIdx = bodyLine + acRel;
 		const title = (lines[start] as string).replace(/^## /, "").trim();
 
 		// Numbering must agree with `splitBody` EXACTLY — `::ac1` means the second
 		// peer criterion, and counting every checkbox line would tick a nested one
-		// instead. One shared classifier, not two implementations of the same idea.
-		let acEnd = sectionLines.length;
-		for (let j = acIdx + 1; j < sectionLines.length; j++) {
-			if (isHeadingLine(sectionLines[j] as string)) {
-				acEnd = j;
-				break;
-			}
-		}
-		const acBody = sectionLines.slice(acIdx + 1, acEnd);
-		const peers = new Set(peerCheckboxLineIndices(acBody).map((rel) => acIdx + 1 + rel));
+		// instead. The complete section verdict (heading, next heading, peers) is
+		// shared — write-back no longer reconstructs any of those boundaries.
+		const peers = classification.peerCheckboxLineIndices.map((rel) => bodyLine + rel);
 
-		let pos = 0;
-		for (let j = acIdx + 1; j < acEnd; j++) {
+		for (const [pos, j] of peers.entries()) {
 			const rel = sectionLines[j] as string;
-			if (!peers.has(j)) {
-				continue; // nested content, or not a checkbox at all
-			}
 			const current = checkboxState(rel);
 			if (current === null) {
-				continue;
+				throw new ConfigError(
+					`${title}: parsed criterion line ${j + 1} could not be mapped back to its checkbox; left unchanged`,
+				);
 			}
 			if (desired.has(pos)) {
 				const want = desired.get(pos) as boolean;
@@ -169,7 +157,6 @@ export function applyCheckboxStates(
 					}
 				}
 			}
-			pos++;
 		}
 	}
 

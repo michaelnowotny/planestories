@@ -7,6 +7,7 @@ import {
 	type ProjectedLeaf,
 	projectLeafDependencies,
 } from "./critical_path.ts";
+import { type GraphQueryKind, requirementForGraphQuery } from "./query_requirements.ts";
 
 const OPEN_GROUPS = new Set<StatusGroup>(["backlog", "unstarted", "started"]);
 const NOT_STARTED_GROUPS = new Set<StatusGroup>(["backlog", "unstarted"]);
@@ -152,12 +153,13 @@ function defaultRoutes(graph: AtlasGraph): GraphQueryAnswerRoutes {
 }
 
 function queryScope(
+	kind: Exclude<GraphQueryKind, "orphans" | "abandoned">,
 	graph: AtlasGraph,
 	options: ScopedQueryOptions,
 	routes?: GraphQueryAnswerRoutes,
 ): QueryScope {
 	const projection = projectLeafDependencies(graph);
-	refuseNestedEdges(projection);
+	if (requirementForGraphQuery(kind).relations === "required") refuseNestedEdges(projection);
 	if (options.epic === undefined) {
 		return { projection, candidates: [...projection.leaves.values()], scope: null };
 	}
@@ -228,7 +230,7 @@ export function queryReady(
 	if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit <= 0)) {
 		throw new ConfigError(`--limit must be a positive integer, got "${String(options.limit)}".`);
 	}
-	const { projection, candidates, scope } = queryScope(graph, options, routes);
+	const { projection, candidates, scope } = queryScope("ready", graph, options, routes);
 	const open = candidates.filter(isOpen);
 	const unknownStatus = candidates.filter((leaf) => leaf.node.statusGroup === "unknown").length;
 	const items: ReadyQueryItem[] = [];
@@ -270,7 +272,7 @@ export function queryInconsistent(
 	options: ScopedQueryOptions = {},
 	routes?: GraphQueryAnswerRoutes,
 ): InconsistentQueryReport {
-	const { projection, candidates, scope } = queryScope(graph, options, routes);
+	const { projection, candidates, scope } = queryScope("inconsistent", graph, options, routes);
 	const doneWithUnfinishedBlockers: BlockedQueryItem[] = [];
 	const notStartedWithDoneBlockers: BlockedQueryItem[] = [];
 
@@ -310,7 +312,7 @@ export function queryBlocked(
 	options: ScopedQueryOptions = {},
 	routes?: GraphQueryAnswerRoutes,
 ): BlockedQueryReport {
-	const { projection, candidates, scope } = queryScope(graph, options, routes);
+	const { projection, candidates, scope } = queryScope("blocked", graph, options, routes);
 	const open = candidates.filter(isOpen);
 	const items = open.flatMap((leaf) => {
 		const unfinishedIds = unfinishedPredecessors(projection, leaf.node.id);
@@ -330,7 +332,7 @@ export function queryBlocked(
 
 export function queryOrphans(graph: AtlasGraph): OrphansQueryReport {
 	const projection = projectLeafDependencies(graph);
-	refuseNestedEdges(projection);
+	if (requirementForGraphQuery("orphans").relations === "required") refuseNestedEdges(projection);
 	const items = [...projection.leaves.values()]
 		.filter((leaf) => !projection.connected.has(leaf.node.id))
 		.map((leaf) => ({ item: ref(leaf.node) }));
@@ -346,6 +348,9 @@ export function queryAbandoned(graph: AtlasGraph): AbandonedQueryReport {
 	// `orphans` keeps the refusal: its definition is connectivity, so a dropped
 	// edge is exactly what would make an item look unconnected.
 	const projection = projectLeafDependencies(graph);
+	if (requirementForGraphQuery("abandoned").relations === "required") {
+		refuseNestedEdges(projection);
+	}
 	const leaves = [...projection.leaves.values()];
 	const open = leaves.filter(isOpen);
 	const items: AbandonedQueryItem[] = [];

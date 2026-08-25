@@ -422,3 +422,84 @@ test("an indented continuation line does NOT end its criterion", () => {
 	].join("\n");
 	expect(splitBody(body).criteria.map((c) => c.text)).toEqual(["first", "second"]);
 });
+
+/**
+ * The criterion classifier is a Markdown parser boundary, so CommonMark — not a
+ * parallel indentation/fence approximation — decides which source lines are
+ * list items. Each case below was measured against Marked, the parser already
+ * used for the Plane HTML round-trip.
+ */
+describe("criteria classification follows CommonMark block structure", () => {
+	const criteria = (lines: string[]) =>
+		splitBody(["Body.", "", "### Acceptance Criteria", ...lines].join("\n")).criteria.map(
+			(criterion) => criterion.text,
+		);
+
+	test("indented code and raw HTML cannot become criteria", () => {
+		expect(criteria(["    - [ ] code example", "- [ ] real criterion"])).toEqual([
+			"real criterion",
+		]);
+		expect(criteria(["<pre>", "- [ ] html example", "</pre>", "- [ ] real criterion"])).toEqual([
+			"real criterion",
+		]);
+	});
+
+	test("a checkbox-looking line inside a list-relative fence is code", () => {
+		expect(
+			criteria(["- [ ] parent", "    ```md", "    - [ ] fenced example", "    ```", "- [ ] peer"]),
+		).toEqual(["parent", "peer"]);
+	});
+
+	test("an invalid backtick info string does not open a fence and hide later criteria", () => {
+		expect(criteria(["````` bad`info", "- [ ] real criterion", "```"])).toEqual(["real criterion"]);
+	});
+
+	test("thematic breaks and top-level fences close the preceding list", () => {
+		expect(criteria(["- - -", "  - [ ] after thematic break"])).toEqual(["after thematic break"]);
+		expect(
+			criteria(["- category", "", "```", "example", "```", "", "  - [ ] after fence"]),
+		).toEqual(["after fence"]);
+	});
+
+	test("lazy continuation and CommonMark's five-space marker padding keep children nested", () => {
+		expect(() => criteria(["- category", "lazy continuation", "  - [ ] child"])).toThrow(
+			/nested checkbox.*child/i,
+		);
+		expect(() => criteria(["-     category", "  - [ ] child"])).toThrow(/nested checkbox.*child/i);
+	});
+
+	test("four-space indented headings and malformed closing hashes are not AC headings", () => {
+		const body = [
+			"    ### Acceptance Criteria",
+			"    - [ ] code example",
+			"",
+			"### Acceptance Criteria###",
+			"- [ ] still prose",
+			"",
+			"### Acceptance Criteria",
+			"- [ ] real criterion",
+		].join("\n");
+		expect(splitBody(body).criteria.map((criterion) => criterion.text)).toEqual(["real criterion"]);
+	});
+
+	test("a Setext heading ends the criteria section", () => {
+		const body = [
+			"### Acceptance Criteria",
+			"- [ ] ship it",
+			"",
+			"Testing Notes",
+			"-------------",
+			"- browser cases",
+			"  - [ ] Safari",
+		].join("\n");
+		expect(splitBody(body).criteria.map((criterion) => criterion.text)).toEqual(["ship it"]);
+	});
+
+	test("CRLF criteria have the same structural meaning as LF criteria", () => {
+		const body = "Body.\r\n\r\n### Acceptance Criteria\r\n- [ ] one\r\n- [x] two\r\n";
+		expect(splitBody(body).criteria).toEqual([
+			{ text: "one", checked: false },
+			{ text: "two", checked: true },
+		]);
+	});
+});

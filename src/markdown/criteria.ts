@@ -1,3 +1,4 @@
+import { lexer, type Token, type Tokens } from "marked";
 import { ParseError } from "../errors.ts";
 
 export interface AcceptanceCriterion {
@@ -33,152 +34,197 @@ interface ParsedBody extends SplitBody {
 	extras: string;
 }
 
-/**
- * The Acceptance-Criteria heading. Exported so effort detection (directives.ts)
- * scans exactly the same narrative region this splitter uses — otherwise the two
- * could disagree on where the narrative ends and effort could be hashed
- * inconsistently under `--sync-criteria`.
- */
-export const AC_HEADING = /^#{1,6}\s+acceptance criteria\s*#*\s*$/i;
+/** Canonical ATX authoring form, applied only after Marked confirms a real heading. */
+export const AC_HEADING = /^#{1,6}[ \t]+acceptance criteria(?:[ \t]+#*)?[ \t]*\r?$/i;
 /**
  * A checklist line, split into (prefix)(mark)(rest) so the mark can be rewritten
  * in place while preserving the exact bullet, indentation and text. The prefix
  * DELIBERATELY captures leading whitespace: a criterion list may legally be
  * indented, and dropping that indentation on write-back would reflow the file.
  *
- * Whether a given checkbox is a peer criterion or nested content is NOT decided
- * by this pattern — it cannot be. It is decided by comparing indentation against
- * the first checkbox in the section (`baseIndentOf`), because both readings of a
- * two-space checkbox are correct depending on what precedes it. An earlier
- * version treated ANY leading whitespace as nested, which rejected
- * CommonMark-legal top-level lists — one to three leading spaces — and told the
- * author to use a top-level criterion, which it already was.
- *
- * This remains the ONE source of truth used by `splitBody` and write-back
- * numbering, so their positions cannot drift.
+ * This pattern deliberately does NOT decide peer-vs-nested: Marked's block tree
+ * owns that structural verdict. It only preserves the exact authored marker,
+ * state, text, and CRLF ending after a direct list item has been classified.
  */
-export const CHECKBOX_LINE = /^([\t ]*[-*]\s+)\[([ xX])\](\s+.*)$/;
+export const CHECKBOX_LINE = /^([\t ]*[-*][ \t]+)\[([ xX])\]([ \t]+.*?)(\r?)$/;
+
+export interface AcceptanceCriteriaLineClassification {
+	/** Physical line containing the AC heading, or -1 when absent. */
+	headingIndex: number;
+	/** One line for ATX, two for Setext, zero when absent. */
+	headingLength: 0 | 1 | 2;
+	/** First line of the next top-level heading, or `lines.length`. */
+	sectionEnd: number;
+	/** Physical lines that are direct task items of a top-level list. */
+	peerCheckboxLineIndices: number[];
+}
+
+interface PositionedToken {
+	token: Token;
+	startLine: number;
+}
+
+function newlineCount(value: string): number {
+	return value.match(/\n/g)?.length ?? 0;
+}
+
+/**
+ * Marked's block-token `raw` values partition the source. Keep that property
+ * explicit: source positions drive write-back, so a future parser upgrade must
+ * fail closed if it ever stops returning exact raw spans.
+ */
+function positionedBlockTokens(source: string): PositionedToken[] {
+	const tokens = lexer(source);
+	const positioned: PositionedToken[] = [];
+	let start = 0;
+	let startLine = 0;
+	for (const token of tokens) {
+		if (source.slice(start, start + token.raw.length) !== token.raw) {
+			throw new ParseError(
+				"Could not map parsed Acceptance Criteria tokens back to their source lines; left unchanged",
+			);
+		}
+		positioned.push({ token, startLine });
+		start += token.raw.length;
+		startLine += newlineCount(token.raw);
+	}
+	if (start !== source.length) {
+		throw new ParseError(
+			"Could not map the complete Acceptance Criteria section back to its source lines; left unchanged",
+		);
+	}
+	return positioned;
+}
+
+function firstRawLine(raw: string): string {
+	const newline = raw.indexOf("\n");
+	return newline === -1 ? raw : raw.slice(0, newline);
+}
+
+function commonMarkSource(lines: readonly string[]): string {
+	// Marked normalizes CRLF in token.raw. Normalize only the parser copy so line
+	// numbers remain identical while the caller's original bytes stay untouched.
+	return lines.map((line) => line.replace(/\r$/, "")).join("\n");
+}
+
+function checkboxMatch(raw: string): RegExpMatchArray | null {
+	return firstRawLine(raw).match(CHECKBOX_LINE);
+}
+
+/** Find a task item structurally below another list item. */
+function nestedCheckboxText(tokens: readonly Token[]): string | null {
+	for (const token of tokens) {
+		// Do not descend through blockquotes/HTML/code. Their checkbox-looking text
+		// is illustrative content, not a direct child list that Plane would flatten.
+		if (token.type !== "list") continue;
+		for (const item of token.items) {
+			const match = item.task ? checkboxMatch(item.raw) : null;
+			if (match) return (match[3] ?? "").trim();
+			const deeper = nestedCheckboxText(item.tokens);
+			if (deeper !== null) return deeper;
+		}
+	}
+	return null;
+}
+
+function classifyTopLevelList(token: Tokens.List, tokenStartLine: number): number[] {
+	const peers: number[] = [];
+	let searchFrom = 0;
+	for (const item of token.items) {
+		const itemStart = token.raw.indexOf(item.raw, searchFrom);
+		if (itemStart === -1) {
+			throw new ParseError(
+				"Could not map an Acceptance Criteria list item back to its source line; left unchanged",
+			);
+		}
+		searchFrom = itemStart + item.raw.length;
+		const match = item.task ? checkboxMatch(item.raw) : null;
+		if (match) {
+			peers.push(tokenStartLine + newlineCount(token.raw.slice(0, itemStart)));
+		}
+		const nested = nestedCheckboxText(item.tokens);
+		if (nested !== null) {
+			throw new ParseError(
+				`Acceptance Criteria nested checkbox "${nested}" ` +
+					"cannot round-trip without flattening; use an ordinary nested bullet, or outdent it to a top-level criterion",
+			);
+		}
+	}
+	return peers;
+}
+
+function isAcceptanceCriteriaHeading(token: Token): token is Tokens.Heading {
+	return token.type === "heading" && token.text.trim().toLowerCase() === "acceptance criteria";
+}
+
+function isListToken(token: Token): token is Tokens.List {
+	return token.type === "list" && "items" in token;
+}
+
+function headingLength(lines: readonly string[], headingIndex: number): 1 | 2 {
+	return AC_HEADING.test(lines[headingIndex] ?? "") ? 1 : 2;
+}
+
+/**
+ * Classify one complete Markdown body using Marked's CommonMark/GFM block tree.
+ * This is the single structural verdict consumed by parsing and write-back.
+ */
+export function classifyAcceptanceCriteriaLines(
+	lines: readonly string[],
+): AcceptanceCriteriaLineClassification {
+	const source = commonMarkSource(lines);
+	const blocks = positionedBlockTokens(source);
+	const headings = blocks.filter(({ token }) => isAcceptanceCriteriaHeading(token));
+	if (headings.length === 0) {
+		return {
+			headingIndex: -1,
+			headingLength: 0,
+			sectionEnd: lines.length,
+			peerCheckboxLineIndices: [],
+		};
+	}
+	const heading = headings[0] as PositionedToken;
+	if (headings.length > 1) {
+		const duplicate = headings[1] as PositionedToken;
+		throw new ParseError(
+			`Duplicate Acceptance Criteria heading at line ${duplicate.startLine + 1}; a story may contain only one`,
+		);
+	}
+	const headingBlockIndex = blocks.indexOf(heading);
+	const nextHeading = blocks
+		.slice(headingBlockIndex + 1)
+		.find(({ token }) => token.type === "heading");
+	const sectionEnd = nextHeading?.startLine ?? lines.length;
+	const peers: number[] = [];
+	for (const block of blocks.slice(headingBlockIndex + 1)) {
+		if (block.startLine >= sectionEnd) break;
+		if (isListToken(block.token)) {
+			peers.push(...classifyTopLevelList(block.token, block.startLine));
+		}
+	}
+	return {
+		headingIndex: heading.startLine,
+		headingLength: headingLength(lines, heading.startLine),
+		sectionEnd,
+		peerCheckboxLineIndices: peers,
+	};
+}
 
 /**
  * The indices of lines that are PEER acceptance criteria, within an already
  * isolated criteria section.
  *
- * THE shared classifier. `splitBody` decides peer-vs-nested while parsing;
- * `groom --write-back` has to make the identical decision when it numbers
- * checkboxes to tick, and it was making a different one — it counted every
- * matching line. So `::ac1` could tick a checkbox nested under a bullet instead
- * of the second real criterion, writing the wrong state onto someone's board.
- *
- * Widening CHECKBOX_LINE to accept legally-indented lists made that worse:
- * indented checkboxes previously did not match at all, so write-back skipped
- * them by accident. Two callers deciding the same thing separately is what this
- * exists to stop.
+ * Compatibility/test projection of the same Marked-backed list classifier used
+ * by `classifyAcceptanceCriteriaLines`. Production parsing and write-back both
+ * consume that complete section classification, so neither re-derives heading
+ * boundaries, fences, list containers, or `::acN` numbering.
  */
 export function peerCheckboxLineIndices(lines: readonly string[]): number[] {
-	const fenced = markdownFenceMask([...lines]);
-	const peers: number[] = [];
-	// A STACK of open list-item content columns, not a single value. Keeping only
-	// the latest marker meant a deeper sibling overwrote its parent's column:
-	//
-	//   - category            content column 2
-	//     - subcategory       overwrote it with 4
-	//     - [ ] nested task   indent 2 < 4, so wrongly promoted to a peer
-	//
-	// and `--sync-criteria` would then create that nested task as a work item.
-	const open: number[] = [];
-	for (const [i, line] of lines.entries()) {
-		if (fenced[i]) continue;
-		const marker = /^([\t ]*)([-*+]|\d+[.)])(\s+)/.exec(line);
-		if (!marker) {
-			// A non-list line CLOSES any container it has outdented past — a
-			// paragraph at column 0 ends the list above it. Without this the stack
-			// kept stale containers, so a later legal top-level checklist was read
-			// as nested inside a list that had already ended. Indented continuation
-			// lines pop nothing, which is what keeps a criterion's detail lines
-			// attached to it.
-			if (line.trim() !== "") {
-				const textIndent = indentWidth(line);
-				while (open.length > 0 && (open.at(-1) as number) > textIndent) open.pop();
-			}
-			continue;
-		}
-		const indent = indentWidth(marker[1] ?? "");
-		// Close every container this line has outdented past.
-		while (open.length > 0 && (open.at(-1) as number) > indent) open.pop();
-		const inside = open.length > 0 && indent >= (open.at(-1) as number);
-		const checkbox = line.match(CHECKBOX_LINE);
-		if (checkbox) {
-			if (inside) {
-				// SKIPPING would renumber: write-back's `::ac1` would then mean a
-				// different criterion than `splitBody` produced, and groom would
-				// happily tick a box on a file that import refuses. Both paths must
-				// reach the same verdict, so both refuse.
-				throw new ParseError(
-					`Acceptance Criteria nested checkbox "${(checkbox[3] ?? "").trim()}" ` +
-						"cannot round-trip without flattening; use an ordinary nested bullet, or outdent it to a top-level criterion",
-				);
-			}
-			peers.push(i);
-		}
-		open.push(contentColumn(marker) as number);
-	}
-	return peers;
+	const blocks = positionedBlockTokens(commonMarkSource(lines));
+	return blocks.flatMap(({ token, startLine }) =>
+		isListToken(token) ? classifyTopLevelList(token, startLine) : [],
+	);
 }
-
-/** CommonMark content column of a list item: marker indent + marker + following spaces. */
-function contentColumn(marker: RegExpExecArray | null): number | null {
-	if (!marker) return null;
-	// indent + marker + the spaces after it. `- x` at column 0 has content at 2.
-	return indentWidth(marker[1] ?? "") + (marker[2] ?? "").length + (marker[3] ?? "").length;
-}
-
-/** Visual width of a line's leading whitespace, with tabs as four columns. */
-function indentWidth(line: string): number {
-	const lead = /^[\t ]*/.exec(line)?.[0] ?? "";
-	return [...lead].reduce((n, ch) => n + (ch === "\t" ? 4 : 1), 0);
-}
-const ANY_HEADING = /^#{1,6}\s+/;
-const AC_TEXT = /^acceptance criteria$/i;
-const SETEXT_UNDERLINE = /^(?:=+|-+)$/;
-const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
-
-function acHeadingLength(lines: string[], index: number): 0 | 1 | 2 {
-	const trimmed = (lines[index] ?? "").trim();
-	if (AC_HEADING.test(trimmed)) {
-		return 1;
-	}
-	if (
-		AC_TEXT.test(trimmed) &&
-		index + 1 < lines.length &&
-		SETEXT_UNDERLINE.test((lines[index + 1] ?? "").trim())
-	) {
-		return 2;
-	}
-	return 0;
-}
-
-/** Lines inside (or delimiting) a CommonMark fenced code block. */
-function markdownFenceMask(lines: string[]): boolean[] {
-	const mask = new Array<boolean>(lines.length).fill(false);
-	let open: { char: string; length: number } | null = null;
-	for (let i = 0; i < lines.length; i++) {
-		const match = (lines[i] as string).match(FENCE);
-		if (match) {
-			const run = match[1] as string;
-			const info = (match[2] as string).trim();
-			if (open === null) {
-				open = { char: run[0] as string, length: run.length };
-			} else if (run[0] === open.char && run.length >= open.length && info === "") {
-				open = null;
-			}
-			mask[i] = true;
-			continue;
-		}
-		mask[i] = open !== null;
-	}
-	return mask;
-}
-
 /** Trim only empty boundary lines; never strip indentation from real content. */
 function trimBoundaryBlankLines(lines: string[]): string {
 	let start = 0;
@@ -203,19 +249,14 @@ function trimBoundaryBlankLines(lines: string[]): string {
  * Setext heading).
  */
 export function acHeadingIndex(lines: string[]): number {
-	const fenced = markdownFenceMask(lines);
-	for (let i = 0; i < lines.length; i++) {
-		if (!fenced[i] && acHeadingLength(lines, i) > 0) {
-			return i;
-		}
-	}
-	return -1;
+	return classifyAcceptanceCriteriaLines(lines).headingIndex;
 }
 
 /** Parse the one permitted AC section, retaining nested blocks for a lossless splice. */
 function parseBody(body: string): ParsedBody {
 	const lines = body.split("\n");
-	const headingIndex = acHeadingIndex(lines);
+	const classification = classifyAcceptanceCriteriaLines(lines);
+	const headingIndex = classification.headingIndex;
 
 	if (headingIndex === -1) {
 		return {
@@ -228,17 +269,6 @@ function parseBody(body: string): ParsedBody {
 		};
 	}
 
-	const firstHeadingLength = acHeadingLength(lines, headingIndex);
-	const fenced = markdownFenceMask(lines);
-	for (let i = headingIndex + firstHeadingLength; i < lines.length; i++) {
-		const duplicateLength = acHeadingLength(lines, i);
-		if (!fenced[i] && duplicateLength > 0) {
-			throw new ParseError(
-				`Duplicate Acceptance Criteria heading at line ${i + 1}; a story may contain only one`,
-			);
-		}
-	}
-
 	const narrative = lines.slice(0, headingIndex).join("\n").trim();
 	const criterionBlocks: CriterionBlock[] = [];
 	const extras: string[] = [];
@@ -247,45 +277,14 @@ function parseBody(body: string): ParsedBody {
 	// re-derive it inline, and the two drifted: `groom --write-back` and this
 	// parser disagreed on a two-level nested list, so a nested task became a
 	// criterion here while write-back numbered around it.
-	const acStart = headingIndex + firstHeadingLength;
-	// Stop at the NEXT heading before classifying. Classifying everything after
-	// the AC heading meant a nested checkbox in a later section — an ordinary
-	// `### Testing Notes` with a sub-list — was read as a nested acceptance
-	// criterion and refused the whole story.
-	const acFence = markdownFenceMask(lines);
-	let acEnd = lines.length;
-	for (let i = acStart; i < lines.length; i++) {
-		if (!acFence[i] && ANY_HEADING.test((lines[i] as string).trim())) {
-			acEnd = i;
-			break;
-		}
-	}
-	const peerLines = new Set(
-		peerCheckboxLineIndices(lines.slice(acStart, acEnd)).map((rel) => acStart + rel),
-	);
-	let suffixStart = lines.length;
-	for (let i = headingIndex + firstHeadingLength; i < lines.length; i++) {
+	const acStart = headingIndex + classification.headingLength;
+	const acEnd = classification.sectionEnd;
+	const peerLines = new Set(classification.peerCheckboxLineIndices);
+	for (let i = acStart; i < acEnd; i++) {
 		const line = lines[i] as string;
-		if (ANY_HEADING.test(line.trim())) {
-			suffixStart = i;
-			break;
-		}
 
-		// Any list marker — checkbox or plain bullet — opens a container. Track the
-		// SHALLOWEST one still open, so a peer checkbox closes a deeper container
-		// rather than inheriting it.
 		const checkbox = peerLines.has(i) ? line.match(CHECKBOX_LINE) : null;
 		if (checkbox) {
-			// The FIRST checkbox in the section sets the peer level. Anything deeper
-			// is nested content of the criterion above it — which cannot round-trip
-			// through Plane's task list without being flattened into a peer, so it
-			// is refused rather than silently changing what the criteria ARE.
-			//
-			// Comparing against the base rather than against zero is what makes a
-			// legally-indented list (CommonMark allows one to three leading spaces)
-			// parse as the top-level list it is, while still catching a genuine
-			// child two spaces under an unindented parent. Both are two spaces; only
-			// the context distinguishes them.
 			const block: CriterionBlock = {
 				criterion: {
 					checked: checkbox[2]?.toLowerCase() === "x",
@@ -313,7 +312,7 @@ function parseBody(body: string): ParsedBody {
 		narrative,
 		criteria: criterionBlocks.map((block) => block.criterion),
 		hasHeading: true,
-		suffix: trimBoundaryBlankLines(lines.slice(suffixStart)),
+		suffix: trimBoundaryBlankLines(lines.slice(acEnd)),
 		criterionBlocks,
 		extras: trimBoundaryBlankLines(extras),
 	};
@@ -444,7 +443,7 @@ export function setCheckboxMark(line: string, checked: boolean): string | null {
 	if (!match) {
 		return null;
 	}
-	return `${match[1]}[${checked ? "x" : " "}]${match[3]}`;
+	return `${match[1]}[${checked ? "x" : " "}]${match[3]}${match[4] ?? ""}`;
 }
 
 /** Whether a checklist line's mark is currently checked (`[x]`). Null if not a checkbox. */
@@ -463,15 +462,6 @@ export function checkboxText(line: string): string | null {
 		return null;
 	}
 	return (match[3] ?? "").trim();
-}
-
-/**
- * Whether a line is an ATX heading (`#`..`######`). This is the same section
- * boundary `splitBody` uses to stop collecting criteria, exported so the
- * write-back reverse-sync stops at the exact same place.
- */
-export function isHeadingLine(line: string): boolean {
-	return ANY_HEADING.test(line.trim());
 }
 
 /** Join a narrative and a (possibly empty) acceptance-criteria block. */

@@ -7,6 +7,7 @@ import {
 	type ProjectedLeaf,
 	projectLeafDependencies,
 } from "./critical_path.ts";
+import { requirementForStoryPredicates } from "./query_requirements.ts";
 
 export interface QueryPredicates {
 	open?: boolean;
@@ -149,6 +150,7 @@ export function queryStories(
 ): StoryQueryResult {
 	validateQueryPredicates(predicates);
 	const projection = projectLeafDependencies(graph);
+	const requirement = requirementForStoryPredicates(predicates);
 	// `--blocked` is the one predicate here that reads RELATIONS, and a nested
 	// ancestor/descendant edge is never written into `predecessors` — so without
 	// this, `ls --blocked` quietly OMITS an item the board says is blocked and
@@ -157,7 +159,7 @@ export function queryStories(
 	//
 	// Scoped to `--blocked` deliberately: refusing every `ls` because one edge is
 	// malformed would decline questions that do not depend on it.
-	if (predicates.blocked && projection.nestedEdges.length > 0) {
+	if (requirement.relations === "required" && projection.nestedEdges.length > 0) {
 		throw new NestedDependencyError(projection.nestedEdges);
 	}
 	const answerRoutes: QueryAnswerRoutes =

@@ -1,4 +1,5 @@
 import type { AtlasGraph, AtlasNode } from "../atlas/model.ts";
+import { QUERY_REQUIREMENTS } from "./query_requirements.ts";
 
 /**
  * Critical-path analysis over the dependency graph.
@@ -322,7 +323,12 @@ function findCycles(
  */
 export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 	const projected = projectLeafDependencies(graph);
-	if (projected.nestedEdges.length > 0) throw new NestedDependencyError(projected.nestedEdges);
+	if (
+		QUERY_REQUIREMENTS["critical-path"].relations === "required" &&
+		projected.nestedEdges.length > 0
+	) {
+		throw new NestedDependencyError(projected.nestedEdges);
+	}
 	const { leaves, successors, predecessors, connected, expandedEdges } = projected;
 
 	const doneLeaves = [...leaves.values()].filter((l) => l.done).length;

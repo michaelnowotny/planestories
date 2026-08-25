@@ -1,8 +1,7 @@
 import { ConfigError } from "../errors.ts";
 import {
 	type AcceptanceCriterion,
-	acHeadingIndex,
-	isHeadingLine,
+	classifyAcceptanceCriteriaLines,
 	splitBody,
 } from "../markdown/criteria.ts";
 import { formatDevDays, parseEffortDays } from "../markdown/directives.ts";
@@ -129,17 +128,13 @@ function criteriaForItem(item: FetchedWorkItem, index: ProjectIndex): Acceptance
  */
 function narrativeWithoutCriteria(body: string): string {
 	const lines = body.split("\n");
-	const acIdx = acHeadingIndex(lines);
-	if (acIdx === -1) {
+	const classification = classifyAcceptanceCriteriaLines(lines);
+	if (classification.headingIndex === -1) {
 		return body.trim();
 	}
-	// The AC section runs from its heading to the next ATX heading (matching how
-	// splitBody collects criteria); everything after that heading is kept.
-	let end = acIdx + 1;
-	while (end < lines.length && !isHeadingLine(lines[end] as string)) {
-		end++;
-	}
-	return [...lines.slice(0, acIdx), ...lines.slice(end)].join("\n").trim();
+	return [...lines.slice(0, classification.headingIndex), ...lines.slice(classification.sectionEnd)]
+		.join("\n")
+		.trim();
 }
 
 function planningRefs(narrative: string): string[] {

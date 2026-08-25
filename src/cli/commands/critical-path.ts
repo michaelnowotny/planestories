@@ -4,6 +4,7 @@ import type { AtlasGraph } from "../../atlas/model.ts";
 import { ParentCycleError } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { type CriticalPathResult, computeCriticalPath } from "../../sync/critical_path.ts";
+import { planQueryGraph, QUERY_REQUIREMENTS } from "../../sync/query_requirements.ts";
 import { IncompleteGraphError, resolveGraph } from "../graph_source.ts";
 import { reportPacing } from "../pacing.ts";
 import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
@@ -114,6 +115,7 @@ export function registerCriticalPathCommand(program: Command): void {
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.action(async (file: string | undefined, options, command: Command) => {
 			try {
+				const plan = planQueryGraph(QUERY_REQUIREMENTS["critical-path"]);
 				const source = await resolveGraph({
 					file,
 					selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
@@ -121,6 +123,7 @@ export function registerCriticalPathCommand(program: Command): void {
 					context: options.context,
 					project: options.project,
 					fromSnapshot: options.fromSnapshot,
+					dependencies: plan.dependencies,
 					json: options.json === true,
 				});
 				// A partial sweep means the graph is MISSING edges, and a missing
@@ -131,7 +134,9 @@ export function registerCriticalPathCommand(program: Command): void {
 				// without answering this.
 				let graph: AtlasGraph;
 				try {
-					graph = source.requireCompleteGraph("the dependency floor");
+					graph = plan.requireComplete
+						? source.requireCompleteGraph(plan.purpose)
+						: source.acceptPartialGraph(plan.partialReason);
 				} catch (error) {
 					if (!(error instanceof IncompleteGraphError)) throw error;
 					console.error(chalk.red(error.message));

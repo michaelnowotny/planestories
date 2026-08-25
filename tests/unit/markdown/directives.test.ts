@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { splitBody } from "../../../src/markdown/criteria.ts";
 import {
 	formatDevDays,
 	hasEffortLine,
@@ -63,10 +64,11 @@ describe("parseEffortDays", () => {
 	});
 
 	test("an AC heading hidden inside an HTML comment does not desync detection from the hash", () => {
-		// raw splitBody stops at the `### Acceptance Criteria` line inside the comment,
-		// so effort after it is NOT in the hashed narrative — detection must agree (null).
+		// CommonMark treats the apparent heading as comment content. The real effort
+		// line therefore remains in the hashed narrative and detection must agree.
 		const body = "N\n\n<!--\n### Acceptance Criteria\n-->\n\n**Effort:** 1 dev-days";
-		expect(parseEffortDays(body)).toBeNull();
+		expect(splitBody(body).narrative).toContain("**Effort:** 1 dev-days");
+		expect(parseEffortDays(body)).toBe(1);
 	});
 });
 

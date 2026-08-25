@@ -414,7 +414,7 @@ test("abandoned ANSWERS from a partial sweep, because it reads no edges", async 
 	expect(out.join("\n")).toContain("Abandoned-parent work");
 });
 
-test("abandoned --refresh publishes a COMPLETE cache rather than failing", async () => {
+test("abandoned --refresh requires publication of a COMPLETE cache", async () => {
 	// The P0: `abandoned` was told to skip relations, and --refresh rejects that
 	// combination — so `abandoned --refresh` died complaining about
 	// --no-dependencies, a flag the user never passed. Worse, the stale-cache
@@ -422,7 +422,7 @@ test("abandoned --refresh publishes a COMPLETE cache rather than failing", async
 	//
 	// A refresh publishes the cache every other command reads, so it must fetch
 	// relations even for the one verb that does not need them.
-	const seen: Array<{ dependencies?: boolean; refresh?: boolean }> = [];
+	const seen: Array<{ dependencies?: boolean; refresh?: boolean; writeRequired?: boolean }> = [];
 	const value = emptyGraph();
 	await runGraphQueryCommand(
 		"abandoned",
@@ -432,6 +432,7 @@ test("abandoned --refresh publishes a COMPLETE cache rather than failing", async
 				seen.push({
 					dependencies: options.dependencies,
 					refresh: options.boardCache?.refresh,
+					writeRequired: options.boardCache?.writeRequired,
 				});
 				return {
 					provenance: { kind: "live", project: "P", baseUrl: "https://x.test", workspaceSlug: "w" },
@@ -450,6 +451,9 @@ test("abandoned --refresh publishes a COMPLETE cache rather than failing", async
 	// Relations ARE fetched under refresh — otherwise the published cache would
 	// make the next `ready` refuse.
 	expect(seen[0]?.dependencies).toBe(true);
+	// A partial sweep must fail the requested refresh, not return a hierarchy
+	// answer while silently leaving the stale shared cache in place.
+	expect(seen[0]?.writeRequired).toBe(true);
 });
 
 test("abandoned WITHOUT --refresh still skips the relation sweep", async () => {

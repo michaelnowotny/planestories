@@ -272,6 +272,29 @@ describe("applyCheckboxStates (pure, plane_id-keyed reverse-sync)", () => {
 		expect(out).toContain("- [x] real");
 		expect(out).toContain("- [ ] not a criterion");
 	});
+
+	test("numbers CommonMark criteria, so an indented-code decoy cannot receive ::ac0 state", () => {
+		const content = linked(
+			"p1",
+			"S",
+			"### Acceptance Criteria",
+			"    - [ ] code example",
+			"- [ ] real criterion",
+			"",
+		).join("\n");
+
+		const { content: out, changes } = applyCheckboxStates(content, states({ p1: { 0: true } }));
+
+		expect(out).toContain("    - [ ] code example");
+		expect(out).toContain("- [x] real criterion");
+		expect(changes).toHaveLength(1);
+		expect(changes[0]).toMatchObject({
+			position: 0,
+			text: "real criterion",
+			from: false,
+			to: true,
+		});
+	});
 });
 
 const PROJECT_UUID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";

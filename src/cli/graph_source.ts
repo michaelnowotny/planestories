@@ -351,8 +351,10 @@ export async function resolveGraph(
 					? "dependency relations were skipped"
 					: `${coverage.failures} relation lookup(s) failed`;
 			const message = `Board cache was not written because ${reason}; the previous complete cache, if any, is unchanged.`;
-			if (options.boardCache.writeRequired) throw new Error(message);
-			cacheWarn(runtime)(`⚠ ${message}`);
+			// Every --refresh route promises atomic replacement of the reusable
+			// complete cache. Publication failure is therefore command failure even
+			// if a caller forgot the reinforcing `writeRequired` bit.
+			throw new Error(message);
 		} else {
 			const now = (runtime.now ?? (() => new Date()))();
 			const cache: BoardCache = {
