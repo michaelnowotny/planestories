@@ -305,14 +305,21 @@ export async function runGraphQueryCommand(
 					refresh: options.refresh === true,
 					staleOk: options.staleOk === true,
 				},
-		dependencies: true,
+		// `abandoned` reads hierarchy and ancestor status only, so fetching
+		// relations for it is wasted work — and DEMANDING them (below) made an
+		// ordinary failed relation GET refuse an answer the fetched hierarchy
+		// already contained. The pure query was corrected; the CLI still asked.
+		dependencies: kind !== "abandoned",
 		json: options.json === true,
 		selectProjectHelp: options.selectProjectHelp,
 	});
 
 	let graph: AtlasGraph;
 	try {
-		graph = source.requireCompleteGraph(purpose(kind));
+		graph =
+			kind === "abandoned"
+				? source.acceptPartialGraph("abandoned reads hierarchy and ancestor status, not edges")
+				: source.requireCompleteGraph(purpose(kind));
 	} catch (error) {
 		if (!(error instanceof IncompleteGraphError)) throw error;
 		stderr(chalk.red(error.message));

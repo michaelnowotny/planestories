@@ -307,23 +307,67 @@ describe("the peer-checkbox classifier is shared", () => {
 	];
 
 	test.each(cases)("%s: the two agree on the criteria set", (_name, lines) => {
-		const peers = peerCheckboxLineIndices(lines);
+		// BOTH outcomes are asserted. The first version returned early when
+		// `splitBody` threw, so the nested-under-a-bullet case — the one that
+		// motivated the shared classifier — asserted NOTHING and would have stayed
+		// green while write-back ticked the wrong box. An assertion that cannot
+		// fail is not a test, in the file where that rule keeps getting written.
+		const parse = () => splitBody(["Body.", "", "### Acceptance Criteria", ...lines].join("\n"));
+		const classify = () => peerCheckboxLineIndices(lines);
+
 		let parsed: ReturnType<typeof splitBody> | null = null;
+		let parseThrew = false;
 		try {
-			parsed = splitBody(["Body.", "", "### Acceptance Criteria", ...lines].join("\n"));
+			parsed = parse();
 		} catch {
-			// A refused structure is agreement of a different kind: the classifier
-			// must not silently hand write-back a set that parsing rejects.
-			parsed = null;
+			parseThrew = true;
 		}
-		if (parsed === null) return;
-		expect(peers).toHaveLength(parsed.criteria.length);
+
+		if (parseThrew) {
+			// They must reach the SAME verdict. A classifier that quietly skips a
+			// checkbox `splitBody` rejects hands write-back a renumbered set.
+			expect(classify).toThrow();
+			return;
+		}
+
+		const peers = classify();
+		expect(peers).toHaveLength((parsed as NonNullable<typeof parsed>).criteria.length);
 		for (const [n, index] of peers.entries()) {
-			expect(lines[index]).toContain(parsed.criteria[n]?.text ?? "");
+			expect(lines[index]).toContain(
+				(parsed as NonNullable<typeof parsed>).criteria[n]?.text ?? "",
+			);
 		}
 	});
 
 	test("a fenced checkbox is never a peer", () => {
 		expect(peerCheckboxLineIndices(["```md", "- [ ] fake", "```"])).toEqual([]);
 	});
+});
+
+test("a checkbox two levels deep is nested, not a peer", () => {
+	// Codex's shape. Tracking only the LATEST list marker let a deeper sibling
+	// overwrite its parent's content column, so this checkbox was promoted to a
+	// criterion — and `--sync-criteria` would have created it as a work item.
+	// A stack of open containers is the fix.
+	expect(() =>
+		splitBody(
+			[
+				"Body.",
+				"",
+				"### Acceptance Criteria",
+				"- category",
+				"  - subcategory",
+				"  - [ ] nested task",
+			].join("\n"),
+		),
+	).toThrow(/nested checkbox "nested task"/);
+});
+
+test("splitBody and the classifier are ONE implementation, not two that agree", () => {
+	// They disagreed on exactly the shape above: splitBody returned it as a
+	// criterion while the classifier refused. splitBody consumes the classifier
+	// now, so drift is impossible rather than merely tested for.
+	const lines = ["- category", "  - subcategory", "  - [ ] nested task"];
+	expect(() => peerCheckboxLineIndices(lines)).toThrow();
+	expect(() => splitBody(["Body.", "", "### Acceptance Criteria", ...lines].join("\n"))).toThrow();
 });

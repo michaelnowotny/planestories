@@ -201,7 +201,10 @@ test("every dependency verb refuses a partial sweep and names commands that woul
 		},
 	};
 
-	for (const kind of ["ready", "inconsistent", "blocked", "orphans", "abandoned"] as const) {
+	// `abandoned` is deliberately absent: it reads hierarchy and ancestor status
+	// only, so demanding a complete relation sweep would refuse an answer the
+	// fetched hierarchy already contains. Its counterpart test is below.
+	for (const kind of ["ready", "inconsistent", "blocked", "orphans"] as const) {
 		const out: string[] = [];
 		const err: string[] = [];
 		const ok = await runGraphQueryCommand(
@@ -377,4 +380,36 @@ test("without --json the human form is unchanged", async () => {
 	expect(out[0]).toContain("ready items");
 	expect(out[0]).toContain("Source:");
 	expect(() => JSON.parse(out[0] as string)).toThrow();
+});
+
+test("abandoned ANSWERS from a partial sweep, because it reads no edges", async () => {
+	// Counterpart to the refusal test above. A failed relation GET must not cost
+	// the operator a hierarchy report that was already fully fetched — and the
+	// pure query had been corrected while the CLI still demanded completeness.
+	const value = emptyGraph();
+	const source: GraphSourceResult = {
+		provenance: {
+			kind: "live",
+			project: "Partial Board",
+			baseUrl: "https://plane.example.test",
+			workspaceSlug: "workspace",
+		},
+		coverage: { kind: "partial", failures: 2 },
+		relationRecovered: 0,
+		requireCompleteGraph(purpose: string): AtlasGraph {
+			throw new IncompleteGraphError({ kind: "partial", failures: 2 }, purpose);
+		},
+		acceptPartialGraph: (): AtlasGraph => value,
+		requireCachedWorkItems: (): readonly never[] => [],
+	};
+
+	const out: string[] = [];
+	const ok = await runGraphQueryCommand(
+		"abandoned",
+		{},
+		{ resolveGraph: async () => source, stdout: (m) => out.push(m) },
+	);
+
+	expect(ok).toBe(true);
+	expect(out.join("\n")).toContain("Abandoned-parent work");
 });

@@ -77,18 +77,38 @@ export const CHECKBOX_LINE = /^([\t ]*[-*]\s+)\[([ xX])\](\s+.*)$/;
 export function peerCheckboxLineIndices(lines: readonly string[]): number[] {
 	const fenced = markdownFenceMask([...lines]);
 	const peers: number[] = [];
-	let enclosing: number | null = null;
+	// A STACK of open list-item content columns, not a single value. Keeping only
+	// the latest marker meant a deeper sibling overwrote its parent's column:
+	//
+	//   - category            content column 2
+	//     - subcategory       overwrote it with 4
+	//     - [ ] nested task   indent 2 < 4, so wrongly promoted to a peer
+	//
+	// and `--sync-criteria` would then create that nested task as a work item.
+	const open: number[] = [];
 	for (const [i, line] of lines.entries()) {
 		if (fenced[i]) continue;
 		const marker = /^([\t ]*)([-*+]|\d+[.)])(\s+)/.exec(line);
+		if (!marker) continue;
+		const indent = indentWidth(marker[1] ?? "");
+		// Close every container this line has outdented past.
+		while (open.length > 0 && (open.at(-1) as number) > indent) open.pop();
+		const inside = open.length > 0 && indent >= (open.at(-1) as number);
 		const checkbox = line.match(CHECKBOX_LINE);
 		if (checkbox) {
-			if (enclosing !== null && indentWidth(line) >= enclosing) continue;
+			if (inside) {
+				// SKIPPING would renumber: write-back's `::ac1` would then mean a
+				// different criterion than `splitBody` produced, and groom would
+				// happily tick a box on a file that import refuses. Both paths must
+				// reach the same verdict, so both refuse.
+				throw new ParseError(
+					`Acceptance Criteria nested checkbox "${(checkbox[3] ?? "").trim()}" ` +
+						"cannot round-trip without flattening; use an ordinary nested bullet, or outdent it to a top-level criterion",
+				);
+			}
 			peers.push(i);
-			enclosing = contentColumn(marker);
-			continue;
 		}
-		if (marker) enclosing = contentColumn(marker);
+		open.push(contentColumn(marker) as number);
 	}
 	return peers;
 }
@@ -211,9 +231,14 @@ function parseBody(body: string): ParsedBody {
 	const criterionBlocks: CriterionBlock[] = [];
 	const extras: string[] = [];
 	let currentBlock: CriterionBlock | null = null;
-	// Content column of the list item currently open above us, if any. A checkbox
-	// at or past it belongs to that item rather than being a peer criterion.
-	let enclosingContentColumn: number | null = null;
+	// THE shared classifier decides which checkboxes are criteria. This used to
+	// re-derive it inline, and the two drifted: `groom --write-back` and this
+	// parser disagreed on a two-level nested list, so a nested task became a
+	// criterion here while write-back numbered around it.
+	const acStart = headingIndex + firstHeadingLength;
+	const peerLines = new Set(
+		peerCheckboxLineIndices(lines.slice(acStart)).map((rel) => acStart + rel),
+	);
 	let suffixStart = lines.length;
 	for (let i = headingIndex + firstHeadingLength; i < lines.length; i++) {
 		const line = lines[i] as string;
@@ -225,8 +250,7 @@ function parseBody(body: string): ParsedBody {
 		// Any list marker — checkbox or plain bullet — opens a container. Track the
 		// SHALLOWEST one still open, so a peer checkbox closes a deeper container
 		// rather than inheriting it.
-		const marker = fenced[i] ? null : /^([\t ]*)([-*+]|\d+[.)])(\s+)/.exec(line);
-		const checkbox = fenced[i] ? null : line.match(CHECKBOX_LINE);
+		const checkbox = peerLines.has(i) ? line.match(CHECKBOX_LINE) : null;
 		if (checkbox) {
 			// The FIRST checkbox in the section sets the peer level. Anything deeper
 			// is nested content of the criterion above it — which cannot round-trip
@@ -238,23 +262,6 @@ function parseBody(body: string): ParsedBody {
 			// parse as the top-level list it is, while still catching a genuine
 			// child two spaces under an unindented parent. Both are two spaces; only
 			// the context distinguishes them.
-			// CommonMark: a list item's CONTENT column is its marker indent plus the
-			// marker width. A checkbox at or past the content column of the list
-			// item above it is INSIDE that item; anything shallower is a peer.
-			//
-			// Comparing against the first checkbox alone was not enough. It counted
-			// a checkbox nested under an ORDINARY bullet as a criterion —
-			//   - ordinary bullet
-			//     - [ ] nested checkbox      <- became a criterion
-			// because the bullet was invisible to the rule. And it rejected legal
-			// mixed peer indentation (2, 0, then 1 space) as nested.
-			const indent = indentWidth(line);
-			if (enclosingContentColumn !== null && indent >= enclosingContentColumn) {
-				throw new ParseError(
-					`Acceptance Criteria nested checkbox "${(checkbox[3] ?? "").trim()}" ` +
-						"cannot round-trip without flattening; use an ordinary nested bullet, or outdent it to a top-level criterion",
-				);
-			}
 			const block: CriterionBlock = {
 				criterion: {
 					checked: checkbox[2]?.toLowerCase() === "x",
@@ -264,15 +271,7 @@ function parseBody(body: string): ParsedBody {
 			};
 			criterionBlocks.push(block);
 			currentBlock = block;
-			// This checkbox is now the open container for anything deeper.
-			enclosingContentColumn = contentColumn(marker);
 			continue;
-		}
-
-		if (marker && !checkbox) {
-			// An ordinary bullet. A checkbox indented into it is that bullet's
-			// content, not an acceptance criterion.
-			enclosingContentColumn = contentColumn(marker);
 		}
 
 		if (currentBlock && (line.trim() === "" || /^[\t ]+\S/.test(line))) {

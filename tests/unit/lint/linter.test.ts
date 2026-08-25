@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { loadRepoConfig } from "../../../src/config/repo_config.ts";
 import { lintFiles } from "../../../src/lint/linter.ts";
-import { type LintRule, runLintRules } from "../../../src/lint/rules.ts";
+import { ALL_LINT_RULES, type LintRule, runLintRules } from "../../../src/lint/rules.ts";
 import type { UserStory } from "../../../src/types.ts";
 
 let directory: string;
@@ -497,4 +498,60 @@ describe("dependency-nested", () => {
 		const report = await lintFiles([a, b]);
 		expect(report.findings.filter((f) => f.rule === "dependency-nested")).toEqual([]);
 	});
+});
+
+/**
+ * The rule list must not exist twice.
+ *
+ * `repo_config.ts` kept a hand-copied set for validating `lint.disable`, and it
+ * went stale the moment a rule was added — `.planestories.yml` with
+ * `lint.disable: [dependency-nested]` failed startup saying "unknown rule",
+ * which was false. This asserts the two can never drift again.
+ */
+describe("every lint rule can be disabled", () => {
+	test("the exported list covers every rule the linter can emit", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "lint-rules-"));
+		try {
+			for (const rule of ALL_LINT_RULES) {
+				writeFileSync(join(dir, ".planestories.yml"), `lint:\n  disable:\n    - ${rule}\n`);
+				// Loading must accept every name the union permits.
+				await expect(loadRepoConfig(dir), rule).resolves.toBeDefined();
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	test("an invented rule name is still rejected", async () => {
+		// The validation must not have been loosened into uselessness.
+		const dir = mkdtempSync(join(tmpdir(), "lint-rules-bad-"));
+		try {
+			writeFileSync(join(dir, ".planestories.yml"), "lint:\n  disable:\n    - not-a-rule\n");
+			await expect(loadRepoConfig(dir)).rejects.toThrow(/unknown/i);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
+/**
+ * `dependency-nested` has to fire BEFORE the first import.
+ *
+ * The rule keyed on `plane_identifier`, which does not exist until import writes
+ * it back — so it only caught work already on the board and prevented nothing on
+ * the path it was built for: someone authoring a new file. Measured: zero
+ * findings on a brand-new child declaring `blocked_by` on its own parent.
+ */
+test("a NEW story with no identifier is still caught", async () => {
+	const epic = writeMarkdown("ne.md", story("Epic", ["kind: epic", "plane_identifier: X-1"], WHY));
+	const child = writeMarkdown(
+		"nc.md",
+		// No plane_identifier — this file has never been imported.
+		story("Fresh child", ["parent: X-1", "blocked_by: [X-1]"], `${EFFORT}\n\n${CRITERIA}`),
+	);
+	const report = await lintFiles([child, epic]);
+	const nested = report.findings.filter((f) => f.rule === "dependency-nested");
+	expect(nested).toHaveLength(1);
+	// Named by title, since there is no identifier to name it by.
+	expect(nested[0]?.message).toContain("Fresh child");
 });

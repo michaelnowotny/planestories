@@ -21,6 +21,30 @@ export type LintRule =
 	/** A `blocked_by`/`blocks` between an item and its own parent chain. */
 	| "dependency-nested";
 
+/**
+ * Every rule name, in one place.
+ *
+ * `repo_config.ts` kept a hand-copied duplicate for validating `lint.disable`,
+ * and it went stale the moment a rule was added: `.planestories.yml` with
+ * `lint.disable: [dependency-nested]` failed startup with "unknown rule" — which
+ * was false, since the rule exists and runs. Exported so there is one list to
+ * keep current, not two.
+ */
+export const ALL_LINT_RULES = [
+	"missing-acceptance-criteria",
+	"missing-effort",
+	"epic-missing-why",
+	"epic-has-acceptance-criteria",
+	"dependency-self-reference",
+	"dependency-cycle",
+	"dependency-nested",
+	"duplicate-identifier",
+	"dangling-reference",
+	"orphan-criterion",
+	"bad-parent",
+	"unparseable-file",
+] as const satisfies readonly LintRule[];
+
 export interface LintStory {
 	filePath: string;
 	story: UserStory;
@@ -185,19 +209,25 @@ export function checkDependencyNested(context: RuleContext): LintFinding[] {
 	const findings: LintFinding[] = [];
 	for (const entry of context.stories) {
 		const id = entry.story.planeIdentifier?.trim().toUpperCase();
-		if (!id) continue;
-		const up = ancestors(id);
+		const parent = entry.story.parent?.trim().toUpperCase();
+		// A story has NO identifier until the first import writes one back — which
+		// is exactly when this rule matters, because the file is being authored.
+		// Requiring an id made the rule fire only on work already on the board, so
+		// it prevented nothing on the path it was built for. The parent chain is
+		// reachable from `parent:` alone.
+		const up = id ? ancestors(id) : parent ? new Set([parent, ...ancestors(parent)]) : new Set();
+		if (up.size === 0) continue;
 		const related = [...(entry.story.blockedBy ?? []), ...(entry.story.blocks ?? [])].map((value) =>
 			value.trim().toUpperCase(),
 		);
 		for (const other of related) {
-			const nested = up.has(other) || ancestors(other).has(id);
+			const nested = up.has(other) || (id !== undefined && ancestors(other).has(id));
 			if (!nested) continue;
 			findings.push(
 				error(
 					entry,
 					"dependency-nested",
-					`${id} declares a dependency on ${other}, which is in its own parent chain. ` +
+					`${id ?? entry.story.title} declares a dependency on ${other}, which is in its own parent chain. ` +
 						"Such a relation cannot be read as a schedule constraint — expanding it would invent constraints between siblings — so the dependency commands refuse to answer once it exists. " +
 						"Remove the relation, or re-parent one of the two.",
 				),

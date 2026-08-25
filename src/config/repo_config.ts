@@ -2,7 +2,7 @@ import { existsSync, lstatSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ConfigError } from "../errors.ts";
-import type { LintRule } from "../lint/rules.ts";
+import { ALL_LINT_RULES, type LintRule } from "../lint/rules.ts";
 
 /** True if a filesystem entry exists at `p` — including a DANGLING symlink (lstat
  *  doesn't follow the link), so a broken config symlink is surfaced, not skipped. */
@@ -34,18 +34,7 @@ export interface RepoConfig {
 
 export const REPO_CONFIG_FILENAME = ".planestories.yml";
 
-const KNOWN_RULES: ReadonlySet<string> = new Set<LintRule>([
-	"missing-acceptance-criteria",
-	"missing-effort",
-	"epic-missing-why",
-	"epic-has-acceptance-criteria",
-	"dependency-self-reference",
-	"dependency-cycle",
-	"duplicate-identifier",
-	"dangling-reference",
-	"orphan-criterion",
-	"bad-parent",
-]);
+const KNOWN_RULES: ReadonlySet<string> = new Set<LintRule>(ALL_LINT_RULES);
 
 /**
  * Find `.planestories.yml` in `startDir` or an ancestor, stopping at the enclosing
