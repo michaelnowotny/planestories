@@ -141,3 +141,94 @@ describe("buildAcceptanceCriteria / joinBody", () => {
 		expect(joinBody(narrative, buildAcceptanceCriteria(criteria))).toBe(body);
 	});
 });
+
+/**
+ * Indentation decides PEER vs NESTED — and it cannot be decided by the pattern
+ * alone, because both readings of a two-space checkbox are correct depending on
+ * what precedes it.
+ *
+ * An earlier version treated ANY leading whitespace as nested. CommonMark allows
+ * one to three leading spaces on a top-level list, so a legitimate file was
+ * rejected with advice to "use a top-level criterion" — which it already was.
+ * That refusal reached import, lint, and every file-based graph command.
+ */
+describe("criteria indentation", () => {
+	const withCriteria = (lines: string[]) => splitBody(["Body.", "", ...lines].join("\n"));
+
+	test.each([0, 1, 2, 3])("a list indented %i space(s) is top-level", (spaces) => {
+		const pad = " ".repeat(spaces);
+		const result = withCriteria([
+			"### Acceptance Criteria",
+			`${pad}- [ ] first`,
+			`${pad}- [x] second`,
+		]);
+		expect(result.criteria).toHaveLength(2);
+		expect(result.criteria[0]?.text).toBe("first");
+		expect(result.criteria[1]?.checked).toBe(true);
+	});
+
+	test("a checkbox DEEPER than the first is nested, and refused", () => {
+		// Same two spaces as the legal case above; only the context differs.
+		expect(() =>
+			withCriteria(["### Acceptance Criteria", "- [ ] parent", "  - [ ] child"]),
+		).toThrow(/nested checkbox "child"/);
+	});
+
+	test("the refusal offers both ways out, not just one", () => {
+		try {
+			withCriteria(["### Acceptance Criteria", "- [ ] parent", "  - [ ] child"]);
+			throw new Error("expected a refusal");
+		} catch (error) {
+			const message = (error as Error).message;
+			expect(message).toMatch(/nested bullet/i);
+			expect(message).toMatch(/outdent/i);
+		}
+	});
+
+	test("an outdented checkbox re-bases rather than being called nested", () => {
+		// If the first checkbox was itself indented content, a later one at column
+		// zero is the real peer level — not a violation of a base set by accident.
+		const result = withCriteria(["### Acceptance Criteria", "  - [ ] a", "- [ ] b"]);
+		expect(result.criteria).toHaveLength(2);
+	});
+
+	test("write-back NORMALISES criterion indentation, losing nothing", () => {
+		// Deliberate, and worth pinning: `spliceAcceptanceCriteria` rewrites the
+		// whole section, so a cosmetically-indented list comes back at column zero.
+		// That is safe here because the `### Acceptance Criteria` heading is
+		// top-level by definition, so the indentation carried no structure — and
+		// the alternative (threading a per-criterion indent through write-back)
+		// buys nothing but a smaller diff.
+		//
+		// What must NOT happen is losing content or churning on every run.
+		const body = ["Body.", "", "### Acceptance Criteria", "  - [ ] first", "  - [ ] second"].join(
+			"\n",
+		);
+		const { criteria } = splitBody(body);
+		const once = spliceAcceptanceCriteria(
+			body,
+			criteria.map((c) => ({ ...c, checked: true })),
+		);
+
+		expect(once).toContain("- [x] first");
+		expect(once).toContain("- [x] second");
+		// Idempotent: a second pass is a no-op, so the normalisation settles rather
+		// than producing a fresh diff on every import.
+		const twice = spliceAcceptanceCriteria(once, splitBody(once).criteria);
+		expect(twice).toBe(once);
+	});
+
+	test("a fenced checkbox is not a criterion", () => {
+		// Recorded P2 from review: fenced state was not applied while collecting.
+		const result = withCriteria([
+			"### Acceptance Criteria",
+			"- [ ] real",
+			"",
+			"```markdown",
+			"- [ ] an example in a code fence",
+			"```",
+		]);
+		expect(result.criteria).toHaveLength(1);
+		expect(result.criteria[0]?.text).toBe("real");
+	});
+});

@@ -41,14 +41,29 @@ interface ParsedBody extends SplitBody {
  */
 export const AC_HEADING = /^#{1,6}\s+acceptance criteria\s*#*\s*$/i;
 /**
- * A TOP-LEVEL checklist line, split into (prefix)(mark)(rest) so the mark can be
- * rewritten in place while preserving the exact bullet and text. Indented
- * checkboxes are nested content belonging to their nearest top-level criterion,
- * not peer acceptance criteria. This remains the ONE source of truth used by
- * `splitBody` and write-back numbering, so their positions cannot drift.
+ * A checklist line, split into (prefix)(mark)(rest) so the mark can be rewritten
+ * in place while preserving the exact bullet, indentation and text. The prefix
+ * DELIBERATELY captures leading whitespace: a criterion list may legally be
+ * indented, and dropping that indentation on write-back would reflow the file.
+ *
+ * Whether a given checkbox is a peer criterion or nested content is NOT decided
+ * by this pattern — it cannot be. It is decided by comparing indentation against
+ * the first checkbox in the section (`baseIndentOf`), because both readings of a
+ * two-space checkbox are correct depending on what precedes it. An earlier
+ * version treated ANY leading whitespace as nested, which rejected
+ * CommonMark-legal top-level lists — one to three leading spaces — and told the
+ * author to use a top-level criterion, which it already was.
+ *
+ * This remains the ONE source of truth used by `splitBody` and write-back
+ * numbering, so their positions cannot drift.
  */
-export const CHECKBOX_LINE = /^([-*]\s+)\[([ xX])\](\s+.*)$/;
-const INDENTED_CHECKBOX_LINE = /^[\t ]+[-*]\s+\[[ xX]\](\s+.*)$/;
+export const CHECKBOX_LINE = /^([\t ]*[-*]\s+)\[([ xX])\](\s+.*)$/;
+
+/** Visual width of a line's leading whitespace, with tabs as four columns. */
+function indentWidth(line: string): number {
+	const lead = /^[\t ]*/.exec(line)?.[0] ?? "";
+	return [...lead].reduce((n, ch) => n + (ch === "\t" ? 4 : 1), 0);
+}
 const ANY_HEADING = /^#{1,6}\s+/;
 const AC_TEXT = /^acceptance criteria$/i;
 const SETEXT_UNDERLINE = /^(?:=+|-+)$/;
@@ -155,6 +170,8 @@ function parseBody(body: string): ParsedBody {
 	const criterionBlocks: CriterionBlock[] = [];
 	const extras: string[] = [];
 	let currentBlock: CriterionBlock | null = null;
+	// Peer level for this section's checkboxes; set by the first one seen.
+	let baseIndent: number | null = null;
 	let suffixStart = lines.length;
 	for (let i = headingIndex + firstHeadingLength; i < lines.length; i++) {
 		const line = lines[i] as string;
@@ -163,8 +180,28 @@ function parseBody(body: string): ParsedBody {
 			break;
 		}
 
-		const checkbox = line.match(CHECKBOX_LINE);
+		const checkbox = fenced[i] ? null : line.match(CHECKBOX_LINE);
 		if (checkbox) {
+			// The FIRST checkbox in the section sets the peer level. Anything deeper
+			// is nested content of the criterion above it — which cannot round-trip
+			// through Plane's task list without being flattened into a peer, so it
+			// is refused rather than silently changing what the criteria ARE.
+			//
+			// Comparing against the base rather than against zero is what makes a
+			// legally-indented list (CommonMark allows one to three leading spaces)
+			// parse as the top-level list it is, while still catching a genuine
+			// child two spaces under an unindented parent. Both are two spaces; only
+			// the context distinguishes them.
+			if (baseIndent === null) baseIndent = indentWidth(line);
+			else if (indentWidth(line) > baseIndent) {
+				throw new ParseError(
+					`Acceptance Criteria nested checkbox "${(checkbox[3] ?? "").trim()}" ` +
+						"cannot round-trip without flattening; use an ordinary nested bullet, or outdent it to a top-level criterion",
+				);
+			} else if (indentWidth(line) < baseIndent) {
+				// An outdented checkbox means the first one was itself nested content.
+				baseIndent = indentWidth(line);
+			}
 			const block: CriterionBlock = {
 				criterion: {
 					checked: checkbox[2]?.toLowerCase() === "x",
@@ -175,14 +212,6 @@ function parseBody(body: string): ParsedBody {
 			criterionBlocks.push(block);
 			currentBlock = block;
 			continue;
-		}
-
-		const indentedCheckbox = line.match(INDENTED_CHECKBOX_LINE);
-		if (indentedCheckbox && !fenced[i]) {
-			throw new ParseError(
-				`Acceptance Criteria nested checkbox "${(indentedCheckbox[1] ?? "").trim()}" ` +
-					"cannot round-trip without flattening; use an ordinary nested bullet or a top-level criterion",
-			);
 		}
 
 		if (currentBlock && (line.trim() === "" || /^[\t ]+\S/.test(line))) {
