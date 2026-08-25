@@ -329,6 +329,76 @@ red first. Ordered as the roadmap sections that produced them.
    `--recreate-target` AND `--allow-divergent-target`.
 2. The CLI no longer forces an exit; it prints a linger notice instead (see below).
 
+## 8f. ⚠ WHERE TO PICK UP (2026-08-24) — READ THIS FIRST, IT SUPERSEDES §8e
+
+**State: branch `integrate/edge-case-fixes`, 1073 tests, gate green, live-verified against the real
+2662-item DATA board. NOT yet merged to `main`.** The remaining step is a delta review round
+(dispatched, may have landed by the time you read this — check
+`scratchpad/delta_{grok,codex}.md`), then merge and push.
+
+### What happened, in one paragraph
+
+An adversarial edge-case hunt plus two full review rounds found that the export → edit → import
+round-trip — the tool's core workflow — corrupted boards in four ways, none needing unusual input.
+Four Codex units fixed those and more; both review engines then returned BLOCK on the integration,
+and their findings were fixed in turn. Everything is committed on the branch with the measured
+evidence in each commit message.
+
+### The three lessons that cost the most, and are not obvious
+
+**1. A build brief is a specification, and a false sentence in it is laundered into evidence.**
+I wrote that a pagination state "is not a state a correct server produces" and told Codex to make it
+a hard error. Plane sends it on every terminal page. `board fetch` failed on its FIRST real call with
+1033 tests green — because Codex implemented my claim faithfully *and wrote a test defending it*. The
+builder could not have caught it: with no credentials it cannot falsify anything a brief asserts
+about an external service. The rule is now in `AGENTS.md`; the short version is **verify every
+sentence that asserts what an external system does, and `git grep` every path you cite** (I also
+cited `src/sync/rules.ts` for a function that lives in `src/lint/rules.ts`).
+
+**2. Two review engines are worth it, and the differentiator is EXECUTION.** Same code, same brief:
+Grok read the epic-expansion rule and called it sound; Codex ran the query layer and found it
+reported every sibling ready while the board still carried the edge. If you can only run one, prefer
+the one that will execute the code.
+
+**3. Verify, do not read the report.** Every Codex unit reported success accurately, and three still
+needed correction: a zero clock-skew tolerance that would have forced an 885-request refetch on a
+two-second clock difference, a file created from my bad path, and the P0 above. The orchestrator's
+whole value is the live smoke test the engines structurally cannot run.
+
+### Things I got wrong that you might repeat
+
+- **A sabotage that does not apply proves nothing.** Twice, a scripted sabotage silently failed to
+  match its anchor and I nearly recorded the guard as proven. Assert the anchor, then check the
+  sabotage landed.
+- **A guard can pass for the wrong reason.** The first CLI-surface invariant reported "0 problems"
+  *with the bug re-introduced*, because it searched all of `src/` and matched an unrelated
+  `estimate:` key. The second version accepted an incidental object key as coverage, so 46 of 251
+  options were "covered" by tests that never invoked them.
+- **My own weak assertion:** `not.toContain("AGO")` missed the lowercase copy in the embedded JSON —
+  in the file documenting the weak-assertion rule.
+
+### Where the judgement calls are recorded
+
+- **`ready` deliberately does NOT narrow** to items that once had blockers. Vacuous readiness is the
+  correct graph answer; narrowing invents policy. The headline splits the two numbers instead.
+- **Identity validation deliberately does NOT require a UUID** despite the review asking for one —
+  the failure is an absent value reaching an identifier, not an unfamiliar format, and five
+  legitimate fixtures use non-UUID ids.
+- **The atlas is exempt from the nested-edge refusal** because it is a map that accepts partial
+  graphs; it routes to its existing FLOOR gauge state. The refusal belongs on answers, not pictures.
+
+### Open, in order
+
+1. The delta review round's findings (check the reports).
+2. Merge `integrate/edge-case-fixes` to `main` and push. **15+ commits, never pushed.**
+3. `npm publish` — WebAuthn-interactive, needs the operator. The inherited `v1.x` tags are already
+   deleted, so `v0.6.0` will be "Latest".
+4. Deferred by the operator to pre-release: rebrand to `planetickets` and a fresh repository with cut
+   history — which also removes the instance hostname, workspace slug and real ticket identifiers
+   from public history. **No credential ever leaked; that was checked across all history.**
+
+---
+
 ## 8e. ⚠ WHERE TO PICK UP (2026-08-23) — READ THIS FIRST, IT SUPERSEDES §8d
 
 **State: `main` @ `757ea1a`. 943 tests, zero biome findings, clean tree, pushed. Version 0.6.0 in
