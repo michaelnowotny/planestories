@@ -11,10 +11,10 @@ The format is loosely [Keep a Changelog](https://keepachangelog.com/); versions 
 >
 > **The `v1.x` tags in this repository come from upstream
 > [linearstories](https://github.com/ijonas/linearstories), not from planestories releases.**
-> `v1.0.0` and `v1.1.0` *are* ancestors of `main` (inherited with the fork point); `v1.2.0`–`v1.4.0`
-> are not on `main` at all. Either way `v1.4.0` semver-sorts above `v0.5.0`, so a GitHub release cut
-> from a `v0.5.0` tag will not be marked "Latest". Decide whether to drop the inherited tags or
-> renumber before tagging.
+> They have been deleted from `origin`, so `v0.6.0` will be this repository's latest release.
+> The configured `upstream` remote still advertises `v1.0.0`–`v1.4.0`, however, and
+> `git fetch --all` can restore those names locally. **Never run `git push --tags` for this release.**
+> Push only the intended tag explicitly: `git push origin v0.6.0`.
 
 ---
 

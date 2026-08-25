@@ -331,10 +331,10 @@ red first. Ordered as the roadmap sections that produced them.
 
 ## 8f. ⚠ WHERE TO PICK UP (2026-08-24) — READ THIS FIRST, IT SUPERSEDES §8e
 
-**State: branch `integrate/edge-case-fixes`, 1073 tests, gate green, live-verified against the real
-2662-item DATA board. NOT yet merged to `main`.** The remaining step is a delta review round
-(dispatched, may have landed by the time you read this — check
-`scratchpad/delta_{grok,codex}.md`), then merge and push.
+**0.6 integration line: branch `codex/coherent-criteria-query-requirements`, 1123 tests, gate green,
+live-verified against the real 2662-item DATA board and approved by the final adversarial repair
+review.** This is the line fast-forwarded to `main` for the release; the gate is rerun on `main`
+before that ref is pushed.
 
 ### What happened, in one paragraph
 
@@ -389,11 +389,9 @@ whole value is the live smoke test the engines structurally cannot run.
 
 ### Open, in order
 
-1. The delta review round's findings (check the reports).
-2. Merge `integrate/edge-case-fixes` to `main` and push. **15+ commits, never pushed.**
-3. `npm publish` — WebAuthn-interactive, needs the operator. The inherited `v1.x` tags are already
+1. `npm publish` — WebAuthn-interactive, needs the operator. The inherited `v1.x` tags are already
    deleted, so `v0.6.0` will be "Latest".
-4. Deferred by the operator to pre-release: rebrand to `planetickets` and a fresh repository with cut
+2. Deferred by the operator to pre-release: rebrand to `planetickets` and a fresh repository with cut
    history — which also removes the instance hostname, workspace slug and real ticket identifiers
    from public history. **No credential ever leaked; that was checked across all history.**
 

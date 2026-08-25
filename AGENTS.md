@@ -46,6 +46,13 @@ kept and the loop is not.
 **Merge when there is no P0 and no P1.** Declare that bar in the brief BEFORE the round. *"No major
 problems"* is not a bar — it has no floor, and it is how four rounds became five.
 
+**Declare a finite review COST budget before the first round.** Severity says what blocks; it does
+not say how long the loop may run. The default budget is one review round plus, only when that round
+finds a P0/P1 introduced by the repair, one repair review. Spending more requires an explicit
+operator decision rather than silently extending the loop. The incident: *"go again when a fix
+introduces a P1"* was applied without a finite cap, and a review became five rounds because each
+repair created the reason for the next one.
+
 **One round is the default.** Go again only when a round finds a P0/P1 **that a previous fix
 introduced**. A regression inside a repair means the change is not understood yet; a residue of P2s
 means the reviewer is working and you should stop. (Both real: round 3 found a P0 created by the
@@ -333,6 +340,20 @@ months while every branch carried "9 pre-existing findings, not mine" as a stand
   passing test that asserts the behaviour you are about to call broken is decisive** — check it
   before writing the bug report, not after. The origin of this rule: an agent spent a whole
   investigation "discovering" a defect that three committed documents already explained.
+- **Reachability decides severity, and reachability is tested — never asserted.** A P1 requires a
+  state the system can produce, not merely one that is imaginable or happens to be on one board.
+  Identify the producer/API path and reproduce it before grading the finding. Both directions failed
+  in one session: a pagination state was dismissed as impossible even though Plane sends it on every
+  terminal page, while nested dependency edges were dismissed as contrived even though a sandbox
+  Plane API created one with HTTP 201. "Our board has one" and "that looks contrived" are both
+  claims to test, not reachability proofs.
+- **Enumerate fan-out before changing an invariant.** A refusal or guard in a shared function is a
+  change to every caller and every shared resource it protects. List those callers/resources first,
+  then write the regression test from that enumeration rather than from the proposed fix. Five
+  review rounds came from locally-correct repairs that missed one edge of the fan-out: the
+  nested-edge refusal reached five commands but missed `ls --blocked`; making `abandoned` skip
+  relations broke `abandoned --refresh`, because refresh publishes the cache every dependency
+  command reads.
 - **A running system tells you what it DOES, never what it is FOR.** Purpose lives in docs and
   tests. Do not infer intent from behaviour alone.
 - **Regression-test-first for bug fixes**, with the RED run against unfixed code as the evidence

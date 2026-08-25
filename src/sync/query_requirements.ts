@@ -44,6 +44,9 @@ export const QUERY_REQUIREMENTS = {
 	inconsistent: dependencyAnswer("board consistency"),
 	blocked: dependencyAnswer("blocked work"),
 	orphans: dependencyAnswer("dependency orphans"),
+	// The answer itself uses hierarchy only. Refresh is the deliberate exception:
+	// it publishes the shared cache, so it must fetch relations or the next
+	// dependency query (for example `ready`) would refuse that incomplete cache.
 	abandoned: hierarchyAnswer(
 		"abandoned work",
 		"abandoned reads hierarchy and ancestor status, not edges",
