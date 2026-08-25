@@ -124,15 +124,21 @@ export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): stri
 	// accepts a partial graph. So the refusal lands on the gauge, not on the
 	// render: the CLI dependency commands refuse outright, the picture says why it
 	// has no number. Letting it propagate here killed the whole page.
-	let cp: ReturnType<typeof computeCriticalPath>;
+	// A UNION, not a nullable pair: exactly one of these holds, and saying so lets
+	// the summary below narrow instead of asserting.
+	type Floor =
+		| { kind: "computed"; cp: ReturnType<typeof computeCriticalPath> }
+		| { kind: "nested"; edges: readonly { sourceLabel: string; targetLabel: string }[] };
+	let floor: Floor;
 	try {
-		cp = computeCriticalPath(graph);
+		floor = { kind: "computed", cp: computeCriticalPath(graph) };
 	} catch (error) {
 		if (!(error instanceof NestedDependencyError)) throw error;
-		cp = {
-			ok: false,
-			cycles: [error.edges.map((e) => `${e.sourceLabel} ⇄ ${e.targetLabel}`)],
-		} as never;
+		// NOT smuggled into `cycles`. A first attempt did exactly that to keep the
+		// page alive, and the gauge then told the reader "the dependency graph has
+		// a cycle" — which is FALSE, and sends them hunting a loop that does not
+		// exist. A nested edge is a different defect with a different repair.
+		floor = { kind: "nested", edges: error.edges };
 	}
 	// FIVE states. Each removed one way the panel could read as a measurement it
 	// is not:
@@ -151,29 +157,37 @@ export function renderAtlasHtml(graph: AtlasGraph, options: RenderOptions): stri
 	// A cycle wins over `incomplete`: adding the edges a partial sweep missed can
 	// never REMOVE a cycle, so one found on a subset is a real finding about the
 	// board, and hiding it behind "re-render later" buries something actionable.
-	const cpSummary = !cp.ok
-		? { state: "cycle" as const, cycles: cp.cycles.slice(0, 1) }
-		: options.coverage.kind === "partial"
-			? { state: "incomplete" as const, missing: options.coverage.failures }
-			: options.coverage.kind === "skipped"
-				? { state: "skipped" as const }
-				: cp.chain.length === 0
-					? { state: "none" as const }
-					: {
-							state: "ok" as const,
-							totalDays: cp.totalDays,
-							chainLength: cp.chain.length,
-							unestimated: cp.unestimated,
-							isLowerBound: cp.isLowerBound,
-							// Unlinked markdown stories have no identifier, so the filter
-							// (which selects by identifier) cannot reach them. Carried so
-							// the tooltip can stop promising otherwise.
-							unfindable: cp.unestimatedUnidentified,
-						};
+	const cpSummary =
+		floor.kind === "nested"
+			? {
+					state: "nested" as const,
+					nested: floor.edges.map((e) => `${e.sourceLabel} → ${e.targetLabel}`),
+				}
+			: !floor.cp.ok
+				? { state: "cycle" as const, cycles: floor.cp.cycles.slice(0, 1) }
+				: options.coverage.kind === "partial"
+					? { state: "incomplete" as const, missing: options.coverage.failures }
+					: options.coverage.kind === "skipped"
+						? { state: "skipped" as const }
+						: floor.cp.chain.length === 0
+							? { state: "none" as const }
+							: {
+									state: "ok" as const,
+									totalDays: floor.cp.totalDays,
+									chainLength: floor.cp.chain.length,
+									unestimated: floor.cp.unestimated,
+									isLowerBound: floor.cp.isLowerBound,
+									// Unlinked markdown stories have no identifier, so the filter
+									// (which selects by identifier) cannot reach them. Carried so
+									// the tooltip can stop promising otherwise.
+									unfindable: floor.cp.unestimatedUnidentified,
+								};
 	const cpJson = JSON.stringify(cpSummary).replace(/</g, "\\u003c");
 	// The SAME set the floor's lower-bound claim is based on, so the filter the
 	// tooltip names selects exactly the stories that make the number a bound.
-	const noEstJson = JSON.stringify(cp.ok ? cp.unestimatedIdentifiers : []).replace(/</g, "\\u003c");
+	const noEstJson = JSON.stringify(
+		floor.kind === "computed" && floor.cp.ok ? floor.cp.unestimatedIdentifiers : [],
+	).replace(/</g, "\\u003c");
 
 	return `<!doctype html>
 <html lang="en">
@@ -1434,7 +1448,7 @@ el("gStories").textContent=String(GRAPH.counts.stories);
    el("gNoEst").parentElement.title=CP.unfindable+" of these "+(CP.unfindable===1?"is":"are")
      +" not linked to the board yet, so the 'no estimate' filter (which selects by identifier) cannot reach "
      +(CP.unfindable===1?"it":"them")+".";
- }else if(st==="cycle"||st==="incomplete"){
+ }else if(st==="cycle"||st==="incomplete"||st==="nested"){
    el("gNoEst").parentElement.title="Not measured: the floor could not be computed, so the connected-and-unestimated set is not established either.";
  }}
 el("gFlag").textContent=String(GRAPH.counts.flagged||0);
@@ -1457,7 +1471,9 @@ el("gFlag").textContent=String(GRAPH.counts.flagged||0);
  }else{
    v.textContent="\\u2014";
    k.textContent="FLOOR";
-   cell.title=st==="cycle"
+   cell.title=st==="nested"
+     ?("No floor: "+((f.nested&&f.nested[0])||"a relation")+" connects an item to its own ancestor or descendant, so it cannot be read as a schedule constraint. Remove the relation, or re-parent one of the two, then re-render.")
+     :st==="cycle"
      ?("No floor: the dependency graph has a cycle ("+((f.cycles&&f.cycles[0])||[]).join(" \\u2192 ")+"). Break it on the board, then re-render.")
      :st==="incomplete"
        ?("No floor: "+f.missing+" relation lookup(s) failed while reading the board, so dependency edges are MISSING. A floor computed from a partial graph can be too short, or can hide a cycle. Re-render at a quieter hour, or from a snapshot.")

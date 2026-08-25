@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { AtlasGraph, AtlasNode } from "../../../src/atlas/model.ts";
 import { buildAtlasFromFile } from "../../../src/atlas/model.ts";
 import { renderAtlasHtml } from "../../../src/atlas/render.ts";
 import { computeCriticalPath } from "../../../src/sync/critical_path.ts";
@@ -485,5 +486,76 @@ describe("effort visibility (operator decisions A/B/C)", () => {
 		expect(out).toContain('st==="cycle"');
 		expect(out).toContain('st==="incomplete"');
 		expect(out).toContain("No dependency chain on this board");
+	});
+});
+
+/**
+ * A nested dependency edge is NOT a cycle, and the gauge must not say it is.
+ *
+ * Keeping the page alive was right — an atlas is a map and accepts partial
+ * graphs. The first attempt did it by fabricating a `cycles` entry from the
+ * nested edges, so the tooltip told the reader "the dependency graph has a
+ * cycle" and sent them hunting a loop that does not exist. Different defect,
+ * different repair.
+ */
+describe("floor gauge — nested dependency edges", () => {
+	const leaf = (id: string): AtlasNode => ({
+		id,
+		kind: "story",
+		title: `T ${id}`,
+		identifier: id,
+		url: null,
+		status: "Todo",
+		statusGroup: "unstarted",
+		labels: [],
+		assignee: null,
+		effortDays: 1,
+		priority: null,
+		createdAt: null,
+		updatedAt: null,
+		criteria: [],
+		quality: null,
+		children: [],
+	});
+
+	const nestedGraph = (): AtlasGraph =>
+		({
+			project: "P",
+			source: "board",
+			nodes: [{ ...leaf("E"), kind: "epic", children: [leaf("M1"), leaf("M2")] }],
+			edges: [{ source: "E", target: "M2", type: "blocks" }],
+			labels: [],
+			assignees: [],
+			statuses: [],
+			counts: { epics: 1, stories: 2, criteria: 0, flagged: 0, edges: 1 },
+		}) as unknown as AtlasGraph;
+
+	test("the page still renders — a map is worth drawing without a floor", () => {
+		// The refusal belongs on ANSWERS, not on the picture. Letting it propagate
+		// here killed the whole page once.
+		const html = renderAtlasHtml(nestedGraph(), {
+			coverage: { kind: "complete" },
+			provenance: null,
+		});
+		expect(html.length).toBeGreaterThan(5000);
+		expect(html).toContain("<!doctype html>");
+	});
+
+	test("the state is `nested`, and the page never claims a cycle", () => {
+		const html = renderAtlasHtml(nestedGraph(), {
+			coverage: { kind: "complete" },
+			provenance: null,
+		});
+		expect(html).toContain('"state":"nested"');
+		expect(html).not.toContain('"state":"cycle"');
+	});
+
+	test("the tooltip names the real defect and its repair", () => {
+		const html = renderAtlasHtml(nestedGraph(), {
+			coverage: { kind: "complete" },
+			provenance: null,
+		});
+		expect(html).toContain("own ancestor or descendant");
+		expect(html).toMatch(/Remove the relation|re-parent/i);
 	});
 });

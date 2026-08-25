@@ -2,7 +2,11 @@ import type { AtlasGraph, AtlasNode, StatusGroup } from "../atlas/model.ts";
 import { ConfigError } from "../errors.ts";
 import { formatDevDays } from "../markdown/directives.ts";
 import { shellQuote } from "../utils/shell.ts";
-import { type ProjectedLeaf, projectLeafDependencies } from "./critical_path.ts";
+import {
+	NestedDependencyError,
+	type ProjectedLeaf,
+	projectLeafDependencies,
+} from "./critical_path.ts";
 
 export interface QueryPredicates {
 	open?: boolean;
@@ -145,6 +149,17 @@ export function queryStories(
 ): StoryQueryResult {
 	validateQueryPredicates(predicates);
 	const projection = projectLeafDependencies(graph);
+	// `--blocked` is the one predicate here that reads RELATIONS, and a nested
+	// ancestor/descendant edge is never written into `predecessors` — so without
+	// this, `ls --blocked` quietly OMITS an item the board says is blocked and
+	// `count --blocked` returns a number that is too small. The dependency verbs
+	// refuse; these two were the sixth path and were missed.
+	//
+	// Scoped to `--blocked` deliberately: refusing every `ls` because one edge is
+	// malformed would decline questions that do not depend on it.
+	if (predicates.blocked && projection.nestedEdges.length > 0) {
+		throw new NestedDependencyError(projection.nestedEdges);
+	}
 	const answerRoutes: QueryAnswerRoutes =
 		routes ??
 		({
