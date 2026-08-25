@@ -343,11 +343,44 @@ export async function fetchWorkItems(
 	return raw.map(normalizeFetched);
 }
 
+/**
+ * Values a cast produces that LOOK like an id and are not one.
+ *
+ * The review suggested requiring a UUID shape. Plane does use UUIDs, but that is
+ * stricter than the defect needs and would reject a deployment whose ids are
+ * shaped differently for no safety gain — the failure being prevented is an
+ * absent value reaching an identifier or URL, not an unfamiliar format.
+ */
+const NON_IDS = new Set(["", "undefined", "null", "[object Object]", "NaN"]);
+
 function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
-	if (typeof item.name !== "string") {
-		const itemId = typeof item.id === "string" ? item.id : "<unknown id>";
+	// IDENTITY FIRST, and validated rather than cast.
+	//
+	// `id` and `sequence_id` were taken on trust, so a malformed response produced
+	// `identifier: DATA-undefined` and `url: .../issues/undefined` — visibly
+	// broken, which is the lucky case. The unlucky one is a STRING sequence:
+	// `"42"` became the entirely plausible `DATA-42`, pointing at whatever really
+	// is item 42. A wrong identifier that looks right is worse than one that
+	// looks wrong, and both are worse than a refusal.
+	if (typeof item.id !== "string" || NON_IDS.has(item.id.trim())) {
 		throw new PlaneApiError(
-			`Plane work item ${itemId} returned an invalid name; expected a string`,
+			`Plane work item returned an invalid id (${JSON.stringify(item.id)}); expected a non-empty identifier. ` +
+				"Refusing to build a work-item URL from it.",
+		);
+	}
+	if (
+		typeof item.sequence_id !== "number" ||
+		!Number.isSafeInteger(item.sequence_id) ||
+		item.sequence_id <= 0
+	) {
+		throw new PlaneApiError(
+			`Plane work item ${item.id} returned an invalid sequence_id (${JSON.stringify(item.sequence_id)}); expected a positive integer. ` +
+				'A string such as "42" would coerce to a plausible-looking identifier for a different item.',
+		);
+	}
+	if (typeof item.name !== "string") {
+		throw new PlaneApiError(
+			`Plane work item ${item.id} returned an invalid name; expected a string`,
 		);
 	}
 	const state = item.state as { name?: string; group?: string } | string | undefined;

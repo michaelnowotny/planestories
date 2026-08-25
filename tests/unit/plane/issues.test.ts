@@ -145,3 +145,54 @@ describe("fetchWorkItems", () => {
 		}
 	});
 });
+
+/**
+ * Identity is validated at the API boundary, BEFORE anything builds an
+ * identifier or a URL from it.
+ *
+ * Measured before the fix: a malformed response produced
+ * `identifier: DATA-undefined` and `url: .../issues/undefined`. That is the
+ * lucky case, because it is visibly broken. The unlucky one is a STRING
+ * sequence: `"42"` coerced to the entirely plausible `DATA-42`, pointing at
+ * whatever really is item 42. A wrong identifier that looks right is worse than
+ * one that looks wrong, and both are worse than a refusal.
+ */
+describe("work-item identity is validated, not cast", () => {
+	// Driven through `fetchWorkItems` rather than the private normaliser: the
+	// guard has to fire on the path that BUILDS an identifier and a URL, which is
+	// where the wrong value would have surfaced.
+	const good = { id: "wi-1", sequence_id: 7, name: "A story" };
+	const fetchWith = (item: Record<string, unknown>) =>
+		fetchWorkItems(makeFakeClient({ workItems: { [PROJECT_ID]: [item] } }).client, PROJECT_ID);
+
+	test.each([
+		["absent", undefined],
+		["empty", ""],
+		["the literal string undefined", "undefined"],
+		["an object cast to a string", "[object Object]"],
+	])("an id that is %s is refused", async (_label, id) => {
+		await expect(fetchWith({ ...good, id })).rejects.toThrow(/invalid id/i);
+	});
+
+	test.each([
+		["a numeric string", "42"],
+		["absent", undefined],
+		["zero", 0],
+		["negative", -1],
+		["fractional", 1.5],
+	])("a sequence_id that is %s is refused", async (_label, sequence_id) => {
+		await expect(fetchWith({ ...good, sequence_id })).rejects.toThrow(/invalid sequence_id/i);
+	});
+
+	test('the "42" refusal explains WHY a plausible value is rejected', async () => {
+		// Without the reason, the obvious "fix" is to coerce it — which IS the
+		// defect: "42" becomes DATA-42, pointing at whatever really is item 42.
+		await expect(fetchWith({ ...good, sequence_id: "42" })).rejects.toThrow(/plausible/i);
+	});
+
+	test("a well-formed item still fetches", async () => {
+		const items = await fetchWith(good);
+		expect(items[0]?.sequenceId).toBe(7);
+		expect(items[0]?.name).toBe("A story");
+	});
+});
