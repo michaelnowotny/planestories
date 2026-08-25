@@ -125,6 +125,49 @@ if most of your criteria are gates and there are many, the story is too big and 
 Rationale and the calibration corpus: `docs/RATE_USERSTORIES.md`,
 `docs/RATE_USERSTORIES_CALIBRATION.md`.
 
+### Fixed — the round-trip and the API boundary
+
+An adversarial edge-case hunt and two review rounds found defects in the paths this tool exists to
+serve. Every one was reproduced against the real functions before being fixed, and the fixes were
+verified against a live 2662-item board.
+
+**The export → edit → import round-trip was not a fixed point**, and none of the four ways it broke
+needed unusual input. An `<h2>` in a Plane description re-imported as a SECOND work item while the
+real ticket lost its body. `## ` inside a fenced code block did the same and truncated the real story
+at the fence — `--strict` did not fire, and this repository's own README has three such lines. CRLF
+line endings discarded the entire per-story YAML block, so an already-linked story re-imported as a
+CREATE. And `estimate: []` reached the wire as an authoritative **0** (`Number([]) === 0`), hashing
+identically to a genuine zero so skip-unchanged never revisited it.
+
+**Two stories sharing a `plane_id` silently destroyed one of them** — both updates landed on the same
+work item, last write wins, no warning. A pre-flight check now refuses the whole run before any write.
+
+**A malformed story aborted an import after earlier stories had been created**, with no summary — so
+the operator concluded nothing had happened, and retrying double-created. Story bodies are parsed in
+the pre-flight now, and the refusal says no board writes were made.
+
+**A parent cycle made work vanish.** Every member has a resolvable parent, so none became a root: a
+two-story file whose stories named each other produced `0 of 0 stories`.
+
+**Ordinary board churn failed every full-board read.** `total_count` moving between pages during a
+27-page walk is normal on an active board; it threw. The walk now retries from page one with the
+accumulation discarded, then refuses explicitly — never a partial read published as complete, and
+never two board states spliced together.
+
+**A dependency edge between an item and its own ancestor was silently erased**, so `ready` reported
+every sibling ready and `blocked` reported nothing while the board still carried the edge. Such an
+edge cannot be expanded without inventing constraints nobody declared, so dependency commands now
+refuse and name both endpoints.
+
+**CommonMark-legal indented criteria were rejected as nested.** One to three leading spaces are legal
+on a top-level list; the first checkbox in a section now sets the peer level.
+
+**Work-item identity was cast unchecked**, producing `DATA-undefined` — and, worse, a string
+sequence `"42"` becoming the entirely plausible `DATA-42`, pointing at a different item.
+
+**`lint` crashed on an unparseable file** instead of reporting it, so a run over twenty files
+reported one and exited zero.
+
 ### Reliability
 
 - **Every CLI option is now covered by a test that would fail if the option did nothing.** All 251
