@@ -34,8 +34,6 @@ interface ParsedBody extends SplitBody {
 	extras: string;
 }
 
-/** Canonical ATX authoring form, applied only after Marked confirms a real heading. */
-export const AC_HEADING = /^#{1,6}[ \t]+acceptance criteria(?:[ \t]+#*)?[ \t]*\r?$/i;
 /**
  * A checklist line, split into (prefix)(mark)(rest) so the mark can be rewritten
  * in place while preserving the exact bullet, indentation and text. The prefix
@@ -161,8 +159,19 @@ function isListToken(token: Token): token is Tokens.List {
 	return token.type === "list" && "items" in token;
 }
 
-function headingLength(lines: readonly string[], headingIndex: number): 1 | 2 {
-	return AC_HEADING.test(lines[headingIndex] ?? "") ? 1 : 2;
+function headingLength(token: Tokens.Heading): 1 | 2 {
+	const rawLines = token.raw.split("\n");
+	// Marked assigns blank lines immediately after a heading to that heading's
+	// raw span. They are section spacing, not Setext syntax; discard them before
+	// deciding whether the parsed heading occupies one source line or two.
+	while (rawLines.length > 0 && rawLines.at(-1)?.trim() === "") rawLines.pop();
+	const physicalLines = rawLines.length;
+	if (physicalLines !== 1 && physicalLines !== 2) {
+		throw new ParseError(
+			"Could not map the Acceptance Criteria heading back to its source lines; left unchanged",
+		);
+	}
+	return physicalLines;
 }
 
 /**
@@ -174,7 +183,9 @@ export function classifyAcceptanceCriteriaLines(
 ): AcceptanceCriteriaLineClassification {
 	const source = commonMarkSource(lines);
 	const blocks = positionedBlockTokens(source);
-	const headings = blocks.filter(({ token }) => isAcceptanceCriteriaHeading(token));
+	const headings = blocks.filter((block): block is PositionedToken & { token: Tokens.Heading } =>
+		isAcceptanceCriteriaHeading(block.token),
+	);
 	if (headings.length === 0) {
 		return {
 			headingIndex: -1,
@@ -183,7 +194,7 @@ export function classifyAcceptanceCriteriaLines(
 			peerCheckboxLineIndices: [],
 		};
 	}
-	const heading = headings[0] as PositionedToken;
+	const heading = headings[0] as PositionedToken & { token: Tokens.Heading };
 	if (headings.length > 1) {
 		const duplicate = headings[1] as PositionedToken;
 		throw new ParseError(
@@ -204,7 +215,7 @@ export function classifyAcceptanceCriteriaLines(
 	}
 	return {
 		headingIndex: heading.startLine,
-		headingLength: headingLength(lines, heading.startLine),
+		headingLength: headingLength(heading.token),
 		sectionEnd,
 		peerCheckboxLineIndices: peers,
 	};

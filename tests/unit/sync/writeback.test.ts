@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { splitBody } from "../../../src/markdown/criteria.ts";
 import { applyCheckboxStates, reverseSyncCriteria } from "../../../src/sync/writeback.ts";
 import type { ResolvedConfig } from "../../../src/types.ts";
 import { type FakeData, makeFakeClient } from "../../helpers/fake-plane-client.ts";
@@ -149,6 +150,21 @@ describe("applyCheckboxStates (pure, plane_id-keyed reverse-sync)", () => {
 		const { content: out, changes } = applyCheckboxStates(content, states({ p1: { 0: true } }));
 		expect(out).toContain("- [x] setext criterion");
 		expect(changes).toHaveLength(1);
+	});
+
+	test("numbers an indented ATX heading identically in splitBody and write-back", () => {
+		const body = ["  ### Acceptance Criteria", "- [ ] enters email", "- [ ] enters password"].join(
+			"\n",
+		);
+		const content = linked("p1", "S", body, "").join("\n");
+
+		const parsedTexts = splitBody(body).criteria.map((criterion) => criterion.text);
+		const { content: out, changes } = applyCheckboxStates(content, states({ p1: { 0: true } }));
+
+		expect(parsedTexts).toEqual(["enters email", "enters password"]);
+		expect(out).toContain("- [x] enters email");
+		expect(out).toContain("- [ ] enters password");
+		expect(changes[0]).toMatchObject({ position: 0, text: parsedTexts[0] });
 	});
 
 	test("ignores an acceptance-criteria heading BEFORE the yaml block (body starts after yaml)", () => {
