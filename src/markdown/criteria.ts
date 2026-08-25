@@ -59,6 +59,13 @@ export const AC_HEADING = /^#{1,6}\s+acceptance criteria\s*#*\s*$/i;
  */
 export const CHECKBOX_LINE = /^([\t ]*[-*]\s+)\[([ xX])\](\s+.*)$/;
 
+/** CommonMark content column of a list item: marker indent + marker + following spaces. */
+function contentColumn(marker: RegExpExecArray | null): number | null {
+	if (!marker) return null;
+	// indent + marker + the spaces after it. `- x` at column 0 has content at 2.
+	return indentWidth(marker[1] ?? "") + (marker[2] ?? "").length + (marker[3] ?? "").length;
+}
+
 /** Visual width of a line's leading whitespace, with tabs as four columns. */
 function indentWidth(line: string): number {
 	const lead = /^[\t ]*/.exec(line)?.[0] ?? "";
@@ -170,8 +177,9 @@ function parseBody(body: string): ParsedBody {
 	const criterionBlocks: CriterionBlock[] = [];
 	const extras: string[] = [];
 	let currentBlock: CriterionBlock | null = null;
-	// Peer level for this section's checkboxes; set by the first one seen.
-	let baseIndent: number | null = null;
+	// Content column of the list item currently open above us, if any. A checkbox
+	// at or past it belongs to that item rather than being a peer criterion.
+	let enclosingContentColumn: number | null = null;
 	let suffixStart = lines.length;
 	for (let i = headingIndex + firstHeadingLength; i < lines.length; i++) {
 		const line = lines[i] as string;
@@ -180,6 +188,10 @@ function parseBody(body: string): ParsedBody {
 			break;
 		}
 
+		// Any list marker — checkbox or plain bullet — opens a container. Track the
+		// SHALLOWEST one still open, so a peer checkbox closes a deeper container
+		// rather than inheriting it.
+		const marker = fenced[i] ? null : /^([\t ]*)([-*+]|\d+[.)])(\s+)/.exec(line);
 		const checkbox = fenced[i] ? null : line.match(CHECKBOX_LINE);
 		if (checkbox) {
 			// The FIRST checkbox in the section sets the peer level. Anything deeper
@@ -192,15 +204,22 @@ function parseBody(body: string): ParsedBody {
 			// parse as the top-level list it is, while still catching a genuine
 			// child two spaces under an unindented parent. Both are two spaces; only
 			// the context distinguishes them.
-			if (baseIndent === null) baseIndent = indentWidth(line);
-			else if (indentWidth(line) > baseIndent) {
+			// CommonMark: a list item's CONTENT column is its marker indent plus the
+			// marker width. A checkbox at or past the content column of the list
+			// item above it is INSIDE that item; anything shallower is a peer.
+			//
+			// Comparing against the first checkbox alone was not enough. It counted
+			// a checkbox nested under an ORDINARY bullet as a criterion —
+			//   - ordinary bullet
+			//     - [ ] nested checkbox      <- became a criterion
+			// because the bullet was invisible to the rule. And it rejected legal
+			// mixed peer indentation (2, 0, then 1 space) as nested.
+			const indent = indentWidth(line);
+			if (enclosingContentColumn !== null && indent >= enclosingContentColumn) {
 				throw new ParseError(
 					`Acceptance Criteria nested checkbox "${(checkbox[3] ?? "").trim()}" ` +
 						"cannot round-trip without flattening; use an ordinary nested bullet, or outdent it to a top-level criterion",
 				);
-			} else if (indentWidth(line) < baseIndent) {
-				// An outdented checkbox means the first one was itself nested content.
-				baseIndent = indentWidth(line);
 			}
 			const block: CriterionBlock = {
 				criterion: {
@@ -211,7 +230,15 @@ function parseBody(body: string): ParsedBody {
 			};
 			criterionBlocks.push(block);
 			currentBlock = block;
+			// This checkbox is now the open container for anything deeper.
+			enclosingContentColumn = contentColumn(marker);
 			continue;
+		}
+
+		if (marker && !checkbox) {
+			// An ordinary bullet. A checkbox indented into it is that bullet's
+			// content, not an acceptance criterion.
+			enclosingContentColumn = contentColumn(marker);
 		}
 
 		if (currentBlock && (line.trim() === "" || /^[\t ]+\S/.test(line))) {

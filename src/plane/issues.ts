@@ -117,7 +117,7 @@ export async function createWorkItem(
 ): Promise<WorkItemRef> {
 	try {
 		const item = await client.createWorkItem<RawWorkItem>(projectId, buildBody(input));
-		return { id: item.id, sequenceId: item.sequence_id };
+		return normalizeWorkItemRef(item as unknown as Record<string, unknown>, "Work-item create");
 	} catch (error) {
 		if (error instanceof PlaneApiError) {
 			throw error;
@@ -139,7 +139,7 @@ export async function updateWorkItem(
 ): Promise<WorkItemRef> {
 	try {
 		const item = await client.updateWorkItem<RawWorkItem>(projectId, workItemId, buildBody(input));
-		return { id: item.id, sequenceId: item.sequence_id };
+		return normalizeWorkItemRef(item as unknown as Record<string, unknown>, "Work-item update");
 	} catch (error) {
 		if (error instanceof PlaneApiError) {
 			throw error;
@@ -174,7 +174,8 @@ export async function findWorkItemByExternalId(
 	}
 	const match =
 		"results" in data && Array.isArray(data.results) ? data.results[0] : (data as RawWorkItem);
-	return match?.id ? { id: match.id, sequenceId: match.sequence_id } : null;
+	if (!match?.id) return null;
+	return normalizeWorkItemRef(match as unknown as Record<string, unknown>, "External-id lookup");
 }
 
 /** Normalize a title for duplicate detection: trim, lowercase, collapse whitespace. */
@@ -353,18 +354,18 @@ export async function fetchWorkItems(
  */
 const NON_IDS = new Set(["", "undefined", "null", "[object Object]", "NaN"]);
 
-function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
-	// IDENTITY FIRST, and validated rather than cast.
-	//
-	// `id` and `sequence_id` were taken on trust, so a malformed response produced
-	// `identifier: DATA-undefined` and `url: .../issues/undefined` — visibly
-	// broken, which is the lucky case. The unlucky one is a STRING sequence:
-	// `"42"` became the entirely plausible `DATA-42`, pointing at whatever really
-	// is item 42. A wrong identifier that looks right is worse than one that
-	// looks wrong, and both are worse than a refusal.
+/**
+ * The ONE place a work-item identity is admitted, whatever response it came from.
+ *
+ * The first version of this guard covered LIST responses only, so an import —
+ * the ordinary write path — still trusted the POST/PATCH echo and could write
+ * back a plausible `DATA-42` from a string sequence, or reach `plane_url` with a
+ * missing id. That is the same false-identifier failure, on the busier path.
+ */
+export function normalizeWorkItemRef(item: Record<string, unknown>, context: string): WorkItemRef {
 	if (typeof item.id !== "string" || NON_IDS.has(item.id.trim())) {
 		throw new PlaneApiError(
-			`Plane work item returned an invalid id (${JSON.stringify(item.id)}); expected a non-empty identifier. ` +
+			`${context} returned an invalid id (${JSON.stringify(item.id)}); expected a non-empty identifier. ` +
 				"Refusing to build a work-item URL from it.",
 		);
 	}
@@ -374,10 +375,23 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 		item.sequence_id <= 0
 	) {
 		throw new PlaneApiError(
-			`Plane work item ${item.id} returned an invalid sequence_id (${JSON.stringify(item.sequence_id)}); expected a positive integer. ` +
+			`${context} returned an invalid sequence_id (${JSON.stringify(item.sequence_id)}); expected a positive integer. ` +
 				'A string such as "42" would coerce to a plausible-looking identifier for a different item.',
 		);
 	}
+	return { id: item.id, sequenceId: item.sequence_id };
+}
+
+function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
+	// IDENTITY FIRST, and validated rather than cast.
+	//
+	// `id` and `sequence_id` were taken on trust, so a malformed response produced
+	// `identifier: DATA-undefined` and `url: .../issues/undefined` — visibly
+	// broken, which is the lucky case. The unlucky one is a STRING sequence:
+	// `"42"` became the entirely plausible `DATA-42`, pointing at whatever really
+	// is item 42. A wrong identifier that looks right is worse than one that
+	// looks wrong, and both are worse than a refusal.
+	const ref = normalizeWorkItemRef(item, "Plane work item");
 	if (typeof item.name !== "string") {
 		throw new PlaneApiError(
 			`Plane work item ${item.id} returned an invalid name; expected a string`,
@@ -408,8 +422,8 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 	};
 
 	return {
-		id: item.id as string,
-		sequenceId: item.sequence_id as number,
+		id: ref.id,
+		sequenceId: ref.sequenceId,
 		name: item.name,
 		createdAt: normalizeInstant(item.created_at),
 		updatedAt: normalizeInstant(item.updated_at),

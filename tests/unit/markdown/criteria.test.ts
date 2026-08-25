@@ -232,3 +232,52 @@ describe("criteria indentation", () => {
 		expect(result.criteria[0]?.text).toBe("real");
 	});
 });
+
+/**
+ * Peer vs nested is decided by CommonMark's CONTENT COLUMN, not by comparing to
+ * the first checkbox.
+ *
+ * The first-checkbox heuristic was blind to what came BEFORE a checkbox, so a
+ * checkbox nested under an ordinary bullet silently became an acceptance
+ * criterion — and it rejected legal mixed peer indentation. Both measured.
+ */
+describe("criteria nesting follows list structure", () => {
+	const withCriteria = (lines: string[]) => splitBody(["Body.", "", ...lines].join("\n"));
+
+	test("a checkbox inside an ORDINARY bullet is not a criterion", () => {
+		// Measured before: returned "nested checkbox" as a peer criterion, so it
+		// would have been synced to the board as one.
+		expect(() =>
+			withCriteria([
+				"### Acceptance Criteria",
+				"- ordinary bullet",
+				"  - [ ] nested checkbox",
+				"- [ ] peer criterion",
+			]),
+		).toThrow(/nested checkbox/i);
+	});
+
+	test("legal mixed peer indentation is accepted", () => {
+		// 2, 0, then 1 space. All three are peers: 1 is short of the content column
+		// (2) opened by the item above it. Measured before: threw on the third.
+		const result = withCriteria(["### Acceptance Criteria", "  - [ ] a", "- [ ] b", " - [ ] c"]);
+		expect(result.criteria.map((c) => c.text)).toEqual(["a", "b", "c"]);
+	});
+
+	test("a peer checkbox CLOSES a deeper container rather than inheriting it", () => {
+		// After a nested block ends, an outdented checkbox is a peer again.
+		const result = withCriteria([
+			"### Acceptance Criteria",
+			"- [ ] first",
+			"  detail belonging to first",
+			"- [ ] second",
+		]);
+		expect(result.criteria.map((c) => c.text)).toEqual(["first", "second"]);
+	});
+
+	test("an ordered-list marker opens a container too", () => {
+		expect(() =>
+			withCriteria(["### Acceptance Criteria", "1. ordered bullet", "   - [ ] inside it"]),
+		).toThrow(/nested checkbox/i);
+	});
+});

@@ -338,8 +338,14 @@ export function queryOrphans(graph: AtlasGraph): OrphansQueryReport {
 }
 
 export function queryAbandoned(graph: AtlasGraph): AbandonedQueryReport {
+	// NO nested-edge refusal here, unlike its neighbours. `abandoned` reads
+	// hierarchy and ancestor STATUS only — a malformed dependency edge cannot
+	// change which open items sit under a cancelled epic. Refusing anyway removed
+	// an exact and useful report for a reason that does not apply to it.
+	//
+	// `orphans` keeps the refusal: its definition is connectivity, so a dropped
+	// edge is exactly what would make an item look unconnected.
 	const projection = projectLeafDependencies(graph);
-	refuseNestedEdges(projection);
 	const leaves = [...projection.leaves.values()];
 	const open = leaves.filter(isOpen);
 	const items: AbandonedQueryItem[] = [];

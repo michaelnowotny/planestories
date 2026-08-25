@@ -196,3 +196,49 @@ describe("work-item identity is validated, not cast", () => {
 		expect(items[0]?.name).toBe("A story");
 	});
 });
+
+/**
+ * Identity validation on the WRITE path, not just on reads.
+ *
+ * The first version covered list responses only — so an import, which is the
+ * ordinary write path and the busier one, still trusted the POST/PATCH echo. A
+ * string sequence in a create response would have been written back into the
+ * story file as a plausible `DATA-42` pointing at a different item.
+ */
+describe("create/update/lookup validate identity too", () => {
+	test("a create response with a string sequence_id is refused", async () => {
+		const { client } = makeFakeClient({});
+		const original = client.createWorkItem.bind(client);
+		void original;
+		(client as unknown as Record<string, unknown>).createWorkItem = async () => ({
+			id: "wi-1",
+			sequence_id: "42",
+			name: "x",
+		});
+		await expect(createWorkItem(client, PROJECT_ID, { name: "x" } as never)).rejects.toThrow(
+			/invalid sequence_id/i,
+		);
+	});
+
+	test("an update response with a missing id is refused", async () => {
+		const { client } = makeFakeClient({});
+		(client as unknown as Record<string, unknown>).updateWorkItem = async () => ({
+			sequence_id: 7,
+			name: "x",
+		});
+		await expect(
+			updateWorkItem(client, PROJECT_ID, "wi-1", { name: "x" } as never),
+		).rejects.toThrow(/invalid id/i);
+	});
+
+	test("a well-formed create response still returns its ref", async () => {
+		const { client } = makeFakeClient({});
+		(client as unknown as Record<string, unknown>).createWorkItem = async () => ({
+			id: "wi-1",
+			sequence_id: 7,
+			name: "x",
+		});
+		const ref = await createWorkItem(client, PROJECT_ID, { name: "x" } as never);
+		expect(ref).toEqual({ id: "wi-1", sequenceId: 7 });
+	});
+});

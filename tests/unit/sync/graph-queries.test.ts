@@ -270,3 +270,36 @@ test("bad epic scopes and limits refuse with an answering route before returning
 		expect(() => queryReady(value, { limit })).toThrow(/positive integer/);
 	}
 });
+
+/**
+ * Which verbs a malformed dependency edge should stop, and which it should not.
+ *
+ * A nested ancestor/descendant edge makes any DEPENDENCY answer unsound, so
+ * `ready`, `blocked` and `inconsistent` refuse. But `abandoned` reads hierarchy
+ * and ancestor status only — no dependency edge can change which open items sit
+ * under a cancelled epic — so refusing there removed an exact, useful report for
+ * a reason that did not apply. `orphans` keeps the refusal because its whole
+ * definition is connectivity.
+ */
+describe("nested-edge refusal is scoped to answers that actually depend on edges", () => {
+	const nested = (): AtlasGraph => {
+		const cancelled = epic("e1", [story("s1"), story("s2")], "cancelled");
+		return graph([cancelled], [{ source: "e1", target: "s2", type: "blocks" }]);
+	};
+
+	test.each([
+		["ready", queryReady],
+		["blocked", queryBlocked],
+		["inconsistent", queryInconsistent],
+		["orphans", queryOrphans],
+	])("%s refuses", (_name, fn) => {
+		expect(() => (fn as (g: AtlasGraph) => unknown)(nested())).toThrow(/ancestor or descendant/i);
+	});
+
+	test("abandoned still answers, because hierarchy is unaffected", () => {
+		const report = queryAbandoned(nested());
+		// Both open stories sit under a cancelled epic; that is true regardless of
+		// what the dependency edge says.
+		expect(report.items).toHaveLength(2);
+	});
+});
