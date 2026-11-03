@@ -329,6 +329,83 @@ red first. Ordered as the roadmap sections that produced them.
    `--recreate-target` AND `--allow-divergent-target`.
 2. The CLI no longer forces an exit; it prints a linger notice instead (see below).
 
+## 8g. ⚠ WHERE TO PICK UP (2026-11-03) — READ THIS FIRST, IT SUPERSEDES §8f
+
+**State: `main` @ `aabd2d4`, pushed (`d2775ea..aabd2d4`). Gate on that commit: 1171 pass, 0 fail,
+3728 `expect()`, 115 files, biome clean.** The command page for this slice is `docs/CHEATSHEET.md`.
+
+### What shipped
+
+| Change | Commit |
+|---|---|
+| `packet`, `epic`, `doctor`, `critical-path` answer from the board cache or `--from-snapshot`, and fetch live only with `--refresh`. Each cached or snapshot answer prints the copy's instant in absolute time. | `eeeae2c` |
+| Opt-in comment sweep on `board fetch --with-comments`. `--with-comments` on `show`, `packet`, and `export`. Without it they print how many comments were withheld. | `018829a` |
+| `audit --stale-state`: open items whose latest cached comment looks finished. Labelled as a heuristic. Default `audit` output is unchanged. | `3d3a093` |
+| One critical path when several chains share the floor: fewest hops, then lowest identifier. | `87129ca` |
+| `--limit` on `blocked`, `inconsistent`, `orphans`, `abandoned`, and `critical-path` (`ready` already had it). `--updated-since` on `ls` and `count`. `--json` was already on all six graph commands. | `1673872` |
+| A paced command prints an opening line before its first request and a stderr ETA while a list or sweep is in flight. The completion `paced:` summary stays. | `aabd2d4` |
+
+A cache hit says `Read from board cache (fetched <ISO>) — NOT live. No API calls were made.` A
+snapshot says `Read from snapshot (taken <ISO>) — NOT live. No API calls were made.` `--refresh`
+says `Live board fetched at <ISO> and stored in the local cache.` Past 1h the cache still refuses
+unless `--refresh` or `--stale-ok`.
+
+`show`, `packet`, and `export` print `N comments not shown` when the count is known, `0 comments
+not shown` when a sweep ran and found none, and `comments not shown (not fetched)` when comments
+were never captured. `--with-comments` without a captured inventory exits non-zero and names
+`board fetch --with-comments` or `--from-snapshot`. `export --with-comments` requires
+`--from-snapshot`, prints on stderr, and does not change the story file. A live export does not
+start a comment sweep.
+
+`audit --stale-state` reads the cache only. It lists open items whose latest comment matches
+merged, deployed, done, shipped, released, or closed, and the report says this is not a state
+change. A missing comment inventory refuses. It does not walk live activity.
+
+`--limit` shortens displayed rows. Denominators, and the critical-path dev-day floor, stay the
+full set. `--updated-since` accepts the same durations and ISO instants as `audit --since`. A
+story with no usable `updatedAt` is omitted and counted as unknown.
+
+A configured `apiRateLimit` produces `Paced run starting · <host> · workspace <slug> · project
+<name> · <rpm>/min.` on stderr before the first request, then lines such as `work items: 100/3328
+(~1m left)`. A list whose length is still unknown says `total unknown, no estimate`. No rate limit
+means no new lines. Snapshot relation and comment sweeps keep their stdout ETA. A paced snapshot
+also gets the opening line and stderr ticks for the listing pages.
+
+### Critical path, live and snapshot
+
+Before `87129ca`, the same Data Platform edges named an 8-node chain from a live read and a 4-node
+chain from a snapshot. Both were 17 days. Several done nodes shared one earliest-finish instant,
+and the old tie followed edge-insertion order, which a snapshot and a live sweep do not share.
+
+After the fix, `critical-path -p "Data Platform" --refresh` on 2026-11-03 returned the 4-node
+chain `DATA-2631`, `DATA-2636`, `DATA-2637`, `DATA-2640`, 17 days. `DATA-2631` is done, so its
+estimate adds nothing to the remaining floor (3 + 5 + 8 + 4 would be 20). The result is a lower
+bound: 11 connected leaves are unestimated. The fetch considered 1190 leaves and 238 connected
+ones, against 1188 and 238 on the morning snapshot. The chain and the day count match. The two
+extra leaves are board drift between the copies, not a second tie-break.
+
+### Premise (a), measured on the CE snapshot of 2026-11-03
+
+§8e recorded that comment- or relation-only writes need not bump `updatedAt`. The comment half
+does not reproduce on that CE snapshot. Of 3,476 comments, none have `createdAt` later than the
+item `updated_at`. On the 2,344 items that have a comment, the latest one sits 0–2 seconds before
+`updated_at` in 1,195 cases (1,182 within 1s, 13 within 2s). Median gap 0.888s. `audit --since`
+was not changed to treat cached comments as missed comment-only writes. The default audit caveat
+stays, because the relation half was not measured on CE.
+
+The relation gap is an observation from the Cloud archive of 2026-08-17: relation fields newer
+than the item `updated_at`. It is not a confirmed CE fact.
+
+### Open, in order
+
+1. **Live CE relation-activity sample.** Read activities for a CE item whose latest change is a
+   relation edit and compare that activity time with the item `updated_at`. Leave the Cloud-archive
+   gap as an archive observation until that sample exists. Not taken in this session.
+2. `npm publish` — still operator-gated (§8f).
+3. Deferred rebrand to `planetickets` (§8f).
+
+---
+
 ## 8f. ⚠ WHERE TO PICK UP (2026-08-24) — READ THIS FIRST, IT SUPERSEDES §8e
 
 **0.6 integration line: branch `codex/coherent-criteria-query-requirements`, 1123 tests, gate green,
@@ -512,7 +589,8 @@ exists. **Relation REMOVAL is also absent on CE**, so `blocked_by` edits are one
 - The embedded-script guard is STATIC (call sites + assignments), not executing. Its three known
   holes are listed under §8d's "Known-open". Do NOT build the regex tokenizer — that was tried and
   invented four phantom findings.
-- `packet`/`epic`/`doctor`/`critical-path` do not read the board cache; they stay live.
+- ~~`packet`/`epic`/`doctor`/`critical-path` do not read the board cache; they stay live.~~
+  Closed 2026-11-03 in `eeeae2c` (§8g).
 - Interpenetration on atlas drag: scoped bodies cannot repel unscoped ones. Accepted knowingly.
 - planestories work is **not tracked in Plane** — these docs are the record. Do not go looking for
   tickets.
@@ -1102,6 +1180,10 @@ every night. Several long-standing constraints stop making sense in that world.
    rather than something you hope never to need, and it makes historical analysis possible
    ("what did the board look like three weeks ago?"). Design note: the command must SAY it read a
    snapshot and print the snapshot's `takenAt`, so nobody mistakes a stale answer for a live one.
+   **Update 2026-11-03 (`eeeae2c`, §8g).** `--from-snapshot` for doctor, atlas, export, packet, and
+   epic had already shipped (§8b). `packet`, `epic`, `doctor`, and `critical-path` now also answer
+   from the board cache, print the absolute `fetchedAt` or `takenAt`, and fetch live only with
+   `--refresh`.
 2. **DONE — Per-instance performance profiles.** Per-context `apiRateLimit` now mirrors Plane's
    `API_KEY_RATE_LIMIT`; a per-client token bucket paces to it and derives sweep concurrency from
    observed latency via Little's Law, while an absent profile preserves the old constants.
@@ -1126,17 +1208,17 @@ every night. Several long-standing constraints stop making sense in that world.
    primary workflow (it was rare when everything came from cloud). Today it takes three passes
    because parent and dependency resolution read a memoized index that predates the run's own
    creates (§9.5b #3). Fix the index lifecycle and this becomes: write the file, `import`, done.
-6. **HALF DONE — Progress + cost telemetry on every paced command.** Print a progress line with an
-   ETA, and on completion the API call count and elapsed time. Two payoffs: "no output for ten
-   minutes" stops being indistinguishable from a hang, and the *cost* of a command becomes visible
-   — which is how you would have known, without measuring by hand, that doctor makes ~800 calls and
-   snapshot ~2× the item count.
-   **What shipped is the COMPLETION half only**, and the second week showed that is the wrong half
-   to have first: `reportPacing` fires after the command finishes, so a run you kill because it
-   looks hung prints nothing at all, and a `doctor` whose entire prelude (`groom` +
-   `fetchProjectIndex`) is un-instrumented looks dead for minutes on a big board regardless of
-   instance speed. See §9.5d C and D — the remaining work is an immediate opening line plus
-   during-run cost, not more polish on the sweep counter.
+6. **DONE 2026-11-03 (`aabd2d4`) — Progress + cost telemetry on every paced command.** Print a
+   progress line with an ETA, and on completion the API call count and elapsed time. Two payoffs:
+   "no output for ten minutes" stops being indistinguishable from a hang, and the *cost* of a
+   command becomes visible — which is how you would have known, without measuring by hand, that
+   doctor makes ~800 calls and snapshot ~2× the item count.
+   The completion half (`reportPacing`) shipped first, and the second week showed that was the
+   wrong half to have first: it fires after the command finishes, so a run you kill because it
+   looks hung prints nothing at all. **The during-run half shipped in `aabd2d4` (§8g):** an opening
+   line before the first request, and a stderr ETA while a multi-page list or a sweep is in flight.
+   A list whose length is unknown says `total unknown, no estimate`. No `apiRateLimit` means no
+   new lines. See §9.5d C and D for why the opening line was the missing piece.
 7. **A journal-less structural verify** (already parked in §9.4, now more valuable). Post-cutover
    there is a live CE board and nightly snapshots but no way to ask "is this board still what I
    think it is?" without the original apply journal. Ship it as an explicitly weaker verdict with
@@ -1229,7 +1311,7 @@ have. What they actually observed is the finding: **`reportPacing` prints only a
 telemetry that exists only at the end is missing exactly when you most want it, which is while a
 command is running long enough that you are wondering what it is doing. §9.5c #6 shipped the
 *completion* half; the *during* half is what they needed. Treat that as the item's second half, not
-as done.
+as done. **Update 2026-11-03:** that second half shipped in `aabd2d4` (§8g).
 
 Their measurement deserves a precise reading: 90 GETs in 36 s with zero 429s proves their CE limit
 is **at or above 150/min** — it does not establish its value, because not hitting a ceiling tells
@@ -1243,7 +1325,9 @@ silent by construction, so "no output at all, then backgrounded at 115s" is exac
 does. The fix is not more progress on the sweep; it is an immediate first line (what it is scanning,
 against which instance) and instrumentation of the fetch phase. Note the earlier framing was wrong
 in a specific way worth remembering: I treated this as a *cloud rate-limit* problem, when it is a
-*board-size* problem — 2,558 items is slow on a fast instance too.
+*board-size* problem — 2,558 items is slow on a fast instance too. **Update 2026-11-03:** the
+opening line and the list/sweep ETA shipped in `aabd2d4` (§8g). `doctor` reads the cache after
+`resolveGraph` has done the fetch, so its old relation-sweep callback is not the progress path.
 
 **E. `migrate-criteria --only` reports a disjunction it could resolve.** `src/cli/commands/migrate.ts:69`
 prints *"ids matching NO migration candidate (typo? no ::ac children? already migrated?)"* — three

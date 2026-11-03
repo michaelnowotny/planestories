@@ -55,6 +55,7 @@ children; do not start a new board with `--sync-criteria`.
 
 ```bash
 planestories board fetch --project "Data Platform" # one sweep -> .planestories/board.json
+planestories board fetch --project "Data Platform" --with-comments # also store comments
 planestories atlas --project "Data Platform"       # -> exports/atlas.html (offline, self-contained)
 planestories atlas stories/q1.md                   # from a file, no credentials
 planestories atlas --project X --json -o exports/atlas.json # the same graph, as data
@@ -62,30 +63,54 @@ planestories atlas --project X --no-dependencies   # skip the relation sweep (fa
 planestories atlas --project X --refresh           # bypass + atomically replace the matching cache
 planestories atlas --project X --stale-ok          # explicitly accept a cache older than 1h
 
-planestories epic DATA-100                         # rollup: status split, completion %, Σ effort
+planestories epic DATA-100                         # cache or --from-snapshot; --refresh to go live
 planestories show DATA-123                         # compact one-item answer; no description body
 planestories show DATA-123 --json                  # the same answer for scripts
+planestories show DATA-123 --with-comments         # needs board fetch --with-comments, or a snapshot
 planestories show DATA-123 --refresh               # live re-fetch + cache replacement
 planestories ls --label ingestion --open           # fixed predicates compose with AND
+planestories ls --updated-since 7d --open          # updated at or after; no updatedAt is omitted
 planestories ls --epic DATA-100 --blocked --json   # missing epic id exits non-zero
 planestories count --epic DATA-100 --open          # always prints numerator + denominator
+planestories count --open --updated-since 24h      # same window shapes as audit --since
 planestories count --open --group-by status        # status|assignee|label|epic
 planestories audit --since 24h --context ce        # my recent writes, each stamped with instance
 planestories audit --since 2026-08-23T08:00:00Z --json
-planestories packet DATA-123                       # implementable brief for an agent (an epic emits all descendants)
-planestories critical-path --project X             # dependency floor in dev-days, slack, biggest lever
+planestories audit --stale-state                   # heuristic over cached comments; no live activity
+planestories packet DATA-123                       # cache when fresh; an epic emits all descendants
+planestories packet DATA-123 --with-comments       # append captured comments
+planestories packet DATA-123 --from-snapshot ~/plane-replication/data.snapshot.json
+planestories critical-path --project X             # cache, --from-snapshot, or --refresh
+planestories critical-path --limit 5               # fewer rows; the dev-day floor stays the full chain
 planestories critical-path stories/q1.md --json
 planestories ready --epic DATA-100 --limit 10       # all blockers closed; highest immediate leverage first
-planestories inconsistent --epic DATA-100           # Done with open blockers; ready but not started
-planestories blocked --epic DATA-100                # open work + titled unfinished blockers
-planestories orphans                                # leaf stories outside the dependency graph
-planestories abandoned                              # open leaf work under a cancelled/abandoned epic
+planestories inconsistent --epic DATA-100 --limit 10 # each finding list, considered count unchanged
+planestories blocked --epic DATA-100 --limit 10     # open-item denominator stays the full count
+planestories orphans --limit 10                     # leaf stories outside the dependency graph
+planestories abandoned --limit 10                   # open leaf work under a cancelled/abandoned epic
 planestories ready --json | jq '.items[0].item'     # every graph verb takes --json
 ```
 
+`packet`, `epic`, `doctor`, and `critical-path` answer from a fresh board cache or
+`--from-snapshot`, and fetch live only with `--refresh`. A cache hit, a snapshot read, and a
+refresh each print the copy's instant as an absolute time (`fetched <ISO>` or `taken <ISO>`).
+Past 1h the cache refuses unless you pass `--refresh` or `--stale-ok`.
+
+Without `--with-comments`, `show`, `packet`, and `export` print `N comments not shown`, or
+`comments not shown (not fetched)` when the sweep never ran. `export --with-comments` requires
+`--from-snapshot`, prints on stderr, and does not change the story file.
+
+When several chains share the critical-path floor, the reported one is the fewest hops, then the
+lowest identifier. A done node on that chain is still named and adds no remaining days.
+
 `ls` / `count` predicates are exactly `--open`, `--status`, `--label`, `--assignee`, `--epic`,
-`--flagged`, `--no-estimate`, and `--blocked`; there is no query grammar. Use `atlas --json` + `jq`
-for anything outside that surface. Both prefer a matching fresh cache and print its age.
+`--flagged`, `--no-estimate`, `--blocked`, and `--updated-since`; there is no query grammar. Use
+`atlas --json` + `jq` for anything outside that surface. Both prefer a matching fresh cache and
+print its age together with the absolute fetch instant. `--updated-since` takes `90m`, `24h`,
+`7d`, or an ISO-8601 instant. Stories with no usable `updatedAt` are omitted and counted as
+unknown, not as old.
+`--limit` on `ready`, `blocked`, `inconsistent`, `orphans`, `abandoned`, and `critical-path`
+shortens the rows only. The considered counts and the dev-day floor stay the full set.
 The graph verbs' `--json` carries its own `provenance`; on an incomplete relation sweep they write
 **nothing** to stdout and exit non-zero, so a pipeline sees an empty document, never half an answer.
 Ordinary `abandoned` needs hierarchy, not relations. `abandoned --refresh` still performs the full
@@ -93,8 +118,12 @@ relation sweep because refresh publishes the shared cache that dependency comman
 
 `audit` requires a fresh matching board cache for its bounded item list; run `board fetch` first.
 It fetches live activity only for cached items whose `updatedAt` is inside the window. The actor is
-the API key's owner (not a distinguishable tool), and comment/relation-only writes may not bump
-`updatedAt`; the report states those limits, its exact bound, board identity, and cache age.
+the API key's owner (not a distinguishable tool). The report still says comment- or relation-only
+writes may not bump `updatedAt`. On the CE Data Platform snapshot of 2026-11-03 that did not hold
+for comments: none were newer than the item `updated_at` (§8g of `HANDOFF.md`). The relation half
+is an unconfirmed Cloud-archive observation, and a live CE activity sample is still open.
+`audit --stale-state` is separate: a labelled heuristic over the latest cached comment, and it
+does not walk live activity. It needs `board fetch --with-comments`.
 
 ## Health & hygiene
 
@@ -103,7 +132,7 @@ planestories lint stories/*.md                     # offline, 12 mechanical rule
 planestories lint stories/*.md --warn-only         # downgrade to warnings, exit 0
 planestories capabilities --context ce             # read-only deployment feature/dialect probe
 planestories capabilities --context ce --json      # the same measured result for scripts
-planestories doctor --project X                    # board rot; non-zero on findings (CI gate)
+planestories doctor --project X                    # cache; CI gate; --refresh to re-fetch
 planestories doctor --project X --house-rules      # + missing Effort, prose deps with no relation
 planestories groom --project X                     # close orphaned criterion sub-items (dry-run default)
 planestories groom --write-back stories/q1.md      # legacy ::ac<n> state → file checkboxes
@@ -187,6 +216,15 @@ Every board-touching command prints the resolved target and dialect before its m
 → plane.example · workspace archimedes · project Data Platform · dialect work-items (detected) · context ce (implicit)
 ```
 
+A command with `apiRateLimit` set also prints this on stderr before the first request, then a
+progress line with an ETA while a multi-page list or a sweep is in flight. The `paced:` summary
+still prints at the end. A list with no known length says `total unknown, no estimate`. No rate
+limit means neither line.
+
+```
+Paced run starting · plane.example · workspace archimedes · project Data Platform · 600/min.
+```
+
 ---
 
 ## Story format
@@ -237,8 +275,11 @@ reproductions: [`PLANE_CAPABILITIES.md`](./PLANE_CAPABILITIES.md).
 ## Things that will bite you
 
 - **Every `##` heading becomes a work item.** Design docs and stories do not share a file.
-- **Cached answers always print their age.** Past 1h they refuse unless you re-fetch with
-  `--refresh` or explicitly acknowledge the old state with `--stale-ok`.
+- **Cached answers print an absolute instant, and their age.** `packet`, `epic`, `doctor`, and
+  `critical-path` use a fresh board cache or `--from-snapshot`, and go live only with `--refresh`.
+  Past 1h the cache refuses unless you re-fetch or pass `--stale-ok`.
+- **Equal critical-path floors name one chain:** fewest hops, then the lowest identifier. A done
+  node on that chain is named and adds no remaining days.
 - **`--no-dependencies` is not "this board has no dependencies."** It skips the sweep; the atlas
   says `skipped`, and the floor shows `—` rather than a number.
 - **A dependency floor is a floor, not a date.** It assumes unlimited parallelism, and it reads
