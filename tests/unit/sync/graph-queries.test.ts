@@ -194,6 +194,31 @@ describe("inconsistent and blocked", () => {
 
 		expect(identifiers(report.items)).toEqual(["P-3"]);
 		expect(report.items[0]?.blockers[0]?.title).toBe("Still-open blocker");
+		expect(report.matched).toBeUndefined();
+		expect(report.openConsidered).toBe(3);
+	});
+
+	test("--limit shortens the rows and leaves the open denominator whole", () => {
+		const blocker = story("n1", "started");
+		const first = story("n2", "backlog");
+		const second = story("n3", "unstarted");
+		const third = story("n4", "started");
+		const value = graph(
+			[blocker, first, second, third],
+			[
+				{ source: blocker.id, target: first.id, type: "blocks" },
+				{ source: blocker.id, target: second.id, type: "blocks" },
+				{ source: blocker.id, target: third.id, type: "blocks" },
+			],
+		);
+		const full = queryBlocked(value);
+		const limited = queryBlocked(value, { limit: 1 });
+
+		expect(identifiers(limited.items)).toEqual(["P-2"]);
+		expect(limited.matched).toBe(full.items.length);
+		expect(limited.matched).toBe(3);
+		expect(limited.openConsidered).toBe(full.openConsidered);
+		expect(limited.openConsidered).toBe(4);
 	});
 });
 

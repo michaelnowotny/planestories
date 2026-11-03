@@ -77,8 +77,8 @@ function parseLimit(value: string | number | undefined): number | undefined {
 	return parsed;
 }
 
-function validateLocalOptions(kind: GraphQueryKind, options: GraphQueryCommandOptions): void {
-	if (kind === "ready") parseLimit(options.limit);
+function validateLocalOptions(options: GraphQueryCommandOptions): void {
+	parseLimit(options.limit);
 	if (options.epic !== undefined && options.epic.trim().length === 0) {
 		throw new ConfigError("--epic must not be blank; pass an epic identifier or omit the option.");
 	}
@@ -152,6 +152,11 @@ function scopeSuffix(scope: GraphQueryRef | null): string {
 	return scope ? ` under ${id(scope)} — ${scope.title}` : "";
 }
 
+/** Unlimited lists keep the bare count. A limit names both the rows shown and the full match. */
+function listCount(shown: number, matched: number | undefined): string {
+	return matched === undefined ? `${shown}` : `showing ${shown} of ${matched}`;
+}
+
 function unknownStatusNote(count: number): string[] {
 	return count === 0
 		? []
@@ -203,13 +208,17 @@ export function renderGraphQuery(report: GraphQueryReport): string {
 			lines.push(
 				`Dependency consistency${scopeSuffix(report.scope)} · ${report.considered} item(s) considered`,
 			);
-			lines.push(`Done with unfinished blockers (${report.doneWithUnfinishedBlockers.length}):`);
+			lines.push(
+				`Done with unfinished blockers (${listCount(report.doneWithUnfinishedBlockers.length, report.matched?.doneWithUnfinishedBlockers)}):`,
+			);
 			if (report.doneWithUnfinishedBlockers.length === 0) lines.push("  none");
 			for (const entry of report.doneWithUnfinishedBlockers) {
 				lines.push(`  ${itemLine(entry.item)}`);
 				lines.push(`    unfinished blockers: ${counterpartLine(entry.blockers, "none")}`);
 			}
-			lines.push(`Ready but not started (${report.notStartedWithDoneBlockers.length}):`);
+			lines.push(
+				`Ready but not started (${listCount(report.notStartedWithDoneBlockers.length, report.matched?.notStartedWithDoneBlockers)}):`,
+			);
 			if (report.notStartedWithDoneBlockers.length === 0) lines.push("  none");
 			for (const entry of report.notStartedWithDoneBlockers) {
 				lines.push(`  ${itemLine(entry.item)}`);
@@ -220,7 +229,9 @@ export function renderGraphQuery(report: GraphQueryReport): string {
 		}
 		case "blocked": {
 			lines.push(
-				`Blocked: ${report.items.length} of ${report.openConsidered} open item(s)${scopeSuffix(report.scope)}`,
+				report.matched === undefined
+					? `Blocked: ${report.items.length} of ${report.openConsidered} open item(s)${scopeSuffix(report.scope)}`
+					: `Blocked: showing ${report.items.length} of ${report.matched}, from ${report.openConsidered} open item(s)${scopeSuffix(report.scope)}`,
 			);
 			if (report.items.length === 0) lines.push("  none");
 			for (const entry of report.items) {
@@ -232,7 +243,9 @@ export function renderGraphQuery(report: GraphQueryReport): string {
 		}
 		case "orphans": {
 			lines.push(
-				`Dependency orphans: ${report.items.length} of ${report.considered} item(s) block nothing and are blocked by nothing`,
+				report.matched === undefined
+					? `Dependency orphans: ${report.items.length} of ${report.considered} item(s) block nothing and are blocked by nothing`
+					: `Dependency orphans: showing ${report.items.length} of ${report.matched}, from ${report.considered} item(s) that block nothing and are blocked by nothing`,
 			);
 			if (report.items.length === 0) lines.push("  none");
 			for (const entry of report.items) lines.push(`  ${itemLine(entry.item)}`);
@@ -240,7 +253,9 @@ export function renderGraphQuery(report: GraphQueryReport): string {
 		}
 		case "abandoned": {
 			lines.push(
-				`Abandoned-parent work: ${report.items.length} of ${report.openConsidered} open item(s)`,
+				report.matched === undefined
+					? `Abandoned-parent work: ${report.items.length} of ${report.openConsidered} open item(s)`
+					: `Abandoned-parent work: showing ${report.items.length} of ${report.matched}, from ${report.openConsidered} open item(s)`,
 			);
 			if (report.items.length === 0) lines.push("  none");
 			for (const entry of report.items) {
@@ -260,17 +275,18 @@ function buildReport(
 	options: GraphQueryCommandOptions,
 ): GraphQueryReport {
 	const routes = answerRoutes(options);
+	const limit = parseLimit(options.limit);
 	switch (kind) {
 		case "ready":
-			return queryReady(graph, { epic: options.epic, limit: parseLimit(options.limit) }, routes);
+			return queryReady(graph, { epic: options.epic, limit }, routes);
 		case "inconsistent":
-			return queryInconsistent(graph, { epic: options.epic }, routes);
+			return queryInconsistent(graph, { epic: options.epic, limit }, routes);
 		case "blocked":
-			return queryBlocked(graph, { epic: options.epic }, routes);
+			return queryBlocked(graph, { epic: options.epic, limit }, routes);
 		case "orphans":
-			return queryOrphans(graph);
+			return queryOrphans(graph, { limit });
 		case "abandoned":
-			return queryAbandoned(graph);
+			return queryAbandoned(graph, { limit });
 	}
 }
 
@@ -280,7 +296,7 @@ export async function runGraphQueryCommand(
 	options: GraphQueryCommandOptions,
 	runtime: GraphQueryCommandRuntime = {},
 ): Promise<boolean> {
-	validateLocalOptions(kind, options);
+	validateLocalOptions(options);
 	const resolve = runtime.resolveGraph ?? resolveGraph;
 	const stdout = runtime.stdout ?? ((message: string) => console.log(message));
 	const stderr = runtime.stderr ?? ((message: string) => console.error(message));
@@ -388,25 +404,38 @@ export function registerGraphQueryCommands(program: Command): void {
 		program
 			.command("inconsistent")
 			.description("Find Done work with unfinished blockers, plus ready work not started")
-			.option("--epic <identifier>", "Restrict candidates to one epic's descendant leaves"),
+			.option("--epic <identifier>", "Restrict candidates to one epic's descendant leaves")
+			.option(
+				"--limit <n>",
+				"Show at most N rows in each finding list. The considered count stays the full set.",
+			),
 	).action(action("inconsistent"));
 
 	addSourceOptions(
 		program
 			.command("blocked")
 			.description("Open work with at least one unfinished blocker")
-			.option("--epic <identifier>", "Restrict candidates to one epic's descendant leaves"),
+			.option("--epic <identifier>", "Restrict candidates to one epic's descendant leaves")
+			.option(
+				"--limit <n>",
+				"Show at most N blocked items. The open-item denominator stays the full count.",
+			),
 	).action(action("blocked"));
 
 	addSourceOptions(
 		program
 			.command("orphans")
-			.description("Leaf stories outside the blocking graph; never age-ranked"),
+			.description("Leaf stories outside the blocking graph; never age-ranked")
+			.option("--limit <n>", "Show at most N orphans. The considered count stays the full set."),
 	).action(action("orphans"));
 
 	addSourceOptions(
 		program
 			.command("abandoned")
-			.description("Open leaf work beneath a cancelled or abandoned epic"),
+			.description("Open leaf work beneath a cancelled or abandoned epic")
+			.option(
+				"--limit <n>",
+				"Show at most N abandoned items. The open-item denominator stays the full count.",
+			),
 	).action(action("abandoned"));
 }

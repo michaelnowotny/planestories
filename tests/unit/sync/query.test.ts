@@ -124,6 +124,31 @@ describe("queryStories predicates", () => {
 		expect(ids(graph, { blocked: true })).toEqual(["DATA-3"]);
 	});
 
+	test("--updated-since narrows the numerator and does not treat a missing timestamp as old", () => {
+		const graph = fixtureGraph();
+		const walk = (nodes: AtlasNode[]): AtlasNode[] =>
+			nodes.flatMap((node) => [node, ...walk(node.children)]);
+		const byId = new Map(walk(graph.nodes).map((node) => [node.identifier, node]));
+		const recent = byId.get("DATA-3");
+		const old = byId.get("DATA-4");
+		if (!recent || !old) throw new Error("fixture lost DATA-3 or DATA-4");
+		recent.updatedAt = "2026-08-01T12:00:00.000Z";
+		old.updatedAt = "2024-01-01T00:00:00.000Z";
+
+		const all = queryStories(graph, {});
+		const filtered = queryStories(graph, { updatedSince: "2026-08-01T12:00:00.000Z" });
+
+		expect(all.updatedSinceUnknown).toBeUndefined();
+		expect(filtered.denominator).toBe(all.denominator);
+		expect(filtered.items.map((item) => item.identifier)).toEqual(["DATA-3"]);
+		expect(filtered.count).toBe(1);
+		expect(filtered.updatedSinceUnknown).toBeGreaterThan(0);
+		expect(renderCountText(filtered, [])).toContain(
+			`1 updated since 2026-08-01T12:00:00.000Z of ${all.denominator} stories`,
+		);
+		expect(renderCountText(filtered, [])).toContain("no usable updatedAt");
+	});
+
 	test("predicates compose with AND, without a query-language precedence layer", () => {
 		const result = queryStories(fixtureGraph(), {
 			open: true,

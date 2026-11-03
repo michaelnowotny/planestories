@@ -5,6 +5,7 @@ import { ParentCycleError } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import {
 	groupQueryItems,
+	parseUpdatedSince,
 	type QueryAnswerRoutes,
 	type QueryPredicates,
 	queryStories,
@@ -42,6 +43,7 @@ interface QueryCommandOptions {
 	 */
 	estimate?: boolean;
 	blocked?: boolean;
+	updatedSince?: string;
 	groupBy?: "status" | "assignee" | "label" | "epic";
 	/** Refusal text composed from this command's own registered routes. */
 	selectProjectHelp?: string;
@@ -57,6 +59,7 @@ function predicates(options: QueryCommandOptions): QueryPredicates {
 		flagged: options.flagged === true,
 		noEstimate: options.estimate === false,
 		blocked: options.blocked === true,
+		updatedSince: parseUpdatedSince(options.updatedSince),
 	};
 }
 
@@ -79,6 +82,10 @@ function addQueryOptions(command: Command): Command {
 			// every run, silently turning EVERY ls/count into an unestimated-only query.
 			.option("--no-estimate", "Only stories without an **Effort:** estimate")
 			.option("--blocked", "Only open stories with at least one unfinished blocker", false)
+			.option(
+				"--updated-since <duration|iso>",
+				"Only stories updated at or after this time (90m, 24h, 7d, or an ISO-8601 instant). Stories with no updatedAt are omitted, not counted as old.",
+			)
 			.option("--json", "Emit the same answer as machine-readable JSON", false)
 			.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 			.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)

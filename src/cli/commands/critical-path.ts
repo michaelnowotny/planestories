@@ -34,7 +34,31 @@ function handleError(error: unknown): never {
  * never be printed as a bare figure when `isLowerBound`, and a cycle must read
  * as a REFUSAL rather than as "no dependencies found".
  */
-export function formatCriticalPath(result: CriticalPathResult): string {
+function parseChainLimit(value: unknown): number | undefined {
+	if (value === undefined) return undefined;
+	const parsed = typeof value === "number" ? value : Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+		throw new ConfigError(`--limit must be a positive integer, got "${String(value)}".`);
+	}
+	return parsed;
+}
+
+/**
+ * A limit shortens the chain a script iterates. The floor, the slack, and the
+ * lever stay the full-chain figures. Unlimited output is the compute result
+ * unchanged, including its keys.
+ */
+function reportedCriticalPath(result: CriticalPathResult, limit: number | undefined) {
+	if (limit === undefined || !result.ok) return result;
+	return {
+		...result,
+		chain: result.chain.slice(0, limit),
+		chainLength: result.chain.length,
+		limit,
+	};
+}
+
+export function formatCriticalPath(result: CriticalPathResult, limit?: number): string {
 	const lines: string[] = [];
 
 	if (!result.ok) {
@@ -60,11 +84,19 @@ export function formatCriticalPath(result: CriticalPathResult): string {
 	}
 
 	const bound = result.isLowerBound ? "at least " : "";
+	const shown = limit === undefined ? result.chain : result.chain.slice(0, limit);
 	lines.push(
 		chalk.bold(
 			`Critical path: ${bound}${result.totalDays} dev-days across ${result.chain.length} items`,
 		),
 	);
+	if (shown.length < result.chain.length) {
+		lines.push(
+			chalk.dim(
+				`  Showing ${shown.length} of ${result.chain.length}. The dev-day floor is the full chain, not the rows below.`,
+			),
+		);
+	}
 	// Say what the number IS. A solo developer will otherwise read it as calendar
 	// time, and it is a PARALLEL floor: independent work is excluded by design.
 	lines.push(
@@ -80,7 +112,7 @@ export function formatCriticalPath(result: CriticalPathResult): string {
 		);
 	}
 	lines.push("");
-	for (const [i, node] of result.chain.entries()) {
+	for (const [i, node] of shown.entries()) {
 		const effort =
 			node.effortDays === null ? chalk.yellow("?d") : chalk.cyan(`${node.effortDays}d`);
 		const state = node.done ? chalk.dim(" (done)") : "";
@@ -114,6 +146,10 @@ export function registerCriticalPathCommand(program: Command): void {
 		.option("--context <name>", "Named context (see --help on any command)")
 		.option("-p, --project <name>", "Analyse a live Plane project instead of a file")
 		.option("--json", "Emit the full result (chain, slack, counts) as JSON", false)
+		.option(
+			"--limit <n>",
+			"Show at most N items of the chain. The dev-day floor is the full chain.",
+		)
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
 		.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)
 		.option(
@@ -123,6 +159,7 @@ export function registerCriticalPathCommand(program: Command): void {
 		)
 		.action(async (file: string | undefined, options, command: Command) => {
 			try {
+				const limit = parseChainLimit(options.limit);
 				if ((file || options.fromSnapshot) && (options.refresh || options.staleOk)) {
 					throw new ConfigError(
 						"--refresh and --stale-ok apply to the board cache and cannot be combined with a stories file or --from-snapshot.",
@@ -179,16 +216,17 @@ export function registerCriticalPathCommand(program: Command): void {
 				const cachedAt =
 					source.provenance.kind === "cache" ? source.provenance.fetchedAt : undefined;
 
+				const reported = reportedCriticalPath(result, limit);
 				if (options.json) {
 					const payload = cachedAt
-						? { ...result, source: { kind: "cache", takenAt: cachedAt } }
-						: result;
+						? { ...reported, source: { kind: "cache", takenAt: cachedAt } }
+						: reported;
 					console.log(JSON.stringify(payload, null, 1));
 				} else {
 					if (cachedAt) {
 						console.log(`Source: board cache fetched ${cachedAt} — NOT live.`);
 					}
-					console.log(formatCriticalPath(result));
+					console.log(formatCriticalPath(result, limit));
 				}
 				if (cachedAt) console.error(chalk.dim(cacheReadLine(cachedAt)));
 				if (options.refresh === true && source.provenance.kind === "live") {

@@ -18,6 +18,8 @@ export interface QueryPredicates {
 	flagged?: boolean;
 	noEstimate?: boolean;
 	blocked?: boolean;
+	/** Inclusive lower bound, as an ISO-8601 instant. Absent means no time filter. */
+	updatedSince?: string;
 }
 
 export type QueryGroupBy = "status" | "assignee" | "label" | "epic";
@@ -53,6 +55,11 @@ export interface StoryQueryResult {
 	scopeEpic: QueryEpicRef | null;
 	/** Named structural epics, so a missing --epic refusal can list valid identifiers. */
 	availableEpics: QueryEpicRef[];
+	/**
+	 * In-scope stories with no usable updatedAt, present only when `--updated-since`
+	 * is set. They are omitted from `count` rather than treated as old or new.
+	 */
+	updatedSinceUnknown?: number;
 }
 
 export interface QueryGroup {
@@ -105,6 +112,7 @@ export function validateQueryPredicates(predicates: QueryPredicates): void {
 		["--label", predicates.label],
 		["--assignee", predicates.assignee],
 		["--epic", predicates.epic],
+		["--updated-since", predicates.updatedSince],
 	] as const) {
 		if (value !== undefined && value.trim().length === 0) {
 			throw new ConfigError(
@@ -112,6 +120,82 @@ export function validateQueryPredicates(predicates: QueryPredicates): void {
 			);
 		}
 	}
+}
+
+/**
+ * Parse `--updated-since` the same way `audit --since` parses a window: a
+ * positive duration (`90m`, `24h`, `7d`, `2w`) or an ISO-8601 instant.
+ * Returns the inclusive lower bound. Absent stays absent — there is no default
+ * window. A future bound is refused rather than matched as an empty board.
+ */
+export function parseUpdatedSince(
+	value: string | undefined,
+	now: Date = new Date(),
+): string | undefined {
+	if (value === undefined) return undefined;
+	const requested = value.trim();
+	if (requested.length === 0) {
+		throw new ConfigError(
+			"--updated-since must not be blank; pass a duration such as 90m, 24h, or 7d, or an ISO-8601 instant.",
+		);
+	}
+	const duration = /^(\d+(?:\.\d+)?)(m|h|d|w)$/i.exec(requested);
+	let sinceMs: number;
+	if (duration) {
+		const amount = Number(duration[1]);
+		const unit = duration[2]?.toLowerCase();
+		const multiplier =
+			unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : unit === "d" ? 86_400_000 : 7 * 86_400_000;
+		const milliseconds = amount * multiplier;
+		if (!Number.isFinite(milliseconds) || milliseconds <= 0) {
+			throw invalidUpdatedSince(requested);
+		}
+		sinceMs = now.getTime() - milliseconds;
+	} else {
+		const iso =
+			/^(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2}))?$/i;
+		const match = iso.exec(requested);
+		if (!match) throw invalidUpdatedSince(requested);
+		const year = Number(match[1]);
+		const month = Number(match[2]);
+		const day = Number(match[3]);
+		const roundTrip = new Date(0);
+		roundTrip.setUTCFullYear(year, month - 1, day);
+		if (
+			roundTrip.getUTCFullYear() !== year ||
+			roundTrip.getUTCMonth() !== month - 1 ||
+			roundTrip.getUTCDate() !== day
+		) {
+			throw new ConfigError(
+				`--updated-since ${JSON.stringify(requested)} is not a valid calendar date. Use a real YYYY-MM-DD date or an ISO-8601 instant with a timezone.`,
+			);
+		}
+		sinceMs = Date.parse(requested);
+		if (Number.isNaN(sinceMs)) throw invalidUpdatedSince(requested);
+	}
+	if (!Number.isFinite(sinceMs)) throw invalidUpdatedSince(requested);
+	const since = new Date(sinceMs);
+	if (Number.isNaN(since.getTime())) {
+		throw new ConfigError(
+			`--updated-since ${JSON.stringify(requested)} falls outside the supported date range.`,
+		);
+	}
+	if (sinceMs > now.getTime()) {
+		throw new ConfigError(`--updated-since ${JSON.stringify(requested)} is in the future.`);
+	}
+	return since.toISOString();
+}
+
+function invalidUpdatedSince(value: string): ConfigError {
+	return new ConfigError(
+		`Invalid --updated-since ${JSON.stringify(value)}. Use a positive duration such as 90m, 24h, or 7d, or an ISO-8601 instant with a timezone.`,
+	);
+}
+
+function updatedAtMs(value: string | null): number | null {
+	if (value === null || value.trim().length === 0) return null;
+	const ms = Date.parse(value);
+	return Number.isNaN(ms) ? null : ms;
 }
 
 function matchesPredicates(
@@ -132,6 +216,11 @@ function matchesPredicates(
 	if (predicates.flagged && item.flagged !== true) return false;
 	if (predicates.noEstimate && item.effortDays !== null) return false;
 	if (predicates.blocked && !activelyBlocked.has(leaf.node.id)) return false;
+	if (predicates.updatedSince !== undefined) {
+		const updated = updatedAtMs(leaf.node.updatedAt);
+		const since = Date.parse(predicates.updatedSince);
+		if (updated === null || Number.isNaN(since) || updated < since) return false;
+	}
 	return true;
 }
 
@@ -199,6 +288,15 @@ export function queryStories(
 		if (hasActiveBlocker) activelyBlocked.add(leaf.node.id);
 	}
 
+	if (predicates.updatedSince !== undefined && Number.isNaN(Date.parse(predicates.updatedSince))) {
+		throw new ConfigError(
+			`--updated-since ${JSON.stringify(predicates.updatedSince)} is not a usable instant.`,
+		);
+	}
+	const updatedSinceUnknown =
+		predicates.updatedSince === undefined
+			? undefined
+			: scope.filter((leaf) => updatedAtMs(leaf.node.updatedAt) === null).length;
 	const items = scope
 		.filter((leaf) => {
 			const item = queryItem(leaf);
@@ -216,6 +314,7 @@ export function queryStories(
 		predicates: { ...predicates },
 		scopeEpic: epicRef(selectedEpic),
 		availableEpics,
+		...(updatedSinceUnknown !== undefined ? { updatedSinceUnknown } : {}),
 	};
 }
 
@@ -252,6 +351,7 @@ function predicateDescription(predicates: QueryPredicates): string | null {
 		predicates.flagged ? "flagged" : null,
 		predicates.noEstimate ? "without estimates" : null,
 		predicates.blocked ? "blocked" : null,
+		predicates.updatedSince ? `updated since ${predicates.updatedSince}` : null,
 	].filter((value): value is string => value !== null);
 	if (active.length === 0) return null;
 	if (active.length === 1) return active[0] as string;
@@ -276,6 +376,8 @@ export function renderCountText(
 	const count = description ? `${result.count} ${description}` : `${result.count} stories`;
 	const scope = result.scopeEpic?.identifier ? ` in ${result.scopeEpic.identifier}` : "";
 	const lines = [`${count} of ${result.denominator} stories${scope}`];
+	const unknown = unknownUpdatedNote(result.updatedSinceUnknown);
+	if (unknown) lines.push(unknown);
 	if (groups.length > 0) {
 		lines.push("");
 		for (const group of groups) {
@@ -303,5 +405,13 @@ export function renderListText(result: StoryQueryResult): string {
 	lines.push(
 		`${result.count} ${result.count === 1 ? "match" : "matches"} of ${result.denominator} stories in scope`,
 	);
+	const unknown = unknownUpdatedNote(result.updatedSinceUnknown);
+	if (unknown) lines.push(unknown);
 	return lines.join("\n");
+}
+
+function unknownUpdatedNote(count: number | undefined): string | null {
+	if (count === undefined || count === 0) return null;
+	const noun = count === 1 ? "item has" : "items have";
+	return `${count} ${noun} no usable updatedAt and are omitted from this filter, not counted as unchanged.`;
 }

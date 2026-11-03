@@ -49,6 +49,14 @@ export interface InconsistentQueryReport {
 	scope: GraphQueryRef | null;
 	doneWithUnfinishedBlockers: BlockedQueryItem[];
 	notStartedWithDoneBlockers: BlockedQueryItem[];
+	/**
+	 * Full list lengths when `--limit` is passed. The arrays may be shorter.
+	 * Absent otherwise, so an unlimited answer keeps its shape.
+	 */
+	matched?: {
+		doneWithUnfinishedBlockers: number;
+		notStartedWithDoneBlockers: number;
+	};
 	considered: number;
 	unknownStatus: number;
 }
@@ -57,6 +65,11 @@ export interface BlockedQueryReport {
 	kind: "blocked";
 	scope: GraphQueryRef | null;
 	items: BlockedQueryItem[];
+	/**
+	 * Full match count when `--limit` is passed. `items` may be shorter.
+	 * Absent otherwise, so an unlimited answer keeps its shape.
+	 */
+	matched?: number;
 	openConsidered: number;
 	unknownStatus: number;
 }
@@ -64,6 +77,8 @@ export interface BlockedQueryReport {
 export interface OrphansQueryReport {
 	kind: "orphans";
 	items: Array<{ item: GraphQueryRef }>;
+	/** Full match count when `--limit` is passed. Absent otherwise. */
+	matched?: number;
 	considered: number;
 }
 
@@ -76,6 +91,8 @@ export interface AbandonedQueryItem {
 export interface AbandonedQueryReport {
 	kind: "abandoned";
 	items: AbandonedQueryItem[];
+	/** Full match count when `--limit` is passed. Absent otherwise. */
+	matched?: number;
 	openConsidered: number;
 	unknownStatus: number;
 }
@@ -89,6 +106,8 @@ export type GraphQueryReport =
 
 export interface ScopedQueryOptions {
 	epic?: string;
+	/** Show at most this many rows. The considered/open denominators stay full. */
+	limit?: number;
 }
 
 export interface ReadyQueryOptions extends ScopedQueryOptions {
@@ -195,6 +214,18 @@ function isOpen(leaf: ProjectedLeaf | undefined): boolean {
 	return leaf !== undefined && OPEN_GROUPS.has(leaf.node.statusGroup);
 }
 
+function assertLimit(limit: number | undefined): void {
+	if (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0)) {
+		throw new ConfigError(`--limit must be a positive integer, got "${String(limit)}".`);
+	}
+}
+
+/** Keep every row unless a limit was asked for. The caller still reports the full length. */
+function take<T>(items: T[], limit: number | undefined): T[] {
+	assertLimit(limit);
+	return limit === undefined ? items : items.slice(0, limit);
+}
+
 function uniqueIds(ids: readonly string[]): string[] {
 	return [...new Set(ids)];
 }
@@ -227,9 +258,7 @@ export function queryReady(
 	options: ReadyQueryOptions = {},
 	routes?: GraphQueryAnswerRoutes,
 ): ReadyQueryReport {
-	if (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit <= 0)) {
-		throw new ConfigError(`--limit must be a positive integer, got "${String(options.limit)}".`);
-	}
+	assertLimit(options.limit);
 	const { projection, candidates, scope } = queryScope("ready", graph, options, routes);
 	const open = candidates.filter(isOpen);
 	const unknownStatus = candidates.filter((leaf) => leaf.node.statusGroup === "unknown").length;
@@ -297,11 +326,21 @@ export function queryInconsistent(
 		}
 	}
 
+	const done = sortByItem(doneWithUnfinishedBlockers);
+	const notStarted = sortByItem(notStartedWithDoneBlockers);
 	return {
 		kind: "inconsistent",
 		scope,
-		doneWithUnfinishedBlockers: sortByItem(doneWithUnfinishedBlockers),
-		notStartedWithDoneBlockers: sortByItem(notStartedWithDoneBlockers),
+		doneWithUnfinishedBlockers: take(done, options.limit),
+		notStartedWithDoneBlockers: take(notStarted, options.limit),
+		...(options.limit !== undefined
+			? {
+					matched: {
+						doneWithUnfinishedBlockers: done.length,
+						notStartedWithDoneBlockers: notStarted.length,
+					},
+				}
+			: {}),
 		considered: candidates.length,
 		unknownStatus: candidates.filter((leaf) => leaf.node.statusGroup === "unknown").length,
 	};
@@ -321,25 +360,40 @@ export function queryBlocked(
 			: [];
 	});
 
+	const sorted = sortByItem(items);
 	return {
 		kind: "blocked",
 		scope,
-		items: sortByItem(items),
+		items: take(sorted, options.limit),
+		...(options.limit !== undefined ? { matched: sorted.length } : {}),
 		openConsidered: open.length,
 		unknownStatus: candidates.filter((leaf) => leaf.node.statusGroup === "unknown").length,
 	};
 }
 
-export function queryOrphans(graph: AtlasGraph): OrphansQueryReport {
+export function queryOrphans(
+	graph: AtlasGraph,
+	options: { limit?: number } = {},
+): OrphansQueryReport {
 	const projection = projectLeafDependencies(graph);
 	if (requirementForGraphQuery("orphans").relations === "required") refuseNestedEdges(projection);
-	const items = [...projection.leaves.values()]
-		.filter((leaf) => !projection.connected.has(leaf.node.id))
-		.map((leaf) => ({ item: ref(leaf.node) }));
-	return { kind: "orphans", items: sortByItem(items), considered: projection.leaves.size };
+	const items = sortByItem(
+		[...projection.leaves.values()]
+			.filter((leaf) => !projection.connected.has(leaf.node.id))
+			.map((leaf) => ({ item: ref(leaf.node) })),
+	);
+	return {
+		kind: "orphans",
+		items: take(items, options.limit),
+		...(options.limit !== undefined ? { matched: items.length } : {}),
+		considered: projection.leaves.size,
+	};
 }
 
-export function queryAbandoned(graph: AtlasGraph): AbandonedQueryReport {
+export function queryAbandoned(
+	graph: AtlasGraph,
+	options: { limit?: number } = {},
+): AbandonedQueryReport {
 	// NO nested-edge refusal here, unlike its neighbours. `abandoned` reads
 	// hierarchy and ancestor STATUS only — a malformed dependency edge cannot
 	// change which open items sit under a cancelled epic. Refusing anyway removed
@@ -362,9 +416,11 @@ export function queryAbandoned(graph: AtlasGraph): AbandonedQueryReport {
 		if (parent) items.push({ item: ref(leaf.node), parent: ref(parent) });
 	}
 
+	const sorted = sortByItem(items);
 	return {
 		kind: "abandoned",
-		items: sortByItem(items),
+		items: take(sorted, options.limit),
+		...(options.limit !== undefined ? { matched: sorted.length } : {}),
 		openConsidered: open.length,
 		unknownStatus: leaves.filter((leaf) => leaf.node.statusGroup === "unknown").length,
 	};
