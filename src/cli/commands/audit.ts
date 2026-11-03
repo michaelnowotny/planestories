@@ -11,9 +11,16 @@ import {
 	formatAuditReport,
 	parseAuditWindow,
 } from "../../sync/audit.ts";
+import {
+	findStaleStateCandidates,
+	formatStaleStateReport,
+	type StaleStateReport,
+} from "../../sync/stale_state.ts";
 import { announceTarget } from "../announce_target.ts";
 import { normalizeBoardBaseUrl } from "../board_cache.ts";
+import { COMMENTS_NOT_CAPTURED } from "../comments.ts";
 import { type GraphSourceRuntime, resolveGraph } from "../graph_source.ts";
+import { cacheReadLine } from "../local_board.ts";
 import { reportPacing } from "../pacing.ts";
 import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { connectTarget } from "../target_client.ts";
@@ -109,6 +116,48 @@ export async function runAudit(
 	};
 }
 
+/**
+ * Offline check. Comment creation on the CE board we measured bumps
+ * `updated_at`, so this does not claim to catch comment-only audit misses.
+ * It only lists open items whose latest comment uses closed language.
+ */
+async function runStaleStateCheck(options: AuditCommandOptions): Promise<StaleStateReport> {
+	const now = new Date();
+	const source = await resolveGraph({
+		config: options.config,
+		context: options.context,
+		project: options.project,
+		boardCache: { readRequired: true },
+		dependencies: false,
+		json: options.json === true,
+		selectProjectHelp: options.selectProjectHelp,
+	});
+	if (source.provenance.kind !== "cache") {
+		throw new ConfigError("The stale-state check reads the local board cache.");
+	}
+	if (!source.commentCapture) {
+		throw new ConfigError(COMMENTS_NOT_CAPTURED);
+	}
+	const graph = source.acceptPartialGraph(
+		"open state comes from the cached graph; dependency edges are not used",
+	);
+	let since: string | undefined;
+	let bounds: { sinceMs: number; throughMs: number } | undefined;
+	if (typeof options.since === "string" && options.since.length > 0) {
+		const window = parseAuditWindow(options.since, now);
+		since = window.since;
+		bounds = { sinceMs: Date.parse(window.since), throughMs: Date.parse(window.through) };
+	}
+	const report: StaleStateReport = {
+		heuristic: true,
+		fetchedAt: source.provenance.fetchedAt,
+		...(since !== undefined ? { since } : {}),
+		candidates: findStaleStateCandidates(graph, source.commentCapture.byId, bounds),
+	};
+	console.error(cacheReadLine(source.provenance.fetchedAt));
+	return report;
+}
+
 function handleError(error: unknown): never {
 	if (
 		error instanceof ParentCycleError ||
@@ -143,8 +192,29 @@ export function registerAuditCommand(program: Command): void {
 			"Bound the audit window (e.g. 90m, 24h, 7d, or an ISO-8601 instant; default 24h)",
 		)
 		.option("--json", "Emit the same bounded audit report as machine-readable JSON", false)
+		.option(
+			"--stale-state",
+			"List open items whose latest cached comment looks finished. A heuristic, from board fetch --with-comments. Does not walk live activity.",
+			false,
+		)
 		.action(async (options, command: Command) => {
 			try {
+				if (options.staleState === true) {
+					const report = await runStaleStateCheck({
+						config: options.config,
+						context: options.context,
+						project: options.project,
+						since: options.since,
+						json: options.json === true,
+						selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
+					});
+					process.stdout.write(
+						options.json
+							? `${JSON.stringify(report, null, "\t")}\n`
+							: `${formatStaleStateReport(report)}\n`,
+					);
+					return;
+				}
 				const result = await runAudit({
 					config: options.config,
 					context: options.context,
