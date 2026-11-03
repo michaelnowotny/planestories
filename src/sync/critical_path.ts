@@ -25,6 +25,13 @@ import { QUERY_REQUIREMENTS } from "./query_requirements.ts";
  *    stay in the graph because their edges still order the work behind them.
  * 4. EPICS ARE CONTAINERS, NOT WORK. Only leaves carry duration; counting an
  *    epic and its children would double-count the same days.
+ * 5. AN EQUAL FLOOR IS NOT AN EQUAL PATH. Several chains can sum to the same
+ *    number of days. The reported one is the fewest hops, then the lowest
+ *    identifier. Edge order used to decide this: a snapshot sorts relation ids
+ *    and a live sweep does not, and those two orders named different chains for
+ *    one Data Platform floor (a direct edge, or that edge plus a zero-day
+ *    detour). Done nodes stay eligible — a zero-day blocker on the chosen path
+ *    is still named.
  */
 
 export interface CriticalPathNode {
@@ -315,6 +322,27 @@ function findCycles(
 }
 
 /**
+ * Which of two equal-finish nodes lies on the path this report names.
+ *
+ * Fewer hops first, so a zero-day detour loses to the direct edge. Then the
+ * identifier (title, then id, when the node has none), which does not depend
+ * on the order the edges were inserted.
+ */
+function preferOnEqualFinish(
+	hops: Map<string, number>,
+	label: (id: string) => string,
+	candidate: string,
+	incumbent: string,
+): boolean {
+	const hopDelta = (hops.get(candidate) ?? 0) - (hops.get(incumbent) ?? 0);
+	if (hopDelta !== 0) return hopDelta < 0;
+	const candidateLabel = label(candidate);
+	const incumbentLabel = label(incumbent);
+	if (candidateLabel !== incumbentLabel) return candidateLabel < incumbentLabel;
+	return candidate < incumbent;
+}
+
+/**
  * Compute the critical path of a graph's `blocks` edges.
  *
  * Pure: takes the same `AtlasGraph` the cockpit renders and the `--json` output
@@ -369,21 +397,31 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 		const es = new Map<string, number>();
 		const ef = new Map<string, number>();
 		const from = new Map<string, string | null>();
+		const hops = new Map<string, number>();
 		for (const id of order) {
-			let start: number | undefined;
 			let via: string | null = null;
 			for (const pred of predecessors.get(id) ?? []) {
+				if (via === null) {
+					via = pred;
+					continue;
+				}
 				const finish = ef.get(pred) ?? 0;
-				if (start === undefined || finish > start) {
-					start = finish;
+				const incumbent = ef.get(via) ?? 0;
+				// A strictly later predecessor is a longer path and always wins.
+				// An equal finish is a tie: fewer hops, then identifier.
+				if (
+					finish > incumbent ||
+					(finish === incumbent && preferOnEqualFinish(hops, label, pred, via))
+				) {
 					via = pred;
 				}
 			}
-			const earliestStart = start ?? 0;
+			const earliestStart = via === null ? 0 : (ef.get(via) ?? 0);
 			const duration = id === zeroed ? 0 : (leaves.get(id)?.duration ?? 0);
 			es.set(id, earliestStart);
 			ef.set(id, earliestStart + duration);
 			from.set(id, via);
+			hops.set(id, via === null ? 0 : (hops.get(via) ?? 0) + 1);
 		}
 		// Connected nodes only: CPM assumes unlimited parallelism, so an item with
 		// no dependencies constrains nothing however large it is.
@@ -391,7 +429,7 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 			0,
 			...order.filter((id) => connected.has(id)).map((id) => ef.get(id) ?? 0),
 		);
-		return { es, ef, from, end };
+		return { es, ef, from, hops, end };
 	};
 
 	const base = forward();
@@ -423,7 +461,8 @@ export function computeCriticalPath(graph: AtlasGraph): CriticalPathResult {
 
 	let tail: string | null = null;
 	for (const id of order) {
-		if ((base.ef.get(id) ?? 0) === projectEnd && connected.has(id)) tail = id;
+		if ((base.ef.get(id) ?? 0) !== projectEnd || !connected.has(id)) continue;
+		if (tail === null || preferOnEqualFinish(base.hops, label, id, tail)) tail = id;
 	}
 	const chainIds: string[] = [];
 	for (let id = tail; id !== null; id = base.from.get(id) ?? null) chainIds.unshift(id);

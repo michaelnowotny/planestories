@@ -365,6 +365,126 @@ describe("critical path", () => {
 });
 
 /**
+ * The Data Platform board named an 8-item chain from a live read and a 4-item
+ * chain from a snapshot. Both graphs contained the same edges and both floors
+ * were 17 days: DATA-2631 blocks DATA-2636 directly, and also blocks it through
+ * a done chain whose remaining duration is zero. Which chain came back followed
+ * predecessor insertion order. These tests fail if that order decides again.
+ */
+describe("equal-duration critical paths", () => {
+	const done = { statusGroup: "completed" as const, status: "Done" };
+
+	function platformNodes(detourDays: number | null = null): AtlasNode[] {
+		return [
+			story("2631", "DATA-2631", 3, done),
+			detourDays === null
+				? story("2703", "DATA-2703", 2.5, done)
+				: story("2703", "DATA-2703", detourDays),
+			story("2709", "DATA-2709", 2.5, done),
+			story("2716", "DATA-2716", 3, done),
+			story("2725", "DATA-2725", 3, done),
+			story("2636", "DATA-2636", 5),
+			story("2637", "DATA-2637", 8),
+			story("2640", "DATA-2640", 4),
+		];
+	}
+
+	const platformEdges: AtlasEdge[] = [
+		{ source: "2631", target: "2703", type: "blocks" },
+		{ source: "2631", target: "2636", type: "blocks" },
+		{ source: "2703", target: "2709", type: "blocks" },
+		{ source: "2709", target: "2716", type: "blocks" },
+		{ source: "2716", target: "2725", type: "blocks" },
+		{ source: "2716", target: "2636", type: "blocks" },
+		{ source: "2725", target: "2636", type: "blocks" },
+		{ source: "2636", target: "2637", type: "blocks" },
+		{ source: "2637", target: "2640", type: "blocks" },
+	];
+
+	function ordersOf<T>(items: T[]): T[][] {
+		return [items, [...items].reverse()];
+	}
+
+	test("a zero-day detour loses to the direct edge, in either insertion order", () => {
+		for (const nodes of ordersOf(platformNodes())) {
+			for (const edges of ordersOf(platformEdges)) {
+				const result = computed(graph(nodes, edges));
+				expect(result.chain.map((node) => node.identifier)).toEqual([
+					"DATA-2631",
+					"DATA-2636",
+					"DATA-2637",
+					"DATA-2640",
+				]);
+				expect(result.totalDays).toBe(17);
+				expect(result.chain.map((node) => node.identifier)).not.toContain("DATA-2703");
+			}
+		}
+	});
+
+	test("a detour that adds days still wins over the direct edge", () => {
+		for (const edges of ordersOf(platformEdges)) {
+			const result = computed(graph(platformNodes(1), edges));
+			expect(result.totalDays).toBe(18);
+			expect(result.chain.map((node) => node.identifier)).toEqual([
+				"DATA-2631",
+				"DATA-2703",
+				"DATA-2709",
+				"DATA-2716",
+				"DATA-2636",
+				"DATA-2637",
+				"DATA-2640",
+			]);
+		}
+	});
+
+	test("equal hop counts break on the identifier, not the node id or the edge order", () => {
+		// "a-node" sorts before "m-node". The identifier P-B sorts before P-C.
+		// Keeping the first predecessor would follow whichever edge was inserted
+		// first; sorting by node id would name P-C.
+		const nodes = [
+			story("z-node", "P-A", 1),
+			story("a-node", "P-C", 1),
+			story("m-node", "P-B", 1),
+			story("d-node", "P-D", 1),
+		];
+		const edges: AtlasEdge[] = [
+			{ source: "z-node", target: "m-node", type: "blocks" },
+			{ source: "z-node", target: "a-node", type: "blocks" },
+			{ source: "m-node", target: "d-node", type: "blocks" },
+			{ source: "a-node", target: "d-node", type: "blocks" },
+		];
+		for (const orderedEdges of ordersOf(edges)) {
+			const result = computed(graph(nodes, orderedEdges));
+			expect(result.chain.map((node) => node.identifier)).toEqual(["P-A", "P-B", "P-D"]);
+			expect(result.totalDays).toBe(3);
+		}
+	});
+
+	test("two sinks on one floor agree across insertion order", () => {
+		// Both paths sum to 10 and both sinks sit one hop from a source. Kahn's
+		// last max-finish node used to depend on which source was queued first.
+		// P-N sorts before P-Z, so the chain is P-M → P-N in every order.
+		const nodes = [
+			story("m", "P-M", 5),
+			story("n", "P-N", 5),
+			story("a", "P-A", 6),
+			story("z", "P-Z", 4),
+		];
+		const edges: AtlasEdge[] = [
+			{ source: "m", target: "n", type: "blocks" },
+			{ source: "a", target: "z", type: "blocks" },
+		];
+		for (const orderedNodes of ordersOf(nodes)) {
+			for (const orderedEdges of ordersOf(edges)) {
+				const result = computed(graph(orderedNodes, orderedEdges));
+				expect(result.chain.map((node) => node.identifier)).toEqual(["P-M", "P-N"]);
+				expect(result.totalDays).toBe(10);
+			}
+		}
+	});
+});
+
+/**
  * The other expansion cases. The rule was argued and one case pinned; review's
  * point is that "argued" is not "tested", and the cases most likely to be wrong
  * are the ones neither of us listed.
