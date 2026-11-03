@@ -17,6 +17,8 @@ of the MIT-licensed `linearstories`, ported to Plane.
 ## Where it is
 
 - Repo: the planestories checkout (on this machine: `~/PycharmProjects/planestories`).
+- 0.7.0 is on npm: `bunx planestories`, or `npm install -g planestories`. The commands in
+  this brief use the checkout.
 - Bun/TypeScript project, independent of whatever project you're working in.
 - Worth skimming: `README.md`, `docs/USER_STORY_FORMAT.md`, `templates/user-story.md`.
 
@@ -123,6 +125,10 @@ bun run src/cli/index.ts import /path/to/stories.md
 bun run src/cli/index.ts export --project "My Project" -o exported.md
 #   --external-source         export only items planestories created (no demo/other noise)
 #   --label NAME / --status S filters (--status is repeatable); --open-only keeps open items
+#   --from-snapshot FILE      zero API calls. --with-comments requires it: comments print on
+#                             stderr and the story file is unchanged. Without --with-comments
+#                             the command prints "N comments not shown", or "comments not shown
+#                             (not fetched)" when no sweep ran. A live export does not sweep comments.
 #   Criteria are recovered DESCRIPTION-FIRST: a description task-list is authoritative; a legacy
 #   parent with only `::ac<n>` sub-items still folds them into the story's checklist. Ticking a box
 #   in the Plane UI then re-exporting yields `- [x]` — this is the board->file reverse sync.
@@ -167,7 +173,12 @@ bun run src/cli/index.ts lint stories/*.md --warn-only  # report only, exit 0
 # Doctor: read-only CI check; exits non-zero on findings (board rot). Checks orphaned/
 # parentless criterion sub-items, duplicate titles, and DANGLING dependency relations
 # (a blocked_by/blocks/relates_to whose target work item was deleted / left the project).
+# Answers from a fresh board cache or --from-snapshot, and calls Plane only with --refresh.
+# A cache hit prints "Read from board cache (fetched <ISO>) — NOT live." A snapshot prints
+# "Read from snapshot (taken <ISO>) — NOT live."
 bun run src/cli/index.ts doctor --project "My Project" --house-rules
+bun run src/cli/index.ts doctor --from-snapshot ~/plane-replication/data.snapshot.json -p "My Project"
+bun run src/cli/index.ts doctor --project "My Project" --refresh
 
 # Read-only deployment facts: edition/version, selected dialect, relations, PQL, count endpoint.
 # Negatives and failed/inconclusive probes are distinct; add --json for machine-readable output.
@@ -186,27 +197,46 @@ bun run src/cli/index.ts atlas --project "My Project" --no-dependencies    # fas
 # Show: compact one-item board answer (no description body). Includes titled parent,
 # child status split, titled/statused relations, criteria progress, and provenance.
 bun run src/cli/index.ts show DATA-123
+bun run src/cli/index.ts show DATA-123 --with-comments   # needs board fetch --with-comments, or a snapshot
 bun run src/cli/index.ts show DATA-123 --json
+# Without --with-comments, show prints "N comments not shown", or "comments not shown
+# (not fetched)" when the sweep never ran.
 
 # Audit: recent activity attributed to this API key's OWNER, newest first, with the
 # Plane instance stamped on every row. Requires a fresh board cache so candidate
 # work items can be narrowed by updatedAt; it never silently walks the whole board.
+# Cached answers print an absolute instant (fetched <ISO>, or taken <ISO> for a snapshot).
 bun run src/cli/index.ts board fetch --project "My Project"
+bun run src/cli/index.ts board fetch --project "My Project" --with-comments
 bun run src/cli/index.ts audit --since 24h --context ce
-# This cannot distinguish planestories from MCP/UI writes sharing the key, and Plane
-# comment/relation-only edits need not bump updatedAt; the report states both limits.
+bun run src/cli/index.ts audit --stale-state
+# audit --stale-state lists open items whose latest cached comment says merged, deployed,
+# done, shipped, released, or closed. It is a heuristic, not a state change, and it does
+# not walk live activity. It needs board fetch --with-comments. A normal audit --since
+# is unchanged.
+# This cannot distinguish planestories from MCP/UI writes sharing the key. The report
+# still says comment- or relation-only writes may not bump updatedAt. On the CE Data
+# Platform snapshot of 2026-11-03 that did not hold for comments: none of 3,476 comments
+# was newer than the item updated_at. The relation half is an unconfirmed Cloud-archive
+# observation from 2026-08-17.
 
 # Packet: emit a self-contained implementable brief for a coding agent from a board
 # ticket — description, acceptance criteria (board state), dependencies WITH their
 # current status, effort, parent epic, planning refs, + a machine-readable YAML header.
-# An epic emits itself + every DESCENDANT's brief (nested epics included) and sums descendant dev-days. Read-only.
+# An epic emits itself + every DESCENDANT's brief (nested epics included) and sums descendant dev-days.
+# packet and epic answer from a fresh board cache or --from-snapshot, and call Plane only
+# with --refresh. The answer prints the copy's time as an absolute instant.
 bun run src/cli/index.ts packet DATA-123                     # to stdout (pipe to an agent)
+bun run src/cli/index.ts packet DATA-123 --with-comments
 bun run src/cli/index.ts packet DATA-1 -o epic-packet.md     # an epic + its whole subtree, to a file
+bun run src/cli/index.ts packet DATA-123 --from-snapshot ~/plane-replication/data.snapshot.json
 
 # Epic rollup: a concise summary of an epic — story status breakdown, completion %
 # (cancelled stories excluded from the denominator), total effort (with a count of
-# unestimated stories), and which stories are blocked / blocking. Read-only.
+# unestimated stories), and which stories are blocked / blocking. Same cache/snapshot
+# rule as packet. Read-only.
 bun run src/cli/index.ts epic DATA-1
+bun run src/cli/index.ts epic DATA-1 --refresh
 
 # Contexts / instance profiles: --context <name> selects a named Plane instance.
 # A context lives in the config file OR purely in env as PLANE_CTX_<NAME>_API_KEY /
@@ -229,9 +259,28 @@ bun run src/cli/index.ts set PROJ-12 --status "In Progress" --project "My Projec
 
 # The dependency floor: the longest chain of blocking work, in dev-days, plus each
 # item's slack and the biggest lever. Refuses (rather than guessing) on a cycle or an
-# incomplete relation sweep, and reports "at least N" when connected work is unestimated:
+# incomplete relation sweep, and reports "at least N" when connected work is unestimated.
+# With no file argument it answers from a fresh board cache or --from-snapshot, and calls
+# Plane only with --refresh. When several chains share the floor, the reported one is the
+# fewest hops, then the lowest identifier. A done ticket on that chain is still named and
+# adds no remaining days. --limit shortens the rows; the dev-day floor stays the full chain.
 bun run src/cli/index.ts critical-path /path/to/stories.md
 bun run src/cli/index.ts critical-path --project "My Project" --json
+bun run src/cli/index.ts critical-path --from-snapshot ~/plane-replication/data.snapshot.json
+bun run src/cli/index.ts critical-path --limit 5
+
+# ls and count take --updated-since (90m, 24h, 7d, or an ISO instant). A story with no
+# usable updatedAt is omitted and counted as unknown, not as old.
+bun run src/cli/index.ts ls --updated-since 7d --open
+bun run src/cli/index.ts count --open --updated-since 24h
+
+# --limit on ready, blocked, inconsistent, orphans, and abandoned shortens the rows.
+# The considered counts stay the full set. critical-path --limit is the same rule for the chain.
+bun run src/cli/index.ts ready --limit 10
+bun run src/cli/index.ts blocked --limit 10
+bun run src/cli/index.ts inconsistent --limit 10
+bun run src/cli/index.ts orphans --limit 10
+bun run src/cli/index.ts abandoned --limit 10
 
 # Board health over time, from a directory of snapshots — offline, zero API calls:
 bun run src/cli/index.ts trend --dir backups
@@ -394,6 +443,11 @@ just sent was ignored.
   automatically — honoring `Retry-After` when present, else exponential backoff with jitter.
   Tune with `PLANE_MAX_RETRIES` (default 5; 0 disables). Bulk imports/grooms of large boards
   no longer fall over on a rate limit.
+- When `apiRateLimit` is set, a paced command prints `Paced run starting · <host> · workspace
+  <slug> · project <name> · <rpm>/min.` on stderr before the first request, then a progress
+  line with an ETA during a multi-page list or a sweep. The `paced:` summary still prints at
+  the end. A list whose length is unknown says `total unknown, no estimate`. No rate limit
+  means neither line.
 - Extra yaml keys: `parent: DATA-N` nests a story under an existing item (epic in another file);
   `kind` (story/criterion/epic) is informational; `comment: "..."` posts a one-time evidence note
   on create/update/status-change (idempotent — a re-run won't duplicate it). Use `groom` after a

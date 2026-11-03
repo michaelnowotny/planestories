@@ -149,21 +149,17 @@ explicit context override is present. See
 
 ### 1. Install
 
-The repository describes v0.7.0. Until that version has been published to npm, run it from a
-source checkout:
-
-```bash
-bun install
-bun run src/cli/index.ts import stories/*.md
-```
-
-Once the npm badge above shows `0.7.0`, run it directly or install it globally. You can also build
-a standalone binary from a source checkout:
+0.7.0 is on npm. Install it from there:
 
 ```bash
 bunx planestories import stories/*.md
-bun install -g planestories
-# from the source checkout:
+npm install -g planestories
+```
+
+This repository is v0.7.1. From a source checkout you can also build a standalone binary:
+
+```bash
+bun install
 bun build src/cli/index.ts --compile --outfile planestories
 ```
 
@@ -381,9 +377,12 @@ planestories export [options]
   --include-archived        Include items carrying the 'archived' label (excluded by default)
   --orphans-only            Emit the parentless-story worksheet plus an epic directory
   --from-snapshot <file>    Export from a snapshot with zero API calls
+  --with-comments           Print comments on stderr. Requires --from-snapshot; the story file is unchanged
 ```
 
 Export converts Plane's HTML description back to markdown (headings and `- [ ]`/`- [x]` checklists survive a round-trip), and emits stories in ascending identifier order. It also emits `parent`/`kind` structure and writes `plane_hash`, so re-importing an unedited exported file is all-`unchanged` (see [Idempotency, skip-unchanged & duplicates](#idempotency-skip-unchanged--duplicates)).
+
+Without `--with-comments`, export prints `N comments not shown`, or `comments not shown (not fetched)` when no sweep ran. `--with-comments` requires `--from-snapshot`, prints on stderr, and does not change the story file. A live export does not start a comment sweep.
 
 ### `projects`
 
@@ -476,7 +475,13 @@ findings** (pass `--no-fail-on-findings` to just report):
 ```
 planestories doctor --project <name> [--house-rules]
 planestories doctor --from-snapshot ~/plane-replication/data.snapshot.json -p <name>
+planestories doctor --project <name> --refresh
 ```
+
+`doctor` answers from a fresh board cache (`board fetch`) or `--from-snapshot`, and calls Plane
+only with `--refresh`. A cache hit prints `Read from board cache (fetched <ISO>) — NOT live.` A
+snapshot prints `Read from snapshot (taken <ISO>) — NOT live.` A cache older than one hour
+refuses until `--refresh` or `--stale-ok`.
 
 `--house-rules` flags open non-epic stories without a valid `**Effort:** N dev-days` line,
 and open work whose board-authored `Depends on:` / `Blocks:` prose lacks the matching relation.
@@ -484,11 +489,11 @@ and open work whose board-authored `Depends on:` / `Blocks:` prose lacks the mat
 `--from-snapshot` is also available on `atlas`, `export`, `show`, `packet`, `epic`,
 `critical-path`, `ls`, `count`, and all five graph-query commands. It analyses a snapshot file
 instead of the live board — **and needs no credentials at all**, so it genuinely works on a laptop with no `.env`: **zero API calls, works
-offline, and possible when the instance is rate-limiting you**. On a large board, live `doctor`
+offline, and possible when the instance is rate-limiting you**. On a large board, a live refresh
 can need hundreds of relation requests and take many minutes (or fail outright against a throttled
-instance); from a snapshot the same analysis takes under a second. The report always states the
-snapshot's age, so a stale answer is never mistaken for a live one — and it makes the nightly
-backups useful for something other than disaster.
+instance); from a snapshot the same analysis takes under a second. The report prints the copy's
+time as an absolute instant (`fetched <ISO>` or `taken <ISO>`), so a stale answer is never
+mistaken for a live one — and it makes the nightly backups useful for something other than disaster.
 
 ### `lint`
 
@@ -548,13 +553,15 @@ Populate the identity-bound shared cache explicitly:
 
 ```
 planestories board fetch --project "Data Platform"
+planestories board fetch --project "Data Platform" --with-comments
 ```
 
 The cache lives at `.planestories/board.json`, is bound to host + workspace + project, contains a
 complete board and relation sweep, and is published only by atomic replacement. Cached answers
-print their age and refuse after one hour unless `--stale-ok` is given. Any command's `--refresh`
-performs the same complete publication—even `abandoned --refresh`, although ordinary `abandoned`
-does not need relations for its own answer.
+print the copy's time as an absolute instant (`fetched <ISO>`, or `taken <ISO>` for a snapshot)
+and refuse after one hour unless `--stale-ok` is given. `--with-comments` also stores each item's
+comments. Any command's `--refresh` performs the same complete publication—even
+`abandoned --refresh`, although ordinary `abandoned` does not need relations for its own answer.
 
 ### `show`
 
@@ -565,12 +572,15 @@ description body; use `packet` when you need the full implementable brief.
 ```
 planestories show DATA-123
 planestories show DATA-123 --json
+planestories show DATA-123 --with-comments
 planestories show DATA-123 --from-snapshot ~/plane-replication/data.snapshot.json
 ```
 
 An unknown identifier exits non-zero and names the board searched, so `show` is safe to use as
-an existence guard in a script. Every answer states its board provenance; snapshot JSON also
-embeds the snapshot timestamp.
+an existence guard in a script. Every answer states its board provenance and the copy's absolute
+instant. Without `--with-comments`, `show` prints `N comments not shown`, or `comments not shown
+(not fetched)` when no sweep ran. `--with-comments` needs `board fetch --with-comments` or
+`--from-snapshot`.
 
 ### `packet` and `epic`
 
@@ -582,12 +592,16 @@ rollup over those descendants.
 ```
 planestories packet DATA-123
 planestories packet DATA-100 -o exports/DATA-100-packet.md
+planestories packet DATA-123 --with-comments
 planestories epic DATA-100
+planestories epic DATA-100 --from-snapshot ~/plane-replication/data.snapshot.json
 ```
 
-Both accept `--from-snapshot` for a credential-free offline answer. `packet` writes to stdout unless
-`-o` is supplied; `epic` reports status breakdown, completion percentage, total effort with the
-unestimated count, and blocked/blocking leaves.
+`packet` and `epic` answer from a fresh board cache or `--from-snapshot`, and call Plane only
+with `--refresh`. The answer prints the copy's time as an absolute instant. `packet --with-comments`
+appends comments captured by `board fetch --with-comments` or present in the snapshot. `packet`
+writes to stdout unless `-o` is supplied; `epic` reports status breakdown, completion percentage,
+total effort with the unestimated count, and blocked/blocking leaves.
 
 ### `ls` and `count`
 
@@ -598,15 +612,19 @@ stories (nested epics included), and `--open` means not completed or cancelled.
 ```
 planestories ls --label ingestion --open
 planestories ls --epic DATA-100 --blocked --json
+planestories ls --updated-since 7d --open
 planestories count --epic DATA-100 --open             # e.g. 57 open of 69 stories
+planestories count --open --updated-since 24h
 planestories count --open --group-by status
 ```
 
 Available predicates are `--open`, `--status`, `--label`, `--assignee`, `--epic`, `--flagged`,
-`--no-estimate`, and `--blocked`. Counts always include a denominator; group counts use the
-selected set as theirs. A missing `--epic` identifier exits non-zero. Both commands print board
-provenance and cache age, and `--blocked` refuses unless dependency coverage is complete. For a
-predicate outside this intentionally small surface, use `atlas --json` with `jq`.
+`--no-estimate`, `--blocked`, and `--updated-since`. `--updated-since` takes `90m`, `24h`, `7d`,
+or an ISO instant. A story with no usable `updatedAt` is omitted and counted as unknown, not as
+old. Counts always include a denominator; group counts use the selected set as theirs. A missing
+`--epic` identifier exits non-zero. Both commands print board provenance and the copy's absolute
+instant, and `--blocked` refuses unless dependency coverage is complete. For a predicate outside
+this intentionally small surface, use `atlas --json` with `jq`.
 
 ### `ready`, `inconsistent`, `blocked`, `orphans`, and `abandoned`
 
@@ -616,15 +634,16 @@ coverage when their verdict depends on relations.
 
 ```
 planestories ready --epic DATA-100 --limit 10       # unblocked open work, leverage-ranked
-planestories inconsistent --epic DATA-100           # Done with open blockers; ready but not started
-planestories blocked --epic DATA-100                # open work plus unfinished blockers
-planestories orphans                                # leaves outside the blocking graph
-planestories abandoned                              # open leaves under abandoned/cancelled epics
+planestories inconsistent --epic DATA-100 --limit 10 # each finding list; considered count unchanged
+planestories blocked --epic DATA-100 --limit 10      # open-item denominator stays the full count
+planestories orphans --limit 10                      # leaves outside the blocking graph
+planestories abandoned --limit 10                    # open leaves under abandoned/cancelled epics
 ```
 
-`ready`, `inconsistent`, and `blocked` need complete relations. `orphans` also needs relations to
-prove isolation. `abandoned` needs only hierarchy for an ordinary answer, while its `--refresh`
-still fetches relations because refresh publishes the shared cache used by every other command.
+`--limit` shortens the rows. The considered counts stay the full set. `ready`, `inconsistent`,
+and `blocked` need complete relations. `orphans` also needs relations to prove isolation.
+`abandoned` needs only hierarchy for an ordinary answer, while its `--refresh` still fetches
+relations because refresh publishes the shared cache used by every other command.
 
 ### `audit`
 
@@ -637,14 +656,23 @@ key's owner, sorts newest first, and stamps every row with the instance URL.
 planestories board fetch --project "Data Platform"     # required fresh candidate inventory
 planestories audit --since 24h --context ce
 planestories audit --since 2026-08-23T08:00:00Z --json
+planestories audit --stale-state                       # heuristic; needs board fetch --with-comments
 ```
 
-The bounded default is `24h`. Every report prints the board, cache age, exact window, and number of
-candidate activity trails walked. It also states the limits: the API-key owner is indistinguishable
-across planestories, MCP, and UI writes; only the requested window is covered; and Plane
-comment/relation-only writes need not bump the parent `updatedAt`, so this is bounded evidence rather
-than a complete activity export. A missing/stale/mismatched cache refuses and names the exact
-`board fetch` command; it never degrades into a whole-board live sweep.
+The bounded default is `24h`. Every report prints the board, the cache's absolute fetch instant,
+the exact window, and the number of candidate activity trails walked. It also states the limits:
+the API-key owner is indistinguishable across planestories, MCP, and UI writes; only the requested
+window is covered; and Plane comment- or relation-only writes may not bump the parent `updatedAt`,
+so this is bounded evidence rather than a complete activity export. On the CE Data Platform
+snapshot of 2026-11-03 that did not hold for comments: none of 3,476 comments was newer than the
+item `updated_at`. The relation half is an unconfirmed Cloud-archive observation from 2026-08-17.
+A missing/stale/mismatched cache refuses and names the exact `board fetch` command; it never
+degrades into a whole-board live sweep.
+
+`audit --stale-state` lists open items whose latest cached comment says merged, deployed, done,
+shipped, released, or closed. It is a heuristic for tickets that may still be open after the work
+landed, not a measured state change, and it does not walk live activity. Run
+`board fetch --with-comments` first. A normal `audit --since` is unchanged.
 
 ### `critical-path`
 
@@ -653,9 +681,17 @@ one number a dependency graph exists to reveal.
 
 ```
 planestories critical-path stories/q1-2026.md            # offline, from a file
-planestories critical-path --project "Data Platform"     # from the live board
+planestories critical-path --project "Data Platform"     # cache; --refresh to call Plane
 planestories critical-path --from-snapshot ~/plane-replication/data.snapshot.json --json
+planestories critical-path --limit 5                      # fewer rows; the floor stays the full chain
 ```
+
+With no file argument, `critical-path` answers from a fresh board cache or `--from-snapshot`, and
+calls Plane only with `--refresh`. The answer prints the copy's time as an absolute instant.
+`--limit` shortens the displayed rows. The dev-day floor stays the full chain.
+
+When several chains share the floor, the reported one is the fewest hops, then the lowest
+identifier. A done ticket on that chain is still named and adds no remaining days.
 
 It prints the chain in order, each item's effort, per-item **slack** (how long something off the
 chain can slip without moving the end), and the **biggest lever** — the item whose completion
@@ -822,6 +858,11 @@ requests below that per-key limit and derives useful concurrency from observed l
 equivalent default-context environment override is `PLANE_API_RATE_LIMIT`; named contexts use only
 `PLANE_CTX_<NAME>_API_RATE_LIMIT`. Pacing is off when `apiRateLimit` is absent, preserving the
 existing Plane Cloud behavior because its actual limit is not assumed.
+
+When `apiRateLimit` is set, stderr prints `Paced run starting · <host> · workspace <slug> ·
+project <name> · <rpm>/min.` before the first request, then a progress line with an ETA during a
+multi-page list or a sweep. The `paced:` summary still prints at the end. A list whose length is
+unknown says `total unknown, no estimate`. No rate limit means neither line.
 
 ## Where exports go
 

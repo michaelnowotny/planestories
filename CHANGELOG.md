@@ -5,24 +5,28 @@ All notable changes to planestories.
 The format is loosely [Keep a Changelog](https://keepachangelog.com/); versions follow
 [semver](https://semver.org/). Dates are the date the work landed on `main`.
 
-> **A note on the version history.** `0.3.1` is the last version published to npm. Everything
-> below shipped between then and `0.5.0`; there was never a released `0.4.x`, so it is recorded
+> **A note on the version history.** `0.3.1` was the last version published to npm before `0.5.0`.
+> Everything between them shipped unpublished; there was never a released `0.4.x`, so it is recorded
 > as one release rather than split into a retroactive line that never existed.
 >
-> **0.5.0 and 0.6.0 were never published to npm.** Publishing is interactive (WebAuthn). **0.7.0 is
-> the version to publish.**
+> **0.5.0 and 0.6.0 were never published to npm.** 0.7.0 is published. **0.7.1 is the version to
+> publish.** Publishing is interactive (WebAuthn).
 >
 > **The `v1.x` tags in this repository come from upstream
 > [linearstories](https://github.com/ijonas/linearstories), not from planestories releases.**
 > They have been deleted from `origin`. The configured `upstream` remote still advertises
 > `v1.0.0`–`v1.4.0`, and `git fetch --all` can restore those names locally. **Never run
-> `git push --tags`.** Push only the intended tag explicitly: `git push origin v0.7.0`.
+> `git push --tags`.** Push only the intended tag explicitly: `git push origin v0.7.1`.
 
 ---
 
+## [0.7.1] — 2026-11-03
+
+Documentation: README and USING_WITH_CLAUDE updated for 0.7.0.
+
 ## [0.7.0] — 2026-11-03
 
-**0.5.0 and 0.6.0 were never published to npm. 0.7.0 is the version to publish.**
+**0.5.0 and 0.6.0 were never published to npm. 0.7.0 is published.**
 
 Reads that used to walk the live board now answer from the copy you already have. Comments stay
 out of the answer until you ask for them. A long paced run says that it has started and how long
@@ -111,8 +115,8 @@ it has left.
 
 ## [0.6.0] — 2026-08-23
 
-**Neither 0.5.0 nor 0.6.0 was published to npm.** This section is what 0.6.0 contained. Publish
-0.7.0.
+**Neither 0.5.0 nor 0.6.0 was published to npm.** This section is what 0.6.0 contained. 0.7.0 is
+published. Publish 0.7.1.
 
 The release that answers board questions without PQL. Community Edition has no server-side
 work-item filtering at all — see `docs/PLANE_CAPABILITIES.md` — so planestories fetches the board
