@@ -12,6 +12,7 @@ export interface FreshnessClient {
 	listArchivedWorkItems<T>(projectId: string): Promise<T[] | null>;
 	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]>;
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
+	pacedPhase?(label: string, done: number, total: number): void;
 	workItemCensus?(
 		projectId: string,
 	): Promise<{ totalCount: number; maxSequenceId: number | null } | null>;
@@ -181,10 +182,14 @@ export async function checkFreshness(
 	if (options.deep) {
 		const present = expected.filter((item) => actualById.has(item.id));
 		const concurrency = options.concurrency ?? client.concurrency?.() ?? 4;
+		client.pacedPhase?.("comments", 0, present.length);
 		const commentSweep = await sweepFetch(
 			present,
 			(item) => client.listWorkItemComments<RawComment>(snapshot.source.projectId, item.id),
 			concurrency,
+			(done, total) => {
+				client.pacedPhase?.("comments", done, total);
+			},
 		);
 		if (commentSweep.failures.length > 0) {
 			throw new ReplicateError(
@@ -209,10 +214,14 @@ export async function checkFreshness(
 				});
 			}
 		}
+		client.pacedPhase?.("relations", 0, present.length);
 		const relationSweep = await sweepFetch(
 			present,
 			(item) => client.getRelations(snapshot.source.projectId, item.id),
 			concurrency,
+			(done, total) => {
+				client.pacedPhase?.("relations", done, total);
+			},
 		);
 		if (relationSweep.failures.length > 0) {
 			throw new ReplicateError(

@@ -415,10 +415,14 @@ export async function resolveGraph(
 			// "nobody commented". A failed sweep writes nothing.
 			if (options.boardCache.captureComments) {
 				const concurrency = client.concurrency?.() ?? 4;
+				client.pacedPhase?.("comments", 0, index.items.length);
 				const sweep = await sweepFetch(
 					index.items,
 					(item) => client.listWorkItemComments<Record<string, unknown>>(project.id, item.id),
 					concurrency,
+					(done, total) => {
+						client.pacedPhase?.("comments", done, total);
+					},
 				);
 				if (sweep.failures.length > 0) {
 					const first = sweep.failures[0]?.error;

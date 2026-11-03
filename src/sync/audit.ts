@@ -57,6 +57,7 @@ export interface AuditClient {
 	concurrency?(): number | undefined;
 	getCurrentUser<T>(): Promise<T>;
 	listWorkItemActivities<T>(projectId: string, workItemId: string): Promise<T[]>;
+	pacedPhase?(label: string, done: number, total: number): void;
 }
 
 /** Minimal cached evidence needed to decide which live activity trails to walk. */
@@ -182,10 +183,14 @@ export async function auditWrites(
 		.filter(({ updatedMs }) => updatedMs >= sinceMs)
 		.map(({ item }) => item);
 	const actor = await resolveActor(client);
+	client.pacedPhase?.("activity", 0, candidates.length);
 	const sweep = await sweepFetch(
 		candidates,
 		(item) => client.listWorkItemActivities<unknown>(projectId, item.id),
 		client.concurrency?.() ?? 4,
+		(done, total) => {
+			client.pacedPhase?.("activity", done, total);
+		},
 	);
 	if (sweep.failures.length > 0) {
 		const first = sweep.failures[0];

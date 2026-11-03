@@ -95,4 +95,27 @@ describe("live target connection", () => {
 		expect(warnings).toHaveLength(1);
 		expect(warnings[0]).toContain("Falling back");
 	});
+
+	test("a rate limit announces the paced run before any request", async () => {
+		const lines: string[] = [];
+		let fetches = 0;
+		globalThis.fetch = (async () => {
+			fetches++;
+			throw new Error("must not fetch");
+		}) as unknown as typeof fetch;
+		await connectTarget(
+			{ ...config("https://paced.example", "work-items"), apiRateLimit: 600 },
+			{
+				resolver: new DialectResolver(),
+				progressWrite: (chunk) => lines.push(chunk),
+			},
+		);
+		expect(fetches).toBe(0);
+		const text = lines.join("");
+		expect(text).toContain("Paced run starting");
+		expect(text).toContain("paced.example");
+		expect(text).toContain("workspace ws");
+		expect(text).toContain("project Data Platform");
+		expect(text).toContain("600/min");
+	});
 });

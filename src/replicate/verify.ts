@@ -56,6 +56,7 @@ export interface VerifyClient {
 	listLabels<T>(projectId: string): Promise<T[]>;
 	listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]>;
 	getRelations(projectId: string, workItemId: string): Promise<PlaneIssueRelations>;
+	pacedPhase?(label: string, done: number, total: number): void;
 }
 
 export interface VerifyOptions {
@@ -541,6 +542,7 @@ async function compareComments(
 		const targetId = facts.targetBySource.get(item.id)?.id;
 		return targetId !== undefined && targetById.has(targetId);
 	});
+	client.pacedPhase?.("comments", 0, mapped.length);
 	const sweep = await sweepFetch(
 		mapped,
 		(item) =>
@@ -549,6 +551,9 @@ async function compareComments(
 				facts.targetBySource.get(item.id)!.id,
 			),
 		concurrency,
+		(done, total) => {
+			client.pacedPhase?.("comments", done, total);
+		},
 	);
 	if (sweep.failures.length > 0) {
 		throw new ReplicateError(
@@ -680,10 +685,14 @@ async function compareRelations(
 	add: (finding: VerifyFinding) => void,
 	concurrency = client.concurrency?.() ?? 4,
 ): Promise<void> {
+	client.pacedPhase?.("relations", 0, targetItems.length);
 	const sweep = await sweepFetch(
 		targetItems,
 		(item) => client.getRelations(facts.projectId, item.id),
 		concurrency,
+		(done, total) => {
+			client.pacedPhase?.("relations", done, total);
+		},
 	);
 	if (sweep.failures.length > 0) {
 		throw new ReplicateError(

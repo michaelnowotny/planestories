@@ -7,6 +7,7 @@ import {
 	isDialectConfigured,
 } from "../plane/dialect.ts";
 import type { ResolvedConfig } from "../types.ts";
+import { formatPacedOpening, PacedProgress, writeStderrNow } from "./run_progress.ts";
 
 interface ProjectRef {
 	id: string;
@@ -21,6 +22,8 @@ export interface TargetClientOptions {
 	resolver?: DialectResolver;
 	/** Emit the mandatory loud fallback warning. Defaults to console.error. */
 	warn?: (message: string) => void;
+	/** Captures the opening line in tests. Production writes it to stderr immediately. */
+	progressWrite?: (chunk: string) => void;
 }
 
 export interface ConnectedTarget {
@@ -36,6 +39,25 @@ export async function connectTarget(
 	config: ResolvedConfig,
 	options: TargetClientOptions = {},
 ): Promise<ConnectedTarget> {
+	let pacedProgress: PacedProgress | undefined;
+	if (config.apiRateLimit !== undefined && config.apiRateLimit > 0) {
+		const requestsPerMinute = config.apiRateLimit;
+		pacedProgress = new PacedProgress(
+			options.progressWrite ?? writeStderrNow,
+			Date.now,
+			options.progressWrite ? (text) => text : (text) => chalk.dim(text),
+		);
+		// Before the dialect probe and every later request. A line that waits
+		// for connectTarget to return is already late on a slow instance.
+		pacedProgress.announce(
+			formatPacedOpening({
+				baseUrl: config.baseUrl,
+				workspaceSlug: config.workspaceSlug,
+				project: options.project ?? config.defaultProject ?? undefined,
+				requestsPerMinute,
+			}),
+		);
+	}
 	const base = createPlaneClient({
 		apiKey: config.apiKey,
 		workspaceSlug: config.workspaceSlug,
@@ -46,6 +68,7 @@ export async function connectTarget(
 		requestsPerMinute: config.apiRateLimit,
 		rateHeadroom: config.rateHeadroom,
 		maxConcurrency: config.maxConcurrency,
+		pacedProgress,
 	});
 	const resolver = options.resolver ?? sharedResolver;
 	const resolution = await resolver.resolve(config, async () => {

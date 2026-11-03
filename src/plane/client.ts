@@ -87,6 +87,16 @@ export interface PlaneClientOptions {
 	pacer?: Pacer;
 	/** Injectable clock used by pacing and telemetry. */
 	now?: () => number;
+	/**
+	 * During-run progress attached by a paced command. Absent for library
+	 * calls and tests, which stay quiet.
+	 */
+	pacedProgress?: PacedProgressSink;
+}
+
+/** CLI-supplied phase progress. The client reports counts and does not print. */
+export interface PacedProgressSink {
+	phase(label: string, done: number, total: number | undefined): void;
 }
 
 export type PlaneDependencyRelationType = "blocked_by" | "blocking" | "relates_to";
@@ -174,6 +184,7 @@ export class PlaneClient {
 	private readonly beforeWriteAttempt?: () => void;
 	private readonly options: PlaneClientOptions;
 	private readonly pacer?: Pacer;
+	private readonly pacedProgress?: PacedProgressSink;
 	private readonly now: () => number;
 	private requestCount = 0;
 	private readonly startedAt: number;
@@ -192,6 +203,7 @@ export class PlaneClient {
 		this.sleep = options.sleep ?? defaultSleep;
 		this.beforeWriteAttempt = options.beforeWriteAttempt;
 		this.now = options.now ?? Date.now;
+		this.pacedProgress = options.pacedProgress;
 		this.startedAt = this.now();
 		// A sibling client (withDialect / withBeforeWriteAttempt) inherits the
 		// SAME Pacer: the rate limit is per API key, so two buckets against one
@@ -213,6 +225,14 @@ export class PlaneClient {
 	/** Requests worth running in parallel, or undefined when pacing is not configured. */
 	concurrency(): number | undefined {
 		return this.pacer?.concurrency();
+	}
+
+	/**
+	 * One step of a paced phase. `done === 0` starts the clock and prints nothing.
+	 * A no-op when this client has no progress sink.
+	 */
+	pacedPhase(label: string, done: number, total: number): void {
+		this.pacedProgress?.phase(label, done, total);
 	}
 
 	/** One-line completion telemetry for commands which perform paced sweeps. */
@@ -395,6 +415,7 @@ export class PlaneClient {
 
 	private async listAllOnce<T>(suffix: string, query: RequestOptions["query"] = {}): Promise<T[]> {
 		const path = this.workspacePath(suffix);
+		this.noteCollectionPage(path, 0, undefined, false);
 		const all: T[] = [];
 		const byId = new Map<string, T>();
 		let cursor: string | undefined;
@@ -454,6 +475,8 @@ export class PlaneClient {
 				cursor = continuationCursor(page, path);
 			}
 
+			this.noteCollectionPage(path, all.length, expectedTotalCount, cursor !== undefined);
+
 			if (cursor !== undefined && pageCount >= MAX_LIST_PAGES) {
 				throw new PlaneApiError(
 					`Plane API list endpoint ${path} exceeded ${MAX_LIST_PAGES} pages (~${MAX_LIST_PAGES * 100} items). ` +
@@ -469,7 +492,45 @@ export class PlaneClient {
 			);
 		}
 
+		this.finishCollection(path, all.length, expectedTotalCount, pageCount);
 		return all;
+	}
+
+	/**
+	 * Multi-page collection lists are the silent prelude. A one-page list (projects,
+	 * states) stays quiet. Per-item comment and activity lists are not collections:
+	 * the sweep that walks them owns that phase, and reusing its label would reset
+	 * the clock on every item.
+	 *
+	 * The closing line waits until the page walk is accepted. A count mismatch
+	 * throws and re-walks; printing "done" before that throw would report a list
+	 * this call is about to discard.
+	 */
+	private noteCollectionPage(
+		path: string,
+		done: number,
+		total: number | undefined,
+		morePages: boolean,
+	): void {
+		const label = collectionProgressLabel(path);
+		if (!label || !this.pacedProgress) return;
+		if (done <= 0) {
+			this.pacedProgress.phase(label, 0, total);
+			return;
+		}
+		if (!morePages) return;
+		this.pacedProgress.phase(label, done, total);
+	}
+
+	private finishCollection(
+		path: string,
+		done: number,
+		total: number | undefined,
+		pageCount: number,
+	): void {
+		const label = collectionProgressLabel(path);
+		if (!label || !this.pacedProgress || pageCount <= 1) return;
+		this.pacedProgress.phase(label, done, total ?? done);
 	}
 
 	// --- Resource helpers (paths relative to the workspace) ---
@@ -843,6 +904,16 @@ export class PlaneClient {
 
 export function createPlaneClient(options: PlaneClientOptions): PlaneClient {
 	return new PlaneClient(options);
+}
+
+function collectionProgressLabel(path: string): string | undefined {
+	if (path.includes("/archived-")) return "archived items";
+	if (/\/(issues|work-items)\/$/.test(path)) return "work items";
+	if (path.endsWith("/projects/")) return "projects";
+	if (path.endsWith("/states/")) return "states";
+	if (path.endsWith("/labels/")) return "labels";
+	if (path.endsWith("/members/")) return "members";
+	return undefined;
 }
 
 function continuationCursor<T>(page: PlanePage<T>, path: string): string | undefined {

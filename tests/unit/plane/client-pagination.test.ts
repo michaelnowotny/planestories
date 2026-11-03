@@ -318,3 +318,59 @@ describe("listAll retries a whole walk when the board changes underneath it", ()
 		}
 	});
 });
+
+describe("list progress", () => {
+	function sinkClient(): { client: PlaneClient; lines: string[] } {
+		const lines: string[] = [];
+		const client = new PlaneClient({
+			apiKey: "k",
+			workspaceSlug: "ws",
+			baseUrl: "https://plane.example",
+			maxRetries: 0,
+			sleep: async () => {},
+			pacedProgress: {
+				phase(label, done, total) {
+					lines.push(`${label}|${done}|${total ?? ""}`);
+				},
+			},
+		});
+		return { client, lines };
+	}
+
+	test("a multi-page work-item list reports the running total and closes only after the walk is accepted", async () => {
+		jsonPages([
+			{
+				results: [{ id: "a" }, { id: "b" }],
+				total_count: 4,
+				next_page_results: true,
+				next_cursor: "c1",
+			},
+			{
+				results: [{ id: "c" }, { id: "d" }],
+				total_count: 4,
+				next_page_results: false,
+				next_cursor: "c2",
+			},
+		]);
+		const { client, lines } = sinkClient();
+		const items = await client.listWorkItems("project-1");
+		expect(items).toHaveLength(4);
+		expect(lines).toContain("work items|0|");
+		expect(lines).toContain("work items|2|4");
+		expect(lines).toContain("work items|4|4");
+		expect(lines.indexOf("work items|2|4")).toBeLessThan(lines.indexOf("work items|4|4"));
+	});
+
+	test("a one-page list does not report a count", async () => {
+		jsonPages([
+			{
+				results: [{ id: "a" }],
+				total_count: 1,
+				next_page_results: false,
+			},
+		]);
+		const { client, lines } = sinkClient();
+		expect(await client.listWorkItems("project-1")).toHaveLength(1);
+		expect(lines.filter((line) => Number(line.split("|")[1]) > 0)).toEqual([]);
+	});
+});

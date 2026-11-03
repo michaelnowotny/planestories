@@ -26,6 +26,7 @@ import { parseSnapshot, serializeSnapshot, takeSnapshot } from "../../replicate/
 import type { ProjectSnapshot } from "../../replicate/types.ts";
 import { formatVerifyReport, verifySnapshot } from "../../replicate/verify.ts";
 import { reportPacing } from "../pacing.ts";
+import { formatPacedOpening, PacedProgress, writeStderrNow } from "../run_progress.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -53,6 +54,17 @@ async function clientFor(context: string | undefined, configPath?: string): Prom
 	// Never infer the instance here: this is the command that writes a whole
 	// project into one. See `allowImplicitContext`.
 	const config = await loadConfig({ configPath, context, allowImplicitContext: false });
+	let pacedProgress: PacedProgress | undefined;
+	if (config.apiRateLimit !== undefined && config.apiRateLimit > 0) {
+		pacedProgress = new PacedProgress(writeStderrNow, Date.now, (text) => chalk.dim(text));
+		pacedProgress.announce(
+			formatPacedOpening({
+				baseUrl: config.baseUrl,
+				workspaceSlug: config.workspaceSlug,
+				requestsPerMinute: config.apiRateLimit,
+			}),
+		);
+	}
 	return createPlaneClient({
 		apiKey: config.apiKey,
 		workspaceSlug: config.workspaceSlug,
@@ -62,6 +74,7 @@ async function clientFor(context: string | undefined, configPath?: string): Prom
 		requestsPerMinute: config.apiRateLimit,
 		rateHeadroom: config.rateHeadroom,
 		maxConcurrency: config.maxConcurrency,
+		pacedProgress,
 	});
 }
 
