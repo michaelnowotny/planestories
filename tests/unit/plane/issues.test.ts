@@ -110,6 +110,7 @@ describe("fetchWorkItems", () => {
 		expect(item.sequenceId).toBe(8);
 		expect(item.name).toBe("Log in");
 		expect(item.description).toBe("User can log in.");
+		expect(item.descriptionHtml).toBe("<p>User can log in.</p>");
 		expect(item.priority).toBe("high");
 		expect(item.estimate).toBe(3);
 		expect(item.stateName).toBe("Backlog");

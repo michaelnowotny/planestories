@@ -1,6 +1,9 @@
 import { lstat, mkdir, rename as renameFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AtlasGraph, AtlasNode, DependencyCoverage } from "../atlas/model.ts";
+import type { PlaneIssueRelations, PlaneRelationKind } from "../plane/client.ts";
+import type { FetchedWorkItem } from "../plane/issues.ts";
+import { RELATION_KINDS } from "../plane/relation_refs.ts";
 import { findRepoRoot } from "./output_path.ts";
 
 /** Allowance for writer/reader clock difference; see validateBoardCache. */
@@ -36,6 +39,43 @@ export interface BoardCacheWorkItem {
 	updatedAt: string | null;
 }
 
+/** Assignee fields a cached record can rebuild into Plane's expanded shape. */
+export interface BoardCacheAssignee {
+	id: string | null;
+	email: string | null;
+	displayName: string | null;
+}
+
+/**
+ * One raw work item, enough to rebuild the row `normalizeFetched` expects.
+ *
+ * The atlas graph drops narrative HTML and dangling relation targets. packet,
+ * epic, and doctor read those, so a graph-only cache must not answer them.
+ * Absence of this section means "not captured", which is different from an
+ * empty board.
+ */
+export interface BoardCacheRecord {
+	id: string;
+	sequenceId: number;
+	name: string;
+	descriptionHtml: string | null;
+	/** Plane's priority string, or null when it was absent or `none`. */
+	priority: string | null;
+	point: number | null;
+	stateName: string | null;
+	stateGroup: string | null;
+	parentId: string | null;
+	labelNames: string[];
+	assignee: BoardCacheAssignee | null;
+	externalSource: string | null;
+	externalId: string | null;
+	createdAt: string | null;
+	updatedAt: string | null;
+}
+
+/** Non-empty relation kinds only. An id missing from the map has no relations. */
+export type BoardCacheRelationSets = Partial<Record<PlaneRelationKind, string[]>>;
+
 /**
  * A complete, derived board graph plus the identity and clock needed to decide
  * whether it is safe to answer from it. Credentials are deliberately absent.
@@ -52,6 +92,18 @@ export interface BoardCache {
 	/** Cache publication is permitted only after a complete relation sweep. */
 	dependencyCoverage: Extract<DependencyCoverage, { kind: "complete" }>;
 	graph: AtlasGraph;
+	/**
+	 * Full work-item rows, same ids and order as `items`.
+	 *
+	 * Optional so a cache written before this section still parses. Present only
+	 * together with `relations`: one without the other is a torn write.
+	 */
+	records?: BoardCacheRecord[];
+	/**
+	 * Relation sets captured with `records`. `{}` means the sweep ran and no
+	 * item had a relation. A missing key means relations were not stored.
+	 */
+	relations?: Record<string, BoardCacheRelationSets>;
 }
 
 export interface BoardCacheTarget {
@@ -282,8 +334,15 @@ function validateBoardCache(value: unknown): BoardCache {
 		throw new Error('dependencyCoverage must be { kind: "complete" }; partial caches are unsafe');
 	}
 	const graph = validateGraph(cache.graph, projectValue.name);
+	const records = validateRecords(cache.records, items, projectValue.identifier);
+	const relations = validateRelations(cache.relations, itemIds);
+	if ((records === undefined) !== (relations === undefined)) {
+		throw new Error(
+			"records and relations must both be present or both be absent; a cache with only one is torn",
+		);
+	}
 
-	return {
+	const validated: BoardCache = {
 		schemaVersion: BOARD_CACHE_SCHEMA_VERSION,
 		fetchedAt,
 		instance: { baseUrl, workspaceSlug },
@@ -292,6 +351,163 @@ function validateBoardCache(value: unknown): BoardCache {
 		items,
 		dependencyCoverage: { kind: "complete" },
 		graph,
+	};
+	if (records !== undefined && relations !== undefined) {
+		validated.records = records;
+		validated.relations = relations;
+	}
+	return validated;
+}
+
+/** Rebuild the on-disk row from a fetched item. Null means Plane sent nothing. */
+export function boardCacheRecord(item: FetchedWorkItem): BoardCacheRecord {
+	const hasAssignee = item.assigneeId || item.assigneeEmail || item.assigneeDisplayName;
+	return {
+		id: item.id,
+		sequenceId: item.sequenceId,
+		name: item.name,
+		descriptionHtml: item.descriptionHtml ?? null,
+		priority: item.priority && item.priority !== "none" ? item.priority : null,
+		point: item.estimate ?? null,
+		stateName: item.stateName ?? null,
+		stateGroup: item.stateGroup ?? null,
+		parentId: item.parent ?? null,
+		labelNames: [...item.labels],
+		assignee: hasAssignee
+			? {
+					id: item.assigneeId ?? null,
+					email: item.assigneeEmail ?? null,
+					displayName: item.assigneeDisplayName ?? null,
+				}
+			: null,
+		externalSource: item.externalSource ?? null,
+		externalId: item.externalId ?? null,
+		createdAt: item.createdAt,
+		updatedAt: item.updatedAt,
+	};
+}
+
+/** Keep only non-empty kinds, with ids sorted so the file does not depend on GET order. */
+export function boardCacheRelations(
+	relationsById: ReadonlyMap<string, PlaneIssueRelations>,
+): Record<string, BoardCacheRelationSets> {
+	const out: Record<string, BoardCacheRelationSets> = {};
+	for (const [id, relations] of relationsById) {
+		const compact: BoardCacheRelationSets = {};
+		for (const kind of RELATION_KINDS) {
+			const ids = relations[kind] ?? [];
+			if (ids.length > 0) compact[kind] = [...new Set(ids)].sort();
+		}
+		if (Object.keys(compact).length > 0) out[id] = compact;
+	}
+	return out;
+}
+
+function validateRecords(
+	value: unknown,
+	items: BoardCacheWorkItem[],
+	projectIdentifier: string,
+): BoardCacheRecord[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value)) throw new Error("records must be an array");
+	if (value.length !== items.length) {
+		throw new Error(`records length ${value.length} disagrees with items length ${items.length}`);
+	}
+	const sequences = new Set<number>();
+	return value.map((entry, index): BoardCacheRecord => {
+		const path = `records[${index}]`;
+		const recordValue = record(entry, path);
+		const id = nonEmptyString(recordValue.id, `${path}.id`);
+		const item = items[index];
+		if (!item || item.id !== id) {
+			throw new Error(`${path}.id must match items[${index}].id (${item?.id ?? "missing"})`);
+		}
+		const sequenceId = positiveInteger(recordValue.sequenceId, `${path}.sequenceId`);
+		if (sequences.has(sequenceId)) throw new Error(`${path}.sequenceId duplicates ${sequenceId}`);
+		sequences.add(sequenceId);
+		const identifier = `${projectIdentifier}-${sequenceId}`;
+		if (item.identifier !== identifier) {
+			throw new Error(
+				`${path}.sequenceId ${sequenceId} disagrees with items[${index}].identifier ${item.identifier}`,
+			);
+		}
+		const priority = validatePriority(recordValue.priority, `${path}.priority`);
+		const stateGroup = validateStateGroup(recordValue.stateGroup, `${path}.stateGroup`);
+		return {
+			id,
+			sequenceId,
+			name: nonEmptyString(recordValue.name, `${path}.name`),
+			descriptionHtml: nullableString(recordValue.descriptionHtml, `${path}.descriptionHtml`),
+			priority,
+			point: nullableFiniteNumber(recordValue.point, `${path}.point`),
+			stateName: nullableString(recordValue.stateName, `${path}.stateName`),
+			stateGroup,
+			parentId: nullableString(recordValue.parentId, `${path}.parentId`),
+			labelNames: stringArray(recordValue.labelNames, `${path}.labelNames`),
+			assignee: validateAssignee(recordValue.assignee, `${path}.assignee`),
+			externalSource: nullableString(recordValue.externalSource, `${path}.externalSource`),
+			externalId: nullableString(recordValue.externalId, `${path}.externalId`),
+			createdAt: nullableInstant(recordValue.createdAt, `${path}.createdAt`),
+			updatedAt: nullableInstant(recordValue.updatedAt, `${path}.updatedAt`),
+		};
+	});
+}
+
+function validateRelations(
+	value: unknown,
+	itemIds: Set<string>,
+): Record<string, BoardCacheRelationSets> | undefined {
+	if (value === undefined) return undefined;
+	const relations = record(value, "relations");
+	const out: Record<string, BoardCacheRelationSets> = {};
+	for (const [id, sets] of Object.entries(relations)) {
+		if (!itemIds.has(id)) throw new Error(`relations key ${id} is not a cached work item`);
+		const body = record(sets, `relations.${id}`);
+		const compact: BoardCacheRelationSets = {};
+		for (const [kind, ids] of Object.entries(body)) {
+			if (!RELATION_KINDS.includes(kind as PlaneRelationKind)) {
+				throw new Error(`relations.${id}.${kind} is not a relation kind`);
+			}
+			if (!Array.isArray(ids) || ids.length === 0) {
+				throw new Error(`relations.${id}.${kind} must be a non-empty array of ids`);
+			}
+			const refs = ids.map((entry, index) =>
+				nonEmptyString(entry, `relations.${id}.${kind}[${index}]`),
+			);
+			if (new Set(refs).size !== refs.length) {
+				throw new Error(`relations.${id}.${kind} contains a duplicate id`);
+			}
+			const sorted = [...refs].sort();
+			if (refs.some((ref, index) => ref !== sorted[index])) {
+				throw new Error(`relations.${id}.${kind} must be sorted`);
+			}
+			compact[kind as PlaneRelationKind] = refs;
+		}
+		if (Object.keys(compact).length === 0) {
+			throw new Error(`relations.${id} is empty; omit the item instead of storing {}`);
+		}
+		out[id] = compact;
+	}
+	return out;
+}
+
+function validatePriority(value: unknown, path: string): string | null {
+	if (value === null) return null;
+	return nonEmptyString(value, path);
+}
+
+function validateStateGroup(value: unknown, path: string): string | null {
+	if (value === null) return null;
+	return nonEmptyString(value, path);
+}
+
+function validateAssignee(value: unknown, path: string): BoardCacheAssignee | null {
+	if (value === null) return null;
+	const assignee = record(value, path);
+	return {
+		id: nullableString(assignee.id, `${path}.id`),
+		email: nullableString(assignee.email, `${path}.email`),
+		displayName: nullableString(assignee.displayName, `${path}.displayName`),
 	};
 }
 
@@ -455,6 +671,13 @@ function stringArray(value: unknown, path: string): string[] {
 function boolean(value: unknown, path: string): boolean {
 	if (typeof value !== "boolean") throw new Error(`${path} must be a boolean`);
 	return value;
+}
+
+function positiveInteger(value: unknown, path: string): number {
+	if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+		throw new Error(`${path} must be a positive integer`);
+	}
+	return value as number;
 }
 
 function nonNegativeInteger(value: unknown, path: string): number {

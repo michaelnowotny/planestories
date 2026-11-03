@@ -5,7 +5,9 @@ import { ParentCycleError } from "../../atlas/model.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import { type CriticalPathResult, computeCriticalPath } from "../../sync/critical_path.ts";
 import { planQueryGraph, QUERY_REQUIREMENTS } from "../../sync/query_requirements.ts";
+import { defaultBoardCachePath, readBoardCache } from "../board_cache.ts";
 import { IncompleteGraphError, resolveGraph } from "../graph_source.ts";
+import { cacheReadLine, cacheStoredLine } from "../local_board.ts";
 import { reportPacing } from "../pacing.ts";
 import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import { FROM_SNAPSHOT_HELP } from "../snapshot_option.ts";
@@ -113,9 +115,21 @@ export function registerCriticalPathCommand(program: Command): void {
 		.option("-p, --project <name>", "Analyse a live Plane project instead of a file")
 		.option("--json", "Emit the full result (chain, slack, counts) as JSON", false)
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
+		.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)
+		.option(
+			"--stale-ok",
+			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
+			false,
+		)
 		.action(async (file: string | undefined, options, command: Command) => {
 			try {
+				if ((file || options.fromSnapshot) && (options.refresh || options.staleOk)) {
+					throw new ConfigError(
+						"--refresh and --stale-ok apply to the board cache and cannot be combined with a stories file or --from-snapshot.",
+					);
+				}
 				const plan = planQueryGraph(QUERY_REQUIREMENTS["critical-path"]);
+				const useCache = !file && !options.fromSnapshot;
 				const source = await resolveGraph({
 					file,
 					selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
@@ -125,6 +139,14 @@ export function registerCriticalPathCommand(program: Command): void {
 					fromSnapshot: options.fromSnapshot,
 					dependencies: plan.dependencies,
 					json: options.json === true,
+					boardCache: useCache
+						? {
+								refresh: options.refresh === true,
+								staleOk: options.staleOk === true,
+								readRequired: options.refresh !== true,
+								writeRequired: options.refresh === true,
+							}
+						: undefined,
 				});
 				// A partial sweep means the graph is MISSING edges, and a missing
 				// `blocks` edge silently SHORTENS the floor or hides a cycle that should
@@ -154,11 +176,24 @@ export function registerCriticalPathCommand(program: Command): void {
 				}
 				const client = source.client;
 				const result = computeCriticalPath(graph);
+				const cachedAt =
+					source.provenance.kind === "cache" ? source.provenance.fetchedAt : undefined;
 
 				if (options.json) {
-					console.log(JSON.stringify(result, null, 1));
+					const payload = cachedAt
+						? { ...result, source: { kind: "cache", takenAt: cachedAt } }
+						: result;
+					console.log(JSON.stringify(payload, null, 1));
 				} else {
+					if (cachedAt) {
+						console.log(`Source: board cache fetched ${cachedAt} — NOT live.`);
+					}
 					console.log(formatCriticalPath(result));
+				}
+				if (cachedAt) console.error(chalk.dim(cacheReadLine(cachedAt)));
+				if (options.refresh === true && source.provenance.kind === "live") {
+					const written = await readBoardCache(defaultBoardCachePath());
+					if (written) console.error(chalk.dim(cacheStoredLine(written.fetchedAt)));
 				}
 				if (client) reportPacing(client);
 				// A cycle is a real finding, not a clean run: exit non-zero so a CI

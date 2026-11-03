@@ -585,6 +585,14 @@ describe("board cache persistence", () => {
 		expect(written.graph.nodes[0]?.title).toBe("Fetched by board command");
 		expect(written.dependencyCoverage).toEqual({ kind: "complete" });
 		expect(fake.calls.some((call) => call.method === "listWorkItems")).toBe(true);
+		expect(written.records?.[0]).toMatchObject({
+			id: "item-1",
+			sequenceId: 1,
+			name: "Fetched by board command",
+			descriptionHtml: "<p>A live description long enough for the quality overlay.</p>",
+			stateGroup: "unstarted",
+		});
+		expect(written.relations).toEqual({});
 	});
 
 	test("the cache inventory retains a legacy criterion child folded out of the graph", async () => {
@@ -626,6 +634,13 @@ describe("board cache persistence", () => {
 			updatedAt: "2026-08-23T10:30:00.000Z",
 		});
 		expect(written.graph.nodes).toHaveLength(1);
+		expect(written.records?.map((record) => record.id)).toEqual(["parent", "criterion"]);
+		expect(written.records?.[1]).toMatchObject({
+			sequenceId: 2,
+			parentId: "parent",
+			externalId: "parent::ac1",
+			externalSource: "planestories",
+		});
 	});
 
 	test("the default path is repository-root .planestories/board.json from a subdirectory", () => {

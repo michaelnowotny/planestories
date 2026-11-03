@@ -1,7 +1,6 @@
 import chalk from "chalk";
 import type { Command } from "commander";
 import { ParentCycleError } from "../../atlas/model.ts";
-import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
 import type { PlaneClient } from "../../plane/client.ts";
 import { fetchProjectIndex } from "../../plane/issues.ts";
@@ -13,14 +12,16 @@ import { checkDependencyGraph } from "../../sync/graph_check.ts";
 import { groom } from "../../sync/groomer.ts";
 import { checkHouseRules, type HouseRuleFindings } from "../../sync/house_rules.ts";
 import { checkCriteriaMigration } from "../../sync/migrate.ts";
-import { announceTarget } from "../announce_target.ts";
+import type { ResolvedConfig } from "../../types.ts";
+import type { BoardCache } from "../board_cache.ts";
+import { openBoardCacheOrLive } from "../local_board.ts";
 import { reportPacing } from "../pacing.ts";
+import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import {
 	announceSnapshotSource,
 	loadConfigForSnapshot,
 	snapshotProvenance,
 } from "../snapshot_option.ts";
-import { connectTarget } from "../target_client.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -71,27 +72,53 @@ export function registerDoctorCommand(program: Command) {
 			"--from-snapshot <file>",
 			"Analyse a snapshot file instead of the live board: ZERO API calls, works offline, and possible when the instance is rate-limiting you. The report states the snapshot's age.",
 		)
-		.action(async (options) => {
+		.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)
+		.option(
+			"--stale-ok",
+			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
+			false,
+		)
+		.action(async (options, command: Command) => {
 			try {
-				let config = options.fromSnapshot
-					? await loadConfigForSnapshot(options.config, options.context)
-					: await loadConfig({ configPath: options.config, context: options.context });
-				// A snapshot contains exactly what doctor enumerates, so it can stand in for
-				// the instance entirely. The one rule: say so, and print its age — a stale
-				// answer presented as a live one is worse than no answer.
-				const snapshotSource = options.fromSnapshot
-					? new SnapshotSource(parseSnapshot(await Bun.file(String(options.fromSnapshot)).text()))
-					: null;
-				let client = snapshotSource as unknown as PlaneClient | null;
-				if (!client) {
-					const target = await connectTarget(config, { project: options.project });
-					config = target.config;
-					client = target.client;
-					announceTarget(config, options.context, options.project);
+				if (options.fromSnapshot && (options.refresh || options.staleOk)) {
+					throw new ConfigError(
+						"--refresh and --stale-ok apply to the board cache and cannot be combined with --from-snapshot.",
+					);
 				}
-				// stderr, so --json stdout stays machine-clean; and INSIDE the payload, so a
-				// stored CI artifact cannot be mistaken for a live reading later.
-				if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
+				let config: ResolvedConfig;
+				let client: PlaneClient;
+				let pacingClient: PlaneClient | undefined;
+				let snapshotSource: SnapshotSource | null = null;
+				let recordedCache: BoardCache | null = null;
+				// A file-backed read is instant. The relation-sweep progress line exists
+				// to distinguish a slow network sweep from a hang, so it stays quiet here.
+				let localRead = false;
+				if (options.fromSnapshot) {
+					config = await loadConfigForSnapshot(options.config, options.context);
+					snapshotSource = new SnapshotSource(
+						parseSnapshot(await Bun.file(String(options.fromSnapshot)).text()),
+					);
+					client = snapshotSource as unknown as PlaneClient;
+					localRead = true;
+					// stderr, so --json stdout stays machine-clean; and INSIDE the payload, so a
+					// stored CI artifact cannot be mistaken for a live reading later.
+					announceSnapshotSource(snapshotSource, options.json === true);
+				} else {
+					const opened = await openBoardCacheOrLive({
+						config: options.config,
+						context: options.context,
+						project: options.project,
+						refresh: options.refresh === true,
+						staleOk: options.staleOk === true,
+						json: options.json === true,
+						selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
+					});
+					config = opened.config;
+					client = opened.client;
+					pacingClient = opened.pacingClient;
+					recordedCache = opened.recorded ? opened.cache : null;
+					localRead = true;
+				}
 
 				// Read-only: groom without apply is a pure analysis.
 				const report = await groom(client, { config, project: options.project });
@@ -115,7 +142,7 @@ export function registerDoctorCommand(program: Command) {
 					(done, total, retry) => {
 						// Nothing to wait for when the source is a file — the progress line
 						// exists to distinguish "slow network sweep" from "hung".
-						if (snapshotSource) return;
+						if (localRead) return;
 						if (retry) {
 							// The sequential recovery pass is the slow tail on a throttled
 							// instance; without this the counter reaches N/N and goes quiet.
@@ -158,6 +185,9 @@ export function registerDoctorCommand(program: Command) {
 					{
 						project: project.identifier,
 						...snapshotProvenance(snapshotSource),
+						...(recordedCache
+							? { source: { kind: "cache" as const, takenAt: recordedCache.fetchedAt } }
+							: {}),
 						findings: baseFindings,
 						orphanedCriteria: report.orphanedCriteria,
 						duplicateTitles: report.duplicateTitles,
@@ -172,7 +202,7 @@ export function registerDoctorCommand(program: Command) {
 
 				if (options.json) {
 					console.log(JSON.stringify(reportObject, null, 1));
-					reportPacing(client);
+					reportPacing(pacingClient ?? client);
 					if (findings > 0 && options.failOnFindings !== false) {
 						process.exitCode = 1;
 					}
@@ -258,7 +288,7 @@ export function registerDoctorCommand(program: Command) {
 						process.exitCode = 1;
 					}
 				}
-				reportPacing(client);
+				reportPacing(pacingClient ?? client);
 			} catch (error) {
 				handleError(error);
 			}

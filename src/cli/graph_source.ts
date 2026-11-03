@@ -19,6 +19,8 @@ import {
 	type BoardCache,
 	type BoardCacheWorkItem,
 	boardCacheMatchesTarget,
+	boardCacheRecord,
+	boardCacheRelations,
 	defaultBoardCachePath,
 	formatBoardCacheAge,
 	formatCachedBoardState,
@@ -252,7 +254,11 @@ export async function resolveGraph(
 			const age = formatBoardCacheAge(cached, now);
 			if (isBoardCacheStale(cached, now, runtime.maxCacheAgeMs ?? BOARD_CACHE_MAX_AGE_MS)) {
 				if (!options.boardCache.staleOk) {
-					if (options.boardCache.readRequired) {
+					// `staleOk: false` means this command registers --stale-ok and the
+					// operator did not pass it, so name the flag. A required read that
+					// leaves the field unset (audit) has no such flag — naming it would
+					// tell the operator to pass an option the command rejects.
+					if (options.boardCache.readRequired && options.boardCache.staleOk !== false) {
 						throw new RequiredBoardCacheError(
 							projectName,
 							`the matching cache is ${age} old`,
@@ -356,6 +362,11 @@ export async function resolveGraph(
 			// if a caller forgot the reinforcing `writeRequired` bit.
 			throw new Error(message);
 		} else {
+			if (!relationsById) {
+				throw new Error(
+					"Board cache was not written because relation results were missing; the previous complete cache, if any, is unchanged.",
+				);
+			}
 			const now = (runtime.now ?? (() => new Date()))();
 			const cache: BoardCache = {
 				schemaVersion: BOARD_CACHE_SCHEMA_VERSION,
@@ -374,6 +385,8 @@ export async function resolveGraph(
 					title: item.name,
 					updatedAt: item.updatedAt,
 				})),
+				records: index.items.map(boardCacheRecord),
+				relations: boardCacheRelations(relationsById),
 				dependencyCoverage: { kind: "complete" },
 				graph,
 			};

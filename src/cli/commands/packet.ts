@@ -1,12 +1,14 @@
 import chalk from "chalk";
 import type { Command } from "commander";
 import { ParentCycleError } from "../../atlas/model.ts";
-import { loadConfig } from "../../config/loader.ts";
 import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../errors.ts";
+import type { PlaneClient } from "../../plane/client.ts";
 import { generatePacket } from "../../sync/packet.ts";
-import { announceTarget } from "../announce_target.ts";
+import type { ResolvedConfig } from "../../types.ts";
+import { openBoardCacheOrLive } from "../local_board.ts";
 import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
+import { describeProjectSelection, selectProjectRefusal } from "../project_selection.ts";
 import {
 	announceSnapshotSource,
 	asClient,
@@ -14,7 +16,6 @@ import {
 	loadConfigForSnapshot,
 	openSnapshotSource,
 } from "../snapshot_option.ts";
-import { connectTarget } from "../target_client.ts";
 
 function handleError(error: unknown): never {
 	if (
@@ -51,25 +52,44 @@ export function registerPacketCommand(program: Command) {
 		)
 		.option("-o, --output <file>", "Write the packet to a file instead of stdout")
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
-		.action(async (identifier: string, options) => {
+		.option("--refresh", "Re-fetch the live board and atomically replace its local cache", false)
+		.option(
+			"--stale-ok",
+			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
+			false,
+		)
+		.action(async (identifier: string, options, command: Command) => {
 			try {
-				let config = options.fromSnapshot
-					? await loadConfigForSnapshot(options.config, options.context)
-					: await loadConfig({ configPath: options.config, context: options.context });
-				const snapshotSource = options.fromSnapshot
-					? await openSnapshotSource(String(options.fromSnapshot))
-					: null;
-				if (snapshotSource) announceSnapshotSource(snapshotSource, options.json === true);
-				let client = snapshotSource ? asClient(snapshotSource) : undefined;
-				if (!client) {
-					const target = await connectTarget(config, { project: options.project });
-					config = target.config;
-					client = target.client;
-					announceTarget(config, options.context, options.project);
+				if (options.fromSnapshot && (options.refresh || options.staleOk)) {
+					throw new ConfigError(
+						"--refresh and --stale-ok apply to the board cache and cannot be combined with --from-snapshot.",
+					);
+				}
+				let client: PlaneClient;
+				let resolvedConfig: ResolvedConfig;
+				let pacingClient: PlaneClient | undefined;
+				if (options.fromSnapshot) {
+					const snapshotSource = await openSnapshotSource(String(options.fromSnapshot));
+					announceSnapshotSource(snapshotSource, options.json === true);
+					resolvedConfig = await loadConfigForSnapshot(options.config, options.context);
+					client = asClient(snapshotSource);
+				} else {
+					const opened = await openBoardCacheOrLive({
+						config: options.config,
+						context: options.context,
+						project: options.project,
+						refresh: options.refresh === true,
+						staleOk: options.staleOk === true,
+						json: options.json === true,
+						selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
+					});
+					client = opened.client;
+					resolvedConfig = opened.config;
+					pacingClient = opened.pacingClient;
 				}
 
 				const { markdown, packet } = await generatePacket(client, {
-					config,
+					config: resolvedConfig,
 					identifier,
 					project: options.project,
 				});
@@ -86,7 +106,7 @@ export function registerPacketCommand(program: Command) {
 					// The packet itself goes to stdout so it can be piped to an agent.
 					process.stdout.write(markdown);
 				}
-				reportPacing(client);
+				reportPacing(pacingClient ?? client);
 			} catch (error) {
 				handleError(error);
 			}

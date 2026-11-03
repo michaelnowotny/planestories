@@ -51,6 +51,15 @@ export interface FetchedWorkItem {
 	updatedAt: string | null;
 	/** Description as markdown (converted from Plane's description_html). */
 	description: string | undefined;
+	/**
+	 * The description HTML the markdown was converted from.
+	 *
+	 * Optional because many fixtures construct a FetchedWorkItem directly.
+	 * `normalizeFetched` always sets it (null when Plane sent none), so a cache
+	 * can store the original HTML and run it back through the same conversion
+	 * instead of caching already-converted markdown.
+	 */
+	descriptionHtml?: string | null;
 	priority: PlanePriority | undefined;
 	estimate: number | undefined;
 	stateName: string | undefined;
@@ -428,6 +437,7 @@ function normalizeFetched(item: Record<string, unknown>): FetchedWorkItem {
 		createdAt: normalizeInstant(item.created_at),
 		updatedAt: normalizeInstant(item.updated_at),
 		description: htmlToMarkdown(item.description_html as string | undefined) || undefined,
+		descriptionHtml: typeof item.description_html === "string" ? item.description_html : null,
 		priority,
 		estimate,
 		stateName,
