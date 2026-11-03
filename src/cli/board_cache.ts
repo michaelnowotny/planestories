@@ -77,6 +77,26 @@ export interface BoardCacheRecord {
 export type BoardCacheRelationSets = Partial<Record<PlaneRelationKind, string[]>>;
 
 /**
+ * One stored comment. `commentHtml` is Plane's raw HTML, the same shape a
+ * snapshot keeps, so display goes through `htmlToMarkdown` once.
+ */
+export interface BoardCacheComment {
+	id: string;
+	commentHtml: string;
+	createdAt: string | null;
+	createdBy: string | null;
+}
+
+/**
+ * Whether this cache contains a complete comment sweep.
+ *
+ * Absent (an older cache) and `"not-requested"` both mean "not fetched".
+ * Neither is "nobody commented". Only `"captured"` supports a count, and then
+ * a missing item key means that item has zero comments.
+ */
+export type BoardCacheCommentInventory = "captured" | "not-requested";
+
+/**
  * A complete, derived board graph plus the identity and clock needed to decide
  * whether it is safe to answer from it. Credentials are deliberately absent.
  */
@@ -104,6 +124,15 @@ export interface BoardCache {
 	 * item had a relation. A missing key means relations were not stored.
 	 */
 	relations?: Record<string, BoardCacheRelationSets>;
+	/**
+	 * Comment sweep. Optional so a cache written before this section still
+	 * parses. `"captured"` is present only together with `comments` (which may
+	 * be `{}`). `"not-requested"` forbids a `comments` object. Omitting both
+	 * is an older cache and means the same as not requested: the count is unknown.
+	 */
+	commentInventory?: BoardCacheCommentInventory;
+	/** Items with at least one comment. A missing key under `"captured"` means zero. */
+	comments?: Record<string, BoardCacheComment[]>;
 }
 
 export interface BoardCacheTarget {
@@ -341,6 +370,7 @@ function validateBoardCache(value: unknown): BoardCache {
 			"records and relations must both be present or both be absent; a cache with only one is torn",
 		);
 	}
+	const commentSection = validateCommentSection(cache.commentInventory, cache.comments, itemIds);
 
 	const validated: BoardCache = {
 		schemaVersion: BOARD_CACHE_SCHEMA_VERSION,
@@ -355,6 +385,12 @@ function validateBoardCache(value: unknown): BoardCache {
 	if (records !== undefined && relations !== undefined) {
 		validated.records = records;
 		validated.relations = relations;
+	}
+	if (commentSection.commentInventory !== undefined) {
+		validated.commentInventory = commentSection.commentInventory;
+	}
+	if (commentSection.comments !== undefined) {
+		validated.comments = commentSection.comments;
 	}
 	return validated;
 }
@@ -385,6 +421,32 @@ export function boardCacheRecord(item: FetchedWorkItem): BoardCacheRecord {
 		createdAt: item.createdAt,
 		updatedAt: item.updatedAt,
 	};
+}
+
+/**
+ * Keep only items that have comments, sorted by createdAt then id so the file
+ * does not depend on GET order. An empty list is omitted: under a captured
+ * inventory, a missing key means zero.
+ */
+export function boardCacheComments(
+	rows: ReadonlyArray<{ itemId: string; raw: ReadonlyArray<Record<string, unknown>> }>,
+): Record<string, BoardCacheComment[]> {
+	const out: Record<string, BoardCacheComment[]> = {};
+	const seen = new Set<string>();
+	for (const row of rows) {
+		if (!Array.isArray(row.raw)) {
+			throw new Error(`comments for ${row.itemId} were not a list`);
+		}
+		if (row.raw.length === 0) continue;
+		const list = row.raw.map((raw) => normalizeBoardComment(raw, row.itemId));
+		for (const comment of list) {
+			if (seen.has(comment.id)) throw new Error(`duplicate comment id ${comment.id}`);
+			seen.add(comment.id);
+		}
+		list.sort(compareComments);
+		out[row.itemId] = list;
+	}
+	return out;
 }
 
 /** Keep only non-empty kinds, with ids sorted so the file does not depend on GET order. */
@@ -489,6 +551,97 @@ function validateRelations(
 		out[id] = compact;
 	}
 	return out;
+}
+
+function validateCommentSection(
+	inventory: unknown,
+	comments: unknown,
+	itemIds: Set<string>,
+): {
+	commentInventory?: BoardCacheCommentInventory;
+	comments?: Record<string, BoardCacheComment[]>;
+} {
+	const hasInventory = inventory !== undefined;
+	const hasComments = comments !== undefined;
+	if (!hasInventory && !hasComments) return {};
+	if (!hasInventory && hasComments) {
+		throw new Error("comments are present but commentInventory is missing");
+	}
+	if (inventory !== "captured" && inventory !== "not-requested") {
+		throw new Error(
+			`commentInventory must be "captured" or "not-requested" (got ${JSON.stringify(inventory)})`,
+		);
+	}
+	if (inventory === "not-requested") {
+		if (hasComments) {
+			throw new Error(
+				'commentInventory is "not-requested" but comments are present; that is not a captured empty sweep',
+			);
+		}
+		return { commentInventory: "not-requested" };
+	}
+	if (!hasComments) {
+		throw new Error(
+			'commentInventory is "captured" but comments are missing; an omitted section cannot mean zero comments',
+		);
+	}
+	const body = record(comments, "comments");
+	const seen = new Set<string>();
+	const out: Record<string, BoardCacheComment[]> = {};
+	for (const [itemId, value] of Object.entries(body)) {
+		if (!itemIds.has(itemId)) throw new Error(`comments key ${itemId} is not a cached work item`);
+		if (!Array.isArray(value) || value.length === 0) {
+			throw new Error(
+				`comments.${itemId} must be a non-empty array; omit the item when it has no comments`,
+			);
+		}
+		const list = value.map((entry, index) =>
+			validateComment(entry, `comments.${itemId}[${index}]`),
+		);
+		for (const comment of list) {
+			if (seen.has(comment.id)) throw new Error(`duplicate comment id ${comment.id}`);
+			seen.add(comment.id);
+		}
+		const sorted = [...list].sort(compareComments);
+		if (list.some((comment, index) => comment.id !== sorted[index]?.id)) {
+			throw new Error(`comments.${itemId} must be sorted by createdAt then id`);
+		}
+		out[itemId] = list;
+	}
+	return { commentInventory: "captured", comments: out };
+}
+
+function validateComment(value: unknown, path: string): BoardCacheComment {
+	const comment = record(value, path);
+	return {
+		id: nonEmptyString(comment.id, `${path}.id`),
+		commentHtml: string(comment.commentHtml, `${path}.commentHtml`),
+		createdAt: nullableInstant(comment.createdAt, `${path}.createdAt`),
+		createdBy: nullableString(comment.createdBy, `${path}.createdBy`),
+	};
+}
+
+function normalizeBoardComment(raw: Record<string, unknown>, itemId: string): BoardCacheComment {
+	if (typeof raw.id !== "string" || raw.id.trim() === "") {
+		throw new Error(`comment on ${itemId} has no id`);
+	}
+	const commentHtml = typeof raw.comment_html === "string" ? raw.comment_html : "";
+	let createdAt: string | null = null;
+	if (raw.created_at != null) {
+		if (typeof raw.created_at !== "string" || Number.isNaN(Date.parse(raw.created_at))) {
+			throw new Error(`comment ${raw.id} on ${itemId} has an unreadable created_at`);
+		}
+		createdAt = raw.created_at;
+	}
+	const author = raw.created_by ?? raw.actor ?? null;
+	if (author != null && typeof author !== "string") {
+		throw new Error(`comment ${raw.id} on ${itemId} has an unreadable author`);
+	}
+	return { id: raw.id, commentHtml, createdAt, createdBy: author };
+}
+
+function compareComments(a: BoardCacheComment, b: BoardCacheComment): number {
+	return (a.createdAt ?? "").localeCompare(b.createdAt ?? "") || a.id.localeCompare(b.id);
 }
 
 function validatePriority(value: unknown, path: string): string | null {

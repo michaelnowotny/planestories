@@ -7,17 +7,20 @@ import {
 } from "../atlas/model.ts";
 import { fetchRelationsWithSweep } from "../atlas/relations.ts";
 import { loadConfig } from "../config/loader.ts";
-import { ConfigError } from "../errors.ts";
+import { ConfigError, PlaneApiError } from "../errors.ts";
 import type { PlaneClient, PlaneIssueRelations } from "../plane/client.ts";
 import { fetchProjectIndex } from "../plane/issues.ts";
 import { Resolver } from "../plane/resolvers.ts";
 import { isCriterionChild } from "../sync/board-story.ts";
+import { sweepFetch } from "../utils/sweep.ts";
 import { announceTarget } from "./announce_target.ts";
 import {
 	BOARD_CACHE_MAX_AGE_MS,
 	BOARD_CACHE_SCHEMA_VERSION,
 	type BoardCache,
+	type BoardCacheComment,
 	type BoardCacheWorkItem,
+	boardCacheComments,
 	boardCacheMatchesTarget,
 	boardCacheRecord,
 	boardCacheRelations,
@@ -46,6 +49,11 @@ export interface BoardCacheSourceOptions {
 	writeRequired?: boolean;
 	/** Refuse instead of falling back to a live whole-board enumeration. */
 	readRequired?: boolean;
+	/**
+	 * Opt-in comment sweep, honored only when this refresh publishes a cache.
+	 * A read does not fetch comments on its own.
+	 */
+	captureComments?: boolean;
 }
 
 export interface GraphSourceOptions {
@@ -176,6 +184,17 @@ export interface GraphSourceResult {
 	 * are deliberately folded out of AtlasGraph. Available only on a cache hit.
 	 */
 	requireCachedWorkItems(purpose: string): readonly BoardCacheWorkItem[];
+	/**
+	 * Present only when this cache captured comments. Absence means the count
+	 * is unknown — an older cache or a fetch that did not ask — not zero.
+	 */
+	commentCapture?: CommentCapture;
+}
+
+/** Comments from a cache whose sweep completed for every item. */
+export interface CommentCapture {
+	inventory: "captured";
+	byId: Readonly<Record<string, BoardCacheComment[]>>;
 }
 
 /**
@@ -281,6 +300,7 @@ export async function resolveGraph(
 				cacheProvenance(cached),
 				undefined,
 				cached.items,
+				commentCaptureFrom(cached),
 			);
 		}
 		if (options.boardCache.readRequired) {
@@ -390,6 +410,36 @@ export async function resolveGraph(
 				dependencyCoverage: { kind: "complete" },
 				graph,
 			};
+			// Comments are a second full sweep. The default fetch records that it
+			// did not ask, so a later reader cannot mistake "not fetched" for
+			// "nobody commented". A failed sweep writes nothing.
+			if (options.boardCache.captureComments) {
+				const concurrency = client.concurrency?.() ?? 4;
+				const sweep = await sweepFetch(
+					index.items,
+					(item) => client.listWorkItemComments<Record<string, unknown>>(project.id, item.id),
+					concurrency,
+				);
+				if (sweep.failures.length > 0) {
+					const first = sweep.failures[0]?.error;
+					const detail = first instanceof Error ? first.message : String(first ?? "unknown error");
+					throw new PlaneApiError(
+						`Board cache was not written because comment fetch failed for ${sweep.failures.length} item(s) (first: ${detail}). The previous cache, if any, is unchanged.`,
+					);
+				}
+				try {
+					cache.comments = boardCacheComments(
+						sweep.results.map((row) => ({ itemId: row.item.id, raw: row.value })),
+					);
+				} catch (error) {
+					throw new PlaneApiError(
+						`Board cache was not written because comments could not be stored (${error instanceof Error ? error.message : String(error)}). The previous cache, if any, is unchanged.`,
+					);
+				}
+				cache.commentInventory = "captured";
+			} else {
+				cache.commentInventory = "not-requested";
+			}
 			await writeBoardCacheAtomic(runtime.cachePath ?? defaultBoardCachePath(), cache);
 			cacheLog(runtime)(
 				`→ board cache refreshed · ${project.name} · ${index.items.length} ${index.items.length === 1 ? "item" : "items"}`,
@@ -413,6 +463,13 @@ export async function resolveGraph(
 			};
 
 	return graphSourceResult(graph, coverage, relationRecovered, provenance, client);
+}
+
+function commentCaptureFrom(cache: BoardCache): CommentCapture | undefined {
+	// `{}` is a finished sweep where nobody commented. It must stay captured;
+	// treating an empty object as missing would print "not fetched" for a real zero.
+	if (cache.commentInventory !== "captured" || cache.comments === undefined) return undefined;
+	return { inventory: "captured", byId: cache.comments };
 }
 
 function cacheProvenance(cache: BoardCache): GraphSourceProvenance {
@@ -451,8 +508,9 @@ function graphSourceResult(
 	provenance: GraphSourceProvenance,
 	client?: PlaneClient,
 	cachedWorkItems?: readonly BoardCacheWorkItem[],
+	commentCapture?: CommentCapture,
 ): GraphSourceResult {
-	return {
+	const result: GraphSourceResult = {
 		client,
 		provenance,
 		coverage,
@@ -473,6 +531,8 @@ function graphSourceResult(
 			return cachedWorkItems;
 		},
 	};
+	if (commentCapture) result.commentCapture = commentCapture;
+	return result;
 }
 
 function boardFetchCommand(options: GraphSourceOptions, projectName: string): string {

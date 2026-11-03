@@ -51,6 +51,7 @@ export async function exportStories(
 	outputPath: string;
 	projectItemCount: number;
 	unmatchedIdentifiers: string[];
+	planeIds: string[];
 }> {
 	const resolver = new Resolver(client);
 
@@ -206,5 +207,8 @@ export async function exportStories(
 		unmatchedIdentifiers: (options.filters.issues ?? []).filter(
 			(wanted) => !stories.some((story) => story.planeIdentifier === wanted),
 		),
+		// Plane ids of the stories just written, so a caller can count comments
+		// without a second board read. Absent ids are omitted, never invented.
+		planeIds: stories.flatMap((story) => (story.planeId ? [story.planeId] : [])),
 	};
 }

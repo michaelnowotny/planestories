@@ -13,6 +13,8 @@ export interface BoardFetchOptions {
 	project?: string;
 	/** Refusal text composed from this command's own registered routes. */
 	selectProjectHelp?: string;
+	/** Also sweep comments. Off by default: one request per work item. */
+	withComments?: boolean;
 }
 
 /** Shared action seam so the real `board fetch` orchestration is no-network testable. */
@@ -25,7 +27,11 @@ export async function fetchBoardToCache(
 			config: options.config,
 			context: options.context,
 			project: options.project,
-			boardCache: { refresh: true, writeRequired: true },
+			boardCache: {
+				refresh: true,
+				writeRequired: true,
+				captureComments: options.withComments === true,
+			},
 			selectProjectHelp: options.selectProjectHelp,
 		},
 		runtime,
@@ -63,6 +69,11 @@ export function registerBoardCommand(program: Command): void {
 			"Named context (config-file entry, or env-only via PLANE_CTX_<NAME>_* vars; bare PLANE_* env applies only without --context)",
 		)
 		.option("-p, --project <name>", "Project to cache (defaults to defaultProject)")
+		.option(
+			"--with-comments",
+			"Also store every work item's comments (one extra request per item)",
+			false,
+		)
 		.action(async (options, command: Command) => {
 			try {
 				const source = await fetchBoardToCache({
@@ -70,6 +81,7 @@ export function registerBoardCommand(program: Command): void {
 					context: options.context,
 					project: options.project,
 					selectProjectHelp: selectProjectRefusal(describeProjectSelection(command)),
+					withComments: options.withComments === true,
 				});
 				// Publication already required complete coverage; keep the type-level
 				// invariant explicit at the command boundary too.

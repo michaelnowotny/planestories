@@ -5,6 +5,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import type { PlaneClient } from "../../plane/client.ts";
 import { generatePacket } from "../../sync/packet.ts";
 import type { ResolvedConfig } from "../../types.ts";
+import { commentAttachment, commentsCaptured, workItemIdFromUrl } from "../comments.ts";
 import { openBoardCacheOrLive } from "../local_board.ts";
 import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
@@ -58,6 +59,11 @@ export function registerPacketCommand(program: Command) {
 			"Use a matching cache older than 1h, explicitly acknowledging that it is stale",
 			false,
 		)
+		.option(
+			"--with-comments",
+			"Append comments for the packet's stories. Requires board fetch --with-comments or --from-snapshot.",
+			false,
+		)
 		.action(async (identifier: string, options, command: Command) => {
 			try {
 				if (options.fromSnapshot && (options.refresh || options.staleOk)) {
@@ -68,6 +74,7 @@ export function registerPacketCommand(program: Command) {
 				let client: PlaneClient;
 				let resolvedConfig: ResolvedConfig;
 				let pacingClient: PlaneClient | undefined;
+				let commentProjectId = "";
 				if (options.fromSnapshot) {
 					const snapshotSource = await openSnapshotSource(String(options.fromSnapshot));
 					announceSnapshotSource(snapshotSource, options.json === true);
@@ -86,6 +93,7 @@ export function registerPacketCommand(program: Command) {
 					client = opened.client;
 					resolvedConfig = opened.config;
 					pacingClient = opened.pacingClient;
+					commentProjectId = opened.cache.project.id;
 				}
 
 				const { markdown, packet } = await generatePacket(client, {
@@ -93,10 +101,23 @@ export function registerPacketCommand(program: Command) {
 					identifier,
 					project: options.project,
 				});
+				const stories = [packet.root, ...packet.children];
+				const workItemIds = commentWorkItemIds(
+					stories.map((story) => story.url),
+					options.withComments === true,
+					client,
+				);
+				const footer = await commentAttachment({
+					source: client,
+					projectId: commentProjectId,
+					workItemIds,
+					withComments: options.withComments === true,
+				});
+				const document = `${markdown.trimEnd()}\n\n${footer}\n`;
 
 				if (options.output) {
 					const abs = resolveOutputPath(options.output, `${identifier}.md`); // -o is set here
-					await Bun.write(abs, markdown);
+					await Bun.write(abs, document);
 					const childNote =
 						packet.kind === "epic" ? ` (epic + ${packet.children.length} child brief(s))` : "";
 					console.error(
@@ -104,11 +125,35 @@ export function registerPacketCommand(program: Command) {
 					);
 				} else {
 					// The packet itself goes to stdout so it can be piped to an agent.
-					process.stdout.write(markdown);
+					process.stdout.write(document);
 				}
 				reportPacing(pacingClient ?? client);
 			} catch (error) {
 				handleError(error);
 			}
 		});
+}
+
+/**
+ * Ids for a captured source. When comments were not captured, skip the lookup:
+ * a missing id must not turn "not fetched" into a hard error on the default path.
+ * When they were captured, a missing id would under-count, so refuse.
+ */
+function commentWorkItemIds(
+	urls: Array<string | null | undefined>,
+	withComments: boolean,
+	source: object,
+): string[] | null {
+	if (!commentsCaptured(source)) return null;
+	return urls.map((url) => {
+		const id = workItemIdFromUrl(url);
+		if (!id) {
+			throw new ConfigError(
+				withComments
+					? "Cannot locate a work item id, so its comments cannot be printed."
+					: "Cannot locate a work item id, so its comments cannot be counted. Refusing to report them as absent.",
+			);
+		}
+		return id;
+	});
 }

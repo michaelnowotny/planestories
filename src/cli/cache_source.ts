@@ -1,3 +1,4 @@
+import { ConfigError } from "../errors.ts";
 import { deriveWebBaseUrl, type PlaneIssueRelations } from "../plane/client.ts";
 import type { BoardCache, BoardCacheRecord, BoardCacheRelationSets } from "./board_cache.ts";
 
@@ -72,6 +73,26 @@ export class CacheSource {
 			);
 		}
 		return expandRelations(this.relations[workItemId]);
+	}
+
+	/** True only after `board fetch --with-comments` stored a complete sweep. */
+	commentsCaptured(): boolean {
+		return this.cache.commentInventory === "captured" && this.cache.comments !== undefined;
+	}
+
+	async listWorkItemComments<T>(projectId: string, workItemId: string): Promise<T[]> {
+		this.assertProject(projectId);
+		if (!this.commentsCaptured() || !this.cache.comments) {
+			throw new ConfigError(
+				`Board cache for "${this.cache.project.name}" has no comments. Run \`planestories board fetch --with-comments\`, or pass --from-snapshot.`,
+			);
+		}
+		if (!this.knownIds.has(workItemId)) {
+			throw new ConfigError(
+				`Board cache has no work item ${workItemId}. Refusing to report it as having no comments.`,
+			);
+		}
+		return [...(this.cache.comments[workItemId] ?? [])] as T[];
 	}
 
 	workItemWebUrl(projectId: string, workItemId: string): string {

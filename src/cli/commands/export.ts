@@ -6,6 +6,7 @@ import { ConfigError, ParseError, PlaneApiError, ResolverError } from "../../err
 import { exportStories } from "../../sync/exporter.ts";
 import type { ExportFilters } from "../../types.ts";
 import { announceTarget } from "../announce_target.ts";
+import { COMMENTS_NOT_CAPTURED, commentAttachment, commentNotShownLine } from "../comments.ts";
 import { resolveOutputPath } from "../output_path.ts";
 import { reportPacing } from "../pacing.ts";
 import {
@@ -70,8 +71,18 @@ export function registerExportCommand(program: Command) {
 			false,
 		)
 		.option("--from-snapshot <file>", FROM_SNAPSHOT_HELP)
+		.option(
+			"--with-comments",
+			"Print comments for the exported items on stderr. Requires --from-snapshot; the story file is unchanged.",
+			false,
+		)
 		.action(async (options) => {
 			try {
+				// Refuse before any connection. A live export must not start a
+				// comment sweep, and it must not write the story file first.
+				if (options.withComments === true && !options.fromSnapshot) {
+					throw new ConfigError(COMMENTS_NOT_CAPTURED);
+				}
 				let config = options.fromSnapshot
 					? await loadConfigForSnapshot(options.config, options.context)
 					: await loadConfig({ configPath: options.config, context: options.context });
@@ -150,6 +161,17 @@ export function registerExportCommand(program: Command) {
 					);
 					process.exitCode = 1;
 				}
+				// Stderr, so the story file stays the story format. A live export
+				// has no captured comments; do not call the comment endpoint.
+				const commentLine = snapshotSource
+					? await commentAttachment({
+							source: client,
+							projectId: "",
+							workItemIds: result.planeIds,
+							withComments: options.withComments === true,
+						})
+					: commentNotShownLine(null);
+				console.error(commentLine);
 				reportPacing(client);
 			} catch (error) {
 				handleError(error);

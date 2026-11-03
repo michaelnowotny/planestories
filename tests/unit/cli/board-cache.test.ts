@@ -153,9 +153,10 @@ function writeCache(value: BoardCache = cache()): void {
 	writeFileSync(cachePath, serializeBoardCache(value));
 }
 
-function fakeLive(title = "Live title") {
+function fakeLive(title = "Live title", comments?: Record<string, Array<Record<string, unknown>>>) {
 	return makeFakeClient({
 		projects: [PROJECT],
+		comments,
 		workItems: {
 			[PROJECT.id]: [
 				{
@@ -593,6 +594,52 @@ describe("board cache persistence", () => {
 			stateGroup: "unstarted",
 		});
 		expect(written.relations).toEqual({});
+		expect(written.commentInventory).toBe("not-requested");
+		expect(written.comments).toBeUndefined();
+		expect(fake.calls.filter((call) => call.method === "listWorkItemComments")).toEqual([]);
+	});
+
+	test("board fetch --with-comments stores a comment and a failed sweep leaves the previous cache", async () => {
+		const fake = fakeLive("Fetched by board command", {
+			"item-1": [
+				{
+					id: "comment-1",
+					comment_html: "<p>Stored comment body</p>",
+					created_at: "2026-08-22T00:00:00.000Z",
+					created_by: "user-1",
+				},
+			],
+		});
+		const messages = { log: [] as string[], warn: [] as string[] };
+
+		await fetchBoardToCache(
+			{ config: configPath, project: PROJECT.name, withComments: true },
+			runtime(fake, messages),
+		);
+		const written = parseBoardCache(readFileSync(cachePath, "utf8"));
+		expect(written.commentInventory).toBe("captured");
+		expect(written.comments?.["item-1"]).toEqual([
+			{
+				id: "comment-1",
+				commentHtml: "<p>Stored comment body</p>",
+				createdAt: "2026-08-22T00:00:00.000Z",
+				createdBy: "user-1",
+			},
+		]);
+		expect(fake.calls.some((call) => call.method === "listWorkItemComments")).toBe(true);
+
+		const before = readFileSync(cachePath, "utf8");
+		const failing = fakeLive("Should not replace");
+		failing.client.listWorkItemComments = async () => {
+			throw new Error("simulated comment read failure");
+		};
+		await expect(
+			fetchBoardToCache(
+				{ config: configPath, project: PROJECT.name, withComments: true },
+				runtime(failing, messages),
+			),
+		).rejects.toThrow(/comment fetch/);
+		expect(readFileSync(cachePath, "utf8")).toBe(before);
 	});
 
 	test("the cache inventory retains a legacy criterion child folded out of the graph", async () => {
@@ -676,6 +723,80 @@ describe("board cache persistence", () => {
 		expect(parseBoardCache(serializeBoardCache(cache()))).toEqual(cache());
 		const partial = { ...cache(), dependencyCoverage: { kind: "partial", failures: 1 } };
 		expect(() => parseBoardCache(JSON.stringify(partial))).toThrow(/complete|coverage/i);
+	});
+
+	test("comment inventory is optional, and a torn or unsorted section is refused", () => {
+		const plain = parseBoardCache(serializeBoardCache(cache()));
+		expect(plain.commentInventory).toBeUndefined();
+		expect(plain.comments).toBeUndefined();
+
+		const notRequested = cache({ commentInventory: "not-requested" });
+		const readNotRequested = parseBoardCache(serializeBoardCache(notRequested));
+		expect(readNotRequested.commentInventory).toBe("not-requested");
+		expect(readNotRequested.comments).toBeUndefined();
+
+		const captured = cache({
+			commentInventory: "captured",
+			comments: {
+				"item-1": [
+					{
+						id: "c1",
+						commentHtml: "<p>Hi</p>",
+						createdAt: "2026-08-22T00:00:00.000Z",
+						createdBy: null,
+					},
+				],
+			},
+		});
+		expect(
+			parseBoardCache(serializeBoardCache(captured)).comments?.["item-1"]?.[0]?.commentHtml,
+		).toBe("<p>Hi</p>");
+		expect(
+			parseBoardCache(serializeBoardCache(cache({ commentInventory: "captured", comments: {} })))
+				.comments,
+		).toEqual({});
+
+		expect(() =>
+			parseBoardCache(JSON.stringify(cache({ commentInventory: "not-requested", comments: {} }))),
+		).toThrow(/not-requested/);
+		expect(() =>
+			parseBoardCache(JSON.stringify({ ...cache(), commentInventory: "captured" })),
+		).toThrow(/captured/);
+		expect(() =>
+			parseBoardCache(
+				JSON.stringify(
+					cache({
+						commentInventory: "captured",
+						comments: { "item-1": [] },
+					}),
+				),
+			),
+		).toThrow(/non-empty|omit/);
+		expect(() =>
+			parseBoardCache(
+				JSON.stringify(
+					cache({
+						commentInventory: "captured",
+						comments: {
+							"item-1": [
+								{
+									id: "c2",
+									commentHtml: "",
+									createdAt: "2026-08-23T00:00:00.000Z",
+									createdBy: null,
+								},
+								{
+									id: "c1",
+									commentHtml: "",
+									createdAt: "2026-08-22T00:00:00.000Z",
+									createdBy: null,
+								},
+							],
+						},
+					}),
+				),
+			),
+		).toThrow(/sorted/);
 	});
 
 	test("test fixture uses no accidental filesystem residue", () => {

@@ -136,6 +136,11 @@ export class SnapshotSource {
 		return (this.snapshot.comments[workItemId] ?? []) as unknown as T[];
 	}
 
+	/** A snapshot's comment sweep is fail-hard, so a missing key means zero. */
+	commentsCaptured(): boolean {
+		return true;
+	}
+
 	/**
 	 * Browser URLs are derived from the snapshot's OWN source instance, so a packet
 	 * built offline still links back to the board the data came from.
