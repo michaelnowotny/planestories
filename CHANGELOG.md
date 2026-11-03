@@ -9,19 +9,110 @@ The format is loosely [Keep a Changelog](https://keepachangelog.com/); versions 
 > below shipped between then and `0.5.0`; there was never a released `0.4.x`, so it is recorded
 > as one release rather than split into a retroactive line that never existed.
 >
+> **0.5.0 and 0.6.0 were never published to npm.** Publishing is interactive (WebAuthn). **0.7.0 is
+> the version to publish.**
+>
 > **The `v1.x` tags in this repository come from upstream
 > [linearstories](https://github.com/ijonas/linearstories), not from planestories releases.**
-> They have been deleted from `origin`, so `v0.6.0` will be this repository's latest release.
-> The configured `upstream` remote still advertises `v1.0.0`–`v1.4.0`, however, and
-> `git fetch --all` can restore those names locally. **Never run `git push --tags` for this release.**
-> Push only the intended tag explicitly: `git push origin v0.6.0`.
+> They have been deleted from `origin`. The configured `upstream` remote still advertises
+> `v1.0.0`–`v1.4.0`, and `git fetch --all` can restore those names locally. **Never run
+> `git push --tags`.** Push only the intended tag explicitly: `git push origin v0.7.0`.
 
 ---
 
+## [0.7.0] — 2026-11-03
+
+**0.5.0 and 0.6.0 were never published to npm. 0.7.0 is the version to publish.**
+
+Reads that used to walk the live board now answer from the copy you already have. Comments stay
+out of the answer until you ask for them. A long paced run says that it has started and how long
+it has left.
+
+### Added
+
+- **Cache and snapshot reads for `packet`, `epic`, `doctor`, and `critical-path`.** These commands
+  use a fresh board cache (`board fetch`) or `--from-snapshot`, and call Plane only when you pass
+  `--refresh`. Use the cache for another answer from a sweep you already paid for, and a snapshot
+  for that exact recorded board, including offline. The answer prints the copy's time as an
+  absolute instant (`fetched <ISO>` or `taken <ISO>`), so an old file cannot read as current. A
+  cache older than one hour still refuses until `--refresh` or `--stale-ok`.
+
+  ```bash
+  planestories packet DATA-123 --from-snapshot ~/plane-replication/data.snapshot.json
+  ```
+
+- **`--with-comments`.** `board fetch --with-comments` stores each item's comments. `show`,
+  `packet`, and `export` leave them out until you pass `--with-comments`, and they say how many
+  were withheld (`N comments not shown`, or `comments not shown (not fetched)` when no sweep ran).
+  Use it when the discussion is part of the answer. `export --with-comments` requires
+  `--from-snapshot`, prints on stderr, and does not change the story file.
+
+  ```bash
+  planestories show DATA-123 --with-comments
+  ```
+
+- **`audit --stale-state`.** Lists open items whose latest cached comment says merged, deployed,
+  done, shipped, released, or closed. It is a heuristic for tickets that may still be open after
+  the work landed, not a measured state change, and it does not walk live activity. Run
+  `board fetch --with-comments` first. A normal `audit --since` is unchanged.
+
+  ```bash
+  planestories audit --stale-state
+  ```
+
+- **`--limit` and `--updated-since`.** `--limit` on `ready`, `blocked`, `inconsistent`, `orphans`,
+  `abandoned`, and `critical-path` shortens the rows. The considered counts and the dev-day floor
+  stay the full set. `--json` was already on these commands. `ls` and `count` take
+  `--updated-since` (`90m`, `24h`, `7d`, or an ISO instant) for stories updated at or after that
+  time. A story with no usable `updatedAt` is omitted and counted as unknown, not as old.
+
+  ```bash
+  planestories ready --limit 10
+  planestories count --open --updated-since 7d
+  ```
+
+### Fixed
+
+- **One critical path when several chains share the floor.** The reported chain is the fewest hops,
+  then the lowest identifier. A done ticket on that chain is still named and adds no remaining
+  days. On Data Platform a live read and a snapshot of the same edges had named 8 nodes and 4
+  nodes, both 17 days. Both orders now return `DATA-2631`, `DATA-2636`, `DATA-2637`, `DATA-2640`.
+  `critical-path -p "Data Platform" --refresh` on 2026-11-03 confirmed that chain and 17 days.
+  `DATA-2631` is done, so its estimate is not part of the remaining floor.
+
+  ```bash
+  planestories critical-path -p "Data Platform"
+  ```
+
+### Changed
+
+- **Paced commands show progress while they run.** When `apiRateLimit` is set, stderr prints
+  `Paced run starting` before the first request, then a line with an ETA during a multi-page list
+  or a sweep. The `paced:` summary still prints at the end. Use it so a multi-minute fetch is
+  visibly working. A list whose length is unknown says `total unknown, no estimate`. A command
+  with no rate limit stays quiet.
+
+  ```bash
+  planestories board fetch -p "Data Platform"
+  ```
+
+### Noted
+
+- **Comments and `updated_at` on Community Edition.** On the Data Platform CE snapshot of
+  2026-11-03, none of 3,476 comments was newer than its item's `updated_at`. On the 2,344 items
+  that have a comment, the latest one sat 0–2 seconds earlier in 1,195 cases (median gap 0.888s).
+  `audit --since` still says comment- or relation-only writes may not bump `updated_at`. That
+  sentence stays because a relation-only gap was seen only in the Cloud archive of 2026-08-17 and
+  has not been checked with a live CE activity read.
+
+  ```bash
+  planestories audit --since 24h
+  ```
+
 ## [0.6.0] — 2026-08-23
 
-**Neither 0.5.0 nor 0.6.0 has been published to npm** (publishing is interactive — WebAuthn). If you
-publish now, publish 0.6.0; 0.5.0's section below still describes what it contained.
+**Neither 0.5.0 nor 0.6.0 was published to npm.** This section is what 0.6.0 contained. Publish
+0.7.0.
 
 The release that answers board questions without PQL. Community Edition has no server-side
 work-item filtering at all — see `docs/PLANE_CAPABILITIES.md` — so planestories fetches the board

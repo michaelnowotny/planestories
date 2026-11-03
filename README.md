@@ -149,7 +149,7 @@ explicit context override is present. See
 
 ### 1. Install
 
-The repository describes v0.6.0. Until that version has been published to npm, run it from a
+The repository describes v0.7.0. Until that version has been published to npm, run it from a
 source checkout:
 
 ```bash
@@ -157,7 +157,7 @@ bun install
 bun run src/cli/index.ts import stories/*.md
 ```
 
-Once the npm badge above shows `0.6.0`, run it directly or install it globally. You can also build
+Once the npm badge above shows `0.7.0`, run it directly or install it globally. You can also build
 a standalone binary from a source checkout:
 
 ```bash
